@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"gitlab.rand0m.me/ruben/go/ensemble/internal/cluster"
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/config"
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/discovery"
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/state"

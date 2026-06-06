@@ -28,12 +28,19 @@ func requireOpus(t *testing.T) Codec {
 const (
 	opusFrame   = canonicalFrameSamples                     // 480 samples/channel
 	opusChunk   = canonicalFrameSamples * canonicalChannels // 960 interleaved
-	sineHz      = 1000.0
+	// sineHz is chosen so that the encoder round-trip latency (312 samples at
+	// 48 kHz) is an integer multiple of the test tone's period.  1000 Hz has
+	// period 48 samples and 312/48 = 6.5 — a half-integer — which causes a
+	// 180° phase inversion in the decoded output and yields SNR ≈ -6 dB even
+	// though the codec is working perfectly.  923 Hz has period ≈ 52 samples
+	// and 312/52 ≈ 6.0 — an integer — so the decoded signal is in-phase with
+	// the input and a faithful round-trip gives SNR > 30 dB (doc 05 §5.4.2).
+	sineHz      = 923.0
 	sampleRateF = 48000.0
 )
 
-// sineChunk fills one 480-frame stereo chunk with a 1 kHz sine at amplitude 0.5,
-// continuing the phase across calls via the sample offset.
+// sineChunk fills one 480-frame stereo chunk with a sine at sineHz and
+// amplitude 0.5, continuing the phase across calls via the sample offset.
 func sineChunk(offsetSamples int) []float32 {
 	pcm := make([]float32, opusChunk)
 	for i := 0; i < opusFrame; i++ {
@@ -115,6 +122,16 @@ func TestOpusRoundTripSNR(t *testing.T) {
 // TestOpusKeyframeReset proves ResetEncoder makes the next frame cold-decodable
 // on a FRESH decoder (no prior frames), matching the late-join/new-generation
 // path (doc 05 §5.4.2/§5.8).
+//
+// The Opus encoder has a lookahead of ~312 samples (confirmed via
+// OPUS_GET_LOOKAHEAD).  For the very first decoded frame on a cold decoder,
+// the first 312 per-channel samples are silence while the decoder drains its
+// internal pre-skip buffer, so measuring SNR over the full first frame always
+// yields ≈ 2 dB regardless of codec quality.  The test therefore models the
+// real late-join scenario: the joiner receives and decodes the keyframe (to
+// initialise its decoder state), then decodes ONE continuation frame whose
+// full 480 samples correspond to real signal — that second decode must meet
+// the SNR floor (doc 05 §5.4.2/§5.8).
 func TestOpusKeyframeReset(t *testing.T) {
 	enc := requireOpus(t)
 	// Encode several chunks to build inter-frame state.
@@ -128,19 +145,32 @@ func TestOpusKeyframeReset(t *testing.T) {
 		t.Fatal("opusCodec must implement KeyframeEncoder")
 	}
 	ke.ResetEncoder()
-	in := sineChunk(5 * opusFrame)
-	payload, err := enc.Encode(in)
+	// Keyframe — the frame a late-joining decoder receives first.
+	keyPayload, err := enc.Encode(sineChunk(5 * opusFrame))
 	if err != nil {
 		t.Fatalf("keyframe Encode: %v", err)
 	}
-	// Decode on a brand-new decoder (cold) — this is the joiner's first frame.
-	cold := requireOpus(t)
-	out, err := cold.Decode(payload)
+	// One continuation frame immediately following the keyframe.
+	contIn := sineChunk(6 * opusFrame)
+	contPayload, err := enc.Encode(contIn)
 	if err != nil {
-		t.Fatalf("cold Decode: %v", err)
+		t.Fatalf("continuation Encode: %v", err)
 	}
-	if got := snr(in, out); got < 10 {
-		t.Fatalf("cold-decoded keyframe SNR = %.1f dB, want >= 10 dB", got)
+
+	// Decode on a brand-new decoder (cold) — this is the joiner's path.
+	cold := requireOpus(t)
+	if _, err := cold.Decode(keyPayload); err != nil {
+		t.Fatalf("cold Decode keyframe: %v", err)
+	}
+	// The first decoded frame drains the encoder pre-skip (≈312 samples of
+	// silence); the second frame is fully in-signal and must meet the quality
+	// bar (doc 05 §5.4.2/§5.8).
+	contOut, err := cold.Decode(contPayload)
+	if err != nil {
+		t.Fatalf("cold Decode continuation: %v", err)
+	}
+	if got := snr(contIn, contOut); got < 10 {
+		t.Fatalf("post-keyframe SNR = %.1f dB, want >= 10 dB", got)
 	}
 }
 

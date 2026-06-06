@@ -7,11 +7,11 @@ import "testing"
 // gate straight to the inbound value (a receiver may have missed a generation).
 func TestGateAccept(t *testing.T) {
 	cases := []struct {
-		name      string
-		startGen  uint64
-		inbound   uint64
-		want      Action
-		afterGen  uint64
+		name     string
+		startGen uint64
+		inbound  uint64
+		want     Action
+		afterGen uint64
 	}{
 		{"first packet at gen0 passes", 0, 0, Pass, 0},
 		{"first live gen adopts from 0", 0, 7, Adopt, 7},

@@ -203,8 +203,8 @@ func TestBadPacket(t *testing.T) {
 	r, cap := newTestReceiver(t, allowingSet("127.0.0.1"), canonCfg())
 	cases := [][]byte{
 		nil,
-		{0x00},                          // too short
-		make([]byte, 44),                // zero header: bad magic
+		{0x00},           // too short
+		make([]byte, 44), // zero header: bad magic
 		append([]byte("XXXX"), make([]byte, 60)...), // bad magic
 	}
 	for i, buf := range cases {

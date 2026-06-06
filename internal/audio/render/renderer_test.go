@@ -191,49 +191,6 @@ func TestWantContentMapping(t *testing.T) {
 	}
 }
 
-func TestChannelSelectAndGain(t *testing.T) {
-	if channelSel("stereo") != nil {
-		t.Fatalf(`channelSel("stereo") should be nil (passthrough)`)
-	}
-	if got := channelSel("left"); len(got) != 1 || got[0] != 0 {
-		t.Fatalf(`channelSel("left")=%v, want [0]`, got)
-	}
-	if got := channelSel("right"); len(got) != 1 || got[0] != 1 {
-		t.Fatalf(`channelSel("right")=%v, want [1]`, got)
-	}
-	if got := channelSel("bogus"); got != nil {
-		t.Fatalf(`channelSel(unknown)=%v, want nil (passthrough)`, got)
-	}
-
-	// pickChannel: passthrough maps src ch->out ch.
-	frame := []float32{0.5, -0.5}
-	if v := pickChannel(frame, nil, 0, 2); v != 0.5 {
-		t.Fatalf("passthrough oc0=%v, want 0.5", v)
-	}
-	if v := pickChannel(frame, nil, 1, 2); v != -0.5 {
-		t.Fatalf("passthrough oc1=%v, want -0.5", v)
-	}
-	// left fan-out: src ch0 to both outputs.
-	for oc := 0; oc < 2; oc++ {
-		if v := pickChannel(frame, []int{0}, oc, 2); v != 0.5 {
-			t.Fatalf("left oc%d=%v, want 0.5 (L on both)", oc, v)
-		}
-	}
-	// right fan-out: src ch1 to both outputs.
-	for oc := 0; oc < 2; oc++ {
-		if v := pickChannel(frame, []int{1}, oc, 2); v != -0.5 {
-			t.Fatalf("right oc%d=%v, want -0.5 (R on both)", oc, v)
-		}
-	}
-
-	if g := gainLinear(0); g != 1.0 {
-		t.Fatalf("gainLinear(0)=%v, want 1.0", g)
-	}
-	if g := gainLinear(-6); math.Abs(float64(g)-0.5012) > 1e-3 {
-		t.Fatalf("gainLinear(-6)=%v, want ~0.501", g)
-	}
-}
-
 func TestResampleSelectGain(t *testing.T) {
 	r := newTestRenderer(&fakeSink{}, &fakeTimeline{}, &fakeReader{}, state.NodeRecord{
 		ID: "n1", Channel: "left", GainDB: -6,

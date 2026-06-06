@@ -10,6 +10,7 @@ import (
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/clock"
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/stream/codec"
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/stream/fec"
+	"gitlab.rand0m.me/ruben/go/ensemble/internal/stream/sink_net"
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/stream/source"
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/stream/streamgen"
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/stream/wire"
@@ -34,6 +35,11 @@ type Config struct {
 	FramesPerChunk int           // 480, 10 ms (A.12)
 	Lead           time.Duration // buffer playout lead, 300 ms (A.12 LeadMs)
 	StreamGen      uint64        // starting generation (set by the group engine on (re)start)
+
+	// Transport selects the wire transport (05 §5.9, D2). Default TransportUDP
+	// (UDP unicast + FEC); TransportTCP forces fec.None and a length-prefixed
+	// stream per listener. Mirrors GroupRecord.Profile.Transport.
+	Transport sink_net.Transport
 }
 
 func (c Config) withDefaults() Config {
@@ -62,12 +68,12 @@ func (c Config) withDefaults() Config {
 type Origin struct {
 	tl    Timeline      // §6.2 NowSample — group playout timeline (P3.1/group)
 	codec codec.Codec   // §6.3 — negotiated for the group (P4.1)
-	fec   fec.FEC        // §6.3 — negotiated for the group (P4.2)
+	fec   fec.FEC       // §6.3 — negotiated for the group (P4.2)
 	src   source.Reader // §5.3 — source decode→PCM, looped (P4.4)
 
 	cfg     Config
 	chunk   *chunker
-	sender  *sender
+	sender  fanOutSender
 	codecID wire.CodecID
 	fecID   wire.FECID
 	rate100 uint16
@@ -97,6 +103,17 @@ type Origin struct {
 // zero/invalid field.
 func New(tl Timeline, c codec.Codec, f fec.FEC, src source.Reader, cfg Config) *Origin {
 	cfg = cfg.withDefaults()
+
+	// TCP fallback forces FEC None (05 §5.9): TCP retransmission already guarantees
+	// delivery, so XOR/dup parity is pure waste and Protect must be identity. We
+	// swap to a fresh fec.None regardless of the negotiated profile; the wire FECID
+	// stamped on the header follows (FECNone=0).
+	var snd fanOutSender = newSender()
+	if cfg.Transport == sink_net.TransportTCP {
+		f = fec.NewNone()
+		snd = tcpSenderAdapter{newTCPSender()}
+	}
+
 	o := &Origin{
 		tl:         tl,
 		codec:      c,
@@ -104,7 +121,7 @@ func New(tl Timeline, c codec.Codec, f fec.FEC, src source.Reader, cfg Config) *
 		src:        src,
 		cfg:        cfg,
 		chunk:      newChunker(src, cfg.FramesPerChunk, cfg.Channels),
-		sender:     newSender(),
+		sender:     snd,
 		codecID:    wire.CodecID(c.ID()),
 		fecID:      wire.FECID(f.ID()),
 		rate100:    uint16(cfg.Rate / 100),
@@ -166,6 +183,11 @@ func (o *Origin) Run(ctx context.Context) error {
 	baseMono := o.nowMono()
 	idx := baseIdx
 	var seq uint64
+	// curGen is the live generation the Run loop stamps on chunks. It is advanced
+	// ONLY when a latched bump is applied at a chunk boundary (below) — never ahead
+	// of the seq/idx reset — so the first chunk of a new generation always carries
+	// gen+seq0+re-anchored idx atomically (05 §5.8). o.gen mirrors it for status.
+	curGen := o.gen.Load()
 
 	// produce builds, protects, and schedules the next chunk; returns false on a
 	// hard source error (Run then returns it).
@@ -175,6 +197,7 @@ func (o *Origin) Run(ctx context.Context) error {
 		// state (step 2). The keyframe (step 4) is forced via the per-listener
 		// keyframe arm done by Bump/ResumeAt and is set on the header below.
 		if g, ok := o.takePending(); ok {
+			curGen = g.Gen
 			if g.ResetSeq {
 				seq = 0
 			}
@@ -185,6 +208,7 @@ func (o *Origin) Run(ctx context.Context) error {
 			if g.ResetFEC {
 				o.fec = resetFEC(o.fec) // fresh parity state for the new generation
 			}
+			o.gen.Store(curGen) // publish the now-live gen for status reads
 		}
 
 		pcm, err := o.chunk.next()
@@ -202,7 +226,7 @@ func (o *Origin) Run(ctx context.Context) error {
 			Flags:       flags,
 			CodecID:     o.codecID,
 			FECID:       o.fecID,
-			StreamGen:   o.gen.Load(),
+			StreamGen:   curGen,
 			Seq:         seq,
 			SampleIndex: idx,
 			MasterMono:  o.nowMono(), // master mono at SOURCE time (05 §5.2.2)

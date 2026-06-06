@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"sync"
 
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/allowlist"
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/audio/ring"
@@ -22,6 +23,11 @@ type Config struct {
 	FramesPerChunk int // 480
 	WindowPackets  int // reorder/dedupe window size, default 32 (05 §5.6.2)
 	LeadMs         int // buffer playout lead before playout, default 300 (A.12 LeadMs)
+
+	// Transport selects the wire transport (05 §5.9, D2). Default TransportUDP;
+	// TransportTCP runs the same pipeline minus FEC and minus UDP reordering (TCP
+	// delivers in order) over a length-prefixed stream. Mirrors origin.Config.Transport.
+	Transport Transport
 }
 
 func (c Config) withDefaults() Config {
@@ -123,10 +129,18 @@ type Receiver struct {
 	primeFrames   int64 // frames pushed since the last (re)prime
 	primeTarget   int64 // LeadMs in frames (cfg.LeadMs/1000 * Rate)
 
+	// metaMu guards the timeline-facing snapshot (latest/haveChunk/primed/genSnap)
+	// because the FollowerTimeline projection reads it from the render goroutine
+	// while the recv loop writes it (05 §6.2). It is taken only on the ~chunk-rate
+	// recv path and the ~100 Hz render read, never in the audio hot path, so it
+	// costs nothing measurable on the Pi.
+	metaMu sync.Mutex
+
 	// latest is the newest accepted chunk's anchor, exposed via LatestChunkMeta for
 	// the group's FollowerTimeline projection (it supplies ChunkMetaSource).
 	latest    chunkMeta
 	haveChunk bool
+	genSnap   uint64 // accepted gen mirror for the StreamGen() status read
 
 	// readBuf is the reusable recv buffer (allocation-free recv hot path).
 	readBuf []byte
@@ -153,15 +167,15 @@ func New(c codec.Codec, f fec.FEC, r *ring.Ring, allow *allowlist.Set, cfg Confi
 	chunkFrames := int64(cfg.FramesPerChunk)
 	rp := &ringPusher{ring: r, chunkFrames: chunkFrames}
 	return &Receiver{
-		codec:       c,
-		fec:         f,
-		ring:        r,
-		allow:       allow,
-		cfg:         cfg,
-		chunkFrames: chunkFrames,
-		win:         newWindow(cfg.WindowPackets),
-		push:        rp,
-		gate:        streamgen.NewGate(),
+		codec:         c,
+		fec:           f,
+		ring:          r,
+		allow:         allow,
+		cfg:           cfg,
+		chunkFrames:   chunkFrames,
+		win:           newWindow(cfg.WindowPackets),
+		push:          rp,
+		gate:          streamgen.NewGate(),
 		awaitKeyframe: true, // a fresh receiver primes from its first keyframe
 		primeTarget:   int64(cfg.LeadMs) * int64(cfg.Rate) / 1000,
 		readBuf:       make([]byte, maxDatagram),
@@ -177,12 +191,20 @@ func New(c codec.Codec, f fec.FEC, r *ring.Ring, allow *allowlist.Set, cfg Confi
 // accumulated, so render holds (orphan/silence) rather than playing a half-empty
 // buffer on a late join / (re)prime.
 func (r *Receiver) LatestChunkMeta() (sampleIndex, masterMono int64, gen uint64, playing, ok bool) {
+	r.metaMu.Lock()
+	defer r.metaMu.Unlock()
 	m := r.latest
 	return m.SampleIndex, m.MasterMono, m.StreamGen, m.Playing, r.haveChunk && r.primed
 }
 
-// StreamGen reports the currently accepted generation (status snapshot).
-func (r *Receiver) StreamGen() uint64 { return r.gate.Current() }
+// StreamGen reports the currently accepted generation (status snapshot). It reads
+// the mutex-guarded mirror rather than the gate (which is owned by the single recv
+// goroutine) so it is safe to call from a status/render goroutine.
+func (r *Receiver) StreamGen() uint64 {
+	r.metaMu.Lock()
+	defer r.metaMu.Unlock()
+	return r.genSnap
+}
 
 // Run reads datagrams from conn and drives allowlist→unwrap→Recover→reorder/dedupe→
 // decode→ring.PushAt until ctx is cancelled (05 §5.6.2). conn is bound by the group
@@ -228,8 +250,12 @@ func (r *Receiver) handle(buf []byte, src netip.Addr) {
 	case streamgen.Adopt:
 		// Higher gen: flush window+FEC+stale ring tail and re-enter the prime state
 		// (keyframe-first, no playout until the lead refills) BEFORE decoding this
-		// (keyframe) packet. The gate has already advanced to hdr.StreamGen.
+		// (keyframe) packet. The gate has already advanced to hdr.StreamGen; publish
+		// the new gen so a concurrent StreamGen() status read observes it.
 		r.flushAndReprime()
+		r.metaMu.Lock()
+		r.genSnap = r.gate.Current()
+		r.metaMu.Unlock()
 	case streamgen.Drop:
 		return // stale prior-generation straggler — DROP
 	}
@@ -276,6 +302,7 @@ func (r *Receiver) deliver(p wire.Packet) {
 		return
 	}
 	r.push.PushAt(p.Header.SampleIndex, pcm)
+	r.metaMu.Lock()
 	r.latest = chunkMeta{
 		SampleIndex: p.Header.SampleIndex,
 		MasterMono:  p.Header.MasterMono,
@@ -283,19 +310,24 @@ func (r *Receiver) deliver(p wire.Packet) {
 		Playing:     true, // master transport state; PCM keyframe carries play=true
 	}
 	r.haveChunk = true
+	r.metaMu.Unlock()
 	r.advancePrime()
 }
 
 // advancePrime accumulates one chunk toward the prime lead and flips primed once
 // the lead is filled (05 §5.6.4 / §5.7). Until primed, LatestChunkMeta reports
-// ok=false so the FollowerTimeline holds playout.
+// ok=false so the FollowerTimeline holds playout. primeFrames/primeTarget are
+// owned by the recv goroutine; only the primed flag is read cross-goroutine, so
+// the flip is published under metaMu.
 func (r *Receiver) advancePrime() {
 	if r.primed {
 		return
 	}
 	r.primeFrames += r.chunkFrames
 	if r.primeFrames >= r.primeTarget {
+		r.metaMu.Lock()
 		r.primed = true
+		r.metaMu.Unlock()
 	}
 }
 

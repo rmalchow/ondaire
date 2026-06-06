@@ -30,12 +30,17 @@ import (
 // A loop boundary is NOT a reason and never calls Bump (doc 05 §5.2.1): the
 // timeline is continuous, the loop is invisible to listeners. Returns the new
 // streamGen.
+//
+// The bump is LATCHED, not applied immediately: Run applies the directives (and
+// publishes the now-live gen for status reads) atomically at the next chunk
+// boundary, so the first chunk of the new generation always carries the new gen
+// together with seq=0 and the re-anchored sampleIndex — never the new gen on an
+// old seq/idx (05 §5.8). The returned value is the controller's new generation.
 func (o *Origin) Bump(reason streamgen.Reason, atSample int64, playing bool) uint64 {
 	o.mu.Lock()
 	g := o.ctrl.Bump(reason, atSample, playing)
 	o.pending = &g
 	o.mu.Unlock()
-	o.gen.Store(g.Gen)
 	o.sender.armKeyframeAll() // first chunk of the new generation is a keyframe for all (step 4)
 	return g.Gen
 }

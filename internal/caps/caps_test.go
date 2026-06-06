@@ -248,12 +248,27 @@ func TestProbe(t *testing.T) {
 			if d.MaxRate != tt.wantRate {
 				t.Errorf("MaxRate = %d, want %d", d.MaxRate, tt.wantRate)
 			}
-			// Opus is deferred (A.11): MVP advertises pcm only.
-			if !slices.Equal(d.EncodeCodecs, []string{codecPCM}) {
-				t.Errorf("EncodeCodecs = %v, want [pcm]", d.EncodeCodecs)
-			}
-			if !slices.Equal(d.DecodeCodecs, []string{codecPCM}) {
-				t.Errorf("DecodeCodecs = %v, want [pcm]", d.DecodeCodecs)
+			// Under -tags opus with libopus present, Opus is legitimately
+			// detected by detectCodecs, so the codec lists include opus.
+			// The exact-match assertion below is only valid for the default
+			// (!opus) build or when libopus is absent at runtime.
+			// Opus presence is covered by TestOpusPresentInDetect (caps_opus_test.go).
+			if !opusAvailable() {
+				// Opus is deferred (A.11): MVP advertises pcm only.
+				if !slices.Equal(d.EncodeCodecs, []string{codecPCM}) {
+					t.Errorf("EncodeCodecs = %v, want [pcm]", d.EncodeCodecs)
+				}
+				if !slices.Equal(d.DecodeCodecs, []string{codecPCM}) {
+					t.Errorf("DecodeCodecs = %v, want [pcm]", d.DecodeCodecs)
+				}
+			} else {
+				// Opus is present: pcm floor must still be there.
+				if !slices.Contains(d.EncodeCodecs, codecPCM) {
+					t.Errorf("EncodeCodecs %v missing pcm floor", d.EncodeCodecs)
+				}
+				if !slices.Contains(d.DecodeCodecs, codecPCM) {
+					t.Errorf("DecodeCodecs %v missing pcm floor", d.DecodeCodecs)
+				}
 			}
 			if !slices.Equal(d.FEC, allFEC) {
 				t.Errorf("FEC = %v, want %v", d.FEC, allFEC)
@@ -282,15 +297,27 @@ func TestProbeThroughCompute(t *testing.T) {
 	if c.Render {
 		t.Error("sink-less probe should yield Render=false")
 	}
-	if !slices.Equal(c.EncodeCodecs, []string{codecPCM}) {
-		t.Errorf("EncodeCodecs = %v, want [pcm] for a sink-less origin", c.EncodeCodecs)
+	// Under -tags opus with libopus present, Opus is legitimately detected so
+	// EncodeCodecs contains both pcm and opus.  The pcm floor must always be
+	// present; the exact-[pcm]-only assertion is only valid when Opus is absent.
+	if !opusAvailable() {
+		if !slices.Equal(c.EncodeCodecs, []string{codecPCM}) {
+			t.Errorf("EncodeCodecs = %v, want [pcm] for a sink-less origin", c.EncodeCodecs)
+		}
+	} else {
+		if !slices.Contains(c.EncodeCodecs, codecPCM) {
+			t.Errorf("EncodeCodecs %v missing pcm floor", c.EncodeCodecs)
+		}
 	}
 }
 
-// TestOpusAbsentMVP pins the A.11 deferral: detectCodecs reports no opus today.
+// TestOpusAbsentMVP pins the default-build behavior: with Opus compiled out
+// (no `opus` build tag) detectCodecs reports no opus. Under `-tags opus` the
+// codec is intentionally available, so this assertion is skipped — Opus
+// presence is covered by caps_opus_test.go (//go:build opus).
 func TestOpusAbsentMVP(t *testing.T) {
 	if opusAvailable() {
-		t.Fatal("opusAvailable() must be false for the MVP (A.11 deferred)")
+		t.Skip("opus build: Opus is available by design; presence covered by caps_opus_test.go")
 	}
 	enc, dec := detectCodecs()
 	if slices.Contains(enc, codecOpus) || slices.Contains(dec, codecOpus) {

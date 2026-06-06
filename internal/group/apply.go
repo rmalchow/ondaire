@@ -92,6 +92,25 @@ func (e *Engine) Apply(in Inputs) Decision {
 	return d
 }
 
+// Shutdown tears the engine's running subsystems down to nothing (used when a
+// group is removed from the ConfigDoc, mirroring cluster.GroupElections.Drop).
+// It reconciles the currently-running decision to the all-stopped zero decision,
+// so exactly the started subsystems are stopped once, then marks the engine
+// un-started. Idempotent: a second call (or a call on a never-applied engine) is
+// a no-op.
+func (e *Engine) Shutdown() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.started {
+		return
+	}
+	prev := e.running
+	e.stopFollowerParts(prev)
+	e.stopMasterParts(prev)
+	e.running = Decision{}
+	e.started = false
+}
+
 // SetClockHealth feeds the latest clock-quality window into the engine's orphan
 // gate (doc 04 §4.2.3). cmd calls this from the clock.Follower sample hook; the
 // next Apply consults the resolved hysteresis. Kept separate from Inputs so the

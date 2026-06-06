@@ -29,6 +29,7 @@ package daemon
 
 import (
 	"context"
+	"io"
 	"net"
 	"path/filepath"
 	"time"
@@ -345,11 +346,12 @@ type originPlane struct {
 }
 
 // receiverPlane bundles a running follower receiver + its ring + cancel + the
-// chunk-meta source the follower timeline reads.
+// chunk-meta source the follower timeline reads. closer closes the bound socket
+// (a *net.UDPConn on the UDP path, a *net.TCPListener on the TCP fallback path).
 type receiverPlane struct {
 	r      *sinknet.Receiver
 	rng    *ring.Ring
-	conn   *net.UDPConn
+	closer io.Closer
 	cancel context.CancelFunc
 }
 
@@ -441,6 +443,7 @@ func (h *hookState) startOrigin(groupID string, streamGen uint64) error {
 		FramesPerChunk: h.ap.framesPerChunk,
 		Lead:           time.Duration(h.ap.leadMs) * time.Millisecond,
 		StreamGen:      streamGen,
+		Transport:      transportFor(doc, groupID), // UDP default; TCP forces fec.None (05 §5.9)
 	})
 	// Register render-capable listeners (other members) at the audio plane.
 	h.addListeners(o, doc, groupID)
@@ -500,22 +503,16 @@ func (h *hookState) stopClockFollower() {
 }
 
 // startReceiver builds the follower-side receiver (recv→allowlist→FEC.Recover→
-// Codec.Decode→ring) bound to the audio-plane UDP socket. Idempotent.
+// Codec.Decode→ring) bound to the audio plane, dispatching the UDP listen or the
+// TCP-fallback listen per the group's negotiated transport (05 §5.9). Idempotent.
 func (h *hookState) startReceiver(groupID string) error {
 	if h.recv != nil {
 		return nil
 	}
-	uaddr, err := net.ResolveUDPAddr("udp", h.ap.audioAddr)
-	if err != nil {
-		return err
-	}
-	conn, err := net.ListenUDP("udp", uaddr)
-	if err != nil {
-		return err
-	}
+	transport := transportFor(h.cfg(), groupID)
+
 	c, err := codec.New(codec.PCM)
 	if err != nil {
-		conn.Close()
 		return err
 	}
 	rng := ring.NewRing(ringSamples(h.ap))
@@ -523,9 +520,40 @@ func (h *hookState) startReceiver(groupID string) error {
 		Rate:           h.ap.rate,
 		Channels:       h.ap.channels,
 		FramesPerChunk: h.ap.framesPerChunk,
+		Transport:      transport,
 	})
 	ctx, cancel := context.WithCancel(h.n.roleCtxNow())
-	h.recv = &receiverPlane{r: rcv, rng: rng, conn: conn, cancel: cancel}
+
+	if transport == sinknet.TransportTCP {
+		taddr, err := net.ResolveTCPAddr("tcp", h.ap.audioAddr)
+		if err != nil {
+			cancel()
+			return err
+		}
+		ln, err := net.ListenTCP("tcp", taddr)
+		if err != nil {
+			cancel()
+			return err
+		}
+		h.recv = &receiverPlane{r: rcv, rng: rng, closer: ln, cancel: cancel}
+		go func() {
+			defer ln.Close()
+			_ = rcv.RunTCP(ctx, ln)
+		}()
+		return nil
+	}
+
+	uaddr, err := net.ResolveUDPAddr("udp", h.ap.audioAddr)
+	if err != nil {
+		cancel()
+		return err
+	}
+	conn, err := net.ListenUDP("udp", uaddr)
+	if err != nil {
+		cancel()
+		return err
+	}
+	h.recv = &receiverPlane{r: rcv, rng: rng, closer: conn, cancel: cancel}
 	go func() {
 		defer conn.Close()
 		_ = rcv.Run(ctx, conn)
@@ -687,6 +715,16 @@ func mediaFor(doc state.ConfigDoc, groupID string) string {
 		return g.Media.File
 	}
 	return ""
+}
+
+// transportFor resolves the group's negotiated audio transport (05 §5.9 / 07
+// §2.4): GroupRecord.Profile.Transport "tcp" selects the reliable fallback,
+// anything else (including "" and "udp") the UDP default.
+func transportFor(doc state.ConfigDoc, groupID string) sinknet.Transport {
+	if g := groupRecord(doc, groupID); g != nil {
+		return sinknet.ParseTransport(g.Profile.Transport)
+	}
+	return sinknet.TransportUDP
 }
 
 func groupRecord(doc state.ConfigDoc, groupID string) *state.GroupRecord {

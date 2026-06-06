@@ -29,9 +29,9 @@ func (r *Receiver) FlushAndReprime() { r.flushAndReprime() }
 // ring is always filled at the correct sampleIndex (05 §5.6.3) — the flush
 // re-anchors the index at the next keyframe, it never shifts subsequent audio.
 func (r *Receiver) flushAndReprime() {
-	r.win.reset()         // clear the reorder/dedupe window
+	r.win.reset()           // clear the reorder/dedupe window
 	r.fec = resetFEC(r.fec) // reset FEC parity-group / dedupe recover state
-	r.ring.Reset()        // drop the stale ring tail (full flush; the new gen re-anchors)
+	r.ring.Reset()          // drop the stale ring tail (full flush; the new gen re-anchors)
 	if rp, ok := r.push.(*ringPusher); ok {
 		// Drop the play cursor so the next push re-seeds it at the new sampleIndex
 		// (a seek/failover may move the index backward as well as forward).
@@ -39,9 +39,13 @@ func (r *Receiver) flushAndReprime() {
 		rp.playCursor = 0
 	}
 	// Re-enter the prime state: withhold playout and require a keyframe-first decode.
-	r.primed = false
+	// awaitKeyframe/primeFrames are recv-goroutine-owned; primed/haveChunk/latest are
+	// read by the FollowerTimeline render goroutine, so they are cleared under metaMu.
 	r.awaitKeyframe = true
 	r.primeFrames = 0
+	r.metaMu.Lock()
+	r.primed = false
 	r.haveChunk = false
 	r.latest = chunkMeta{}
+	r.metaMu.Unlock()
 }

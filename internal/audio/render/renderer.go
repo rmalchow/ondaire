@@ -125,9 +125,9 @@ type Renderer struct {
 
 	// chMu guards the channel-select + gain snapshot, refreshed each tick from the
 	// node's ConfigDoc record (cheap; the lane rarely changes).
-	chMu     sync.Mutex
-	srcChans []int   // source channels this node emits; nil => stereo passthrough
-	gain     float32 // linear gain from NodeRecord.GainDB
+	chMu sync.Mutex
+	role Channel // channel role this node emits (doc 06 §5.1); zero => stereo
+	gain float32 // linear gain from NodeRecord.GainDB
 
 	// baseSourceConsumed is the wantContent captured at the last reseek so
 	// playedContent and wantContent share an origin (doc 06 §3.3). framesWritten /
@@ -343,7 +343,7 @@ func (r *Renderer) resampleSelect(in []float32, outCh int) []float32 {
 	r.rmu.Unlock()
 
 	r.chMu.Lock()
-	sel := r.srcChans
+	role := r.role
 	g := r.gain
 	r.chMu.Unlock()
 
@@ -357,39 +357,10 @@ func (r *Renderer) resampleSelect(in []float32, outCh int) []float32 {
 		base := f * srcCh
 		frame := resampled[base : base+srcCh]
 		for oc := 0; oc < outCh; oc++ {
-			out[f*outCh+oc] = g * pickChannel(frame, sel, oc, outCh)
+			out[f*outCh+oc] = g * SelectChannel(frame, role, outCh, oc)
 		}
 	}
 	return out
-}
-
-// pickChannel chooses the source sample feeding output channel oc (doc 06 §5.1).
-// With no selection (sel nil/empty) it is a straight per-channel passthrough
-// (clamped to available source channels). With a selection of length 1 the chosen
-// source channel is duplicated to every output channel (mono fan-out). With a longer
-// selection sel[oc] picks the source channel for output channel oc.
-func pickChannel(frame []float32, sel []int, oc, outCh int) float32 {
-	srcCh := len(frame)
-	if len(sel) == 0 {
-		if oc < srcCh {
-			return frame[oc]
-		}
-		return frame[srcCh-1]
-	}
-	if len(sel) == 1 {
-		c := sel[0]
-		if c >= 0 && c < srcCh {
-			return frame[c]
-		}
-		return 0
-	}
-	if oc < len(sel) {
-		c := sel[oc]
-		if c >= 0 && c < srcCh {
-			return frame[c]
-		}
-	}
-	return 0
 }
 
 func (r *Renderer) sleep(ctx context.Context, t *time.Timer, d time.Duration) {
@@ -660,12 +631,14 @@ func (r *Renderer) nodeRecord() state.NodeRecord {
 	return nodeRecordIn(r.docSnapshot(), r.nodeID)
 }
 
-// applyLane snapshots the node's channel-select + gain for the producer (doc 06 §5).
+// applyLane snapshots the node's channel-select + gain for the producer (doc 06
+// §5). An unknown Channel role degrades to stereo passthrough (ParseChannel
+// returns ChannelStereo on error).
 func (r *Renderer) applyLane(node state.NodeRecord) {
-	sel := channelSel(node.Channel)
-	g := gainLinear(node.GainDB)
+	role, _ := ParseChannel(node.Channel)
+	g := GainLinear(node.GainDB)
 	r.chMu.Lock()
-	r.srcChans = sel
+	r.role = role
 	r.gain = g
 	r.chMu.Unlock()
 }
@@ -694,24 +667,3 @@ func activeMedia(doc state.ConfigDoc) string {
 	return ""
 }
 
-// channelSel maps NodeRecord.Channel to the source-channel selection feeding
-// pickChannel (doc 06 §5.1): "stereo" => nil (passthrough), "left" => [0],
-// "right" => [1]. An unknown role degrades to passthrough.
-func channelSel(role string) []int {
-	switch role {
-	case "left":
-		return []int{0}
-	case "right":
-		return []int{1}
-	default: // "stereo" or unknown
-		return nil
-	}
-}
-
-// gainLinear converts a dB trim to a linear amplitude scale (0 dB => 1.0, doc 06 §5.2).
-func gainLinear(db float64) float32 {
-	if db == 0 {
-		return 1.0
-	}
-	return float32(math.Pow(10, db/20))
-}

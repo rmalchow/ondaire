@@ -49,8 +49,12 @@ func TestNewGating(t *testing.T) {
 	if _, err := New(PCM); err != nil {
 		t.Fatalf("New(PCM) error: %v", err)
 	}
-	if _, err := New(OPUS); !errors.Is(err, ErrUnsupportedCodec) {
-		t.Fatalf("New(OPUS) err = %v, want ErrUnsupportedCodec", err)
+	// Under the default (!opus) build opusFactory is nil so New(OPUS) always
+	// returns ErrUnsupportedCodec.  Under -tags opus with libopus present the
+	// factory is wired and New(OPUS) succeeds — that case is exercised by
+	// TestOpusAvailableAndNew in opus_test.go (//go:build opus).
+	if _, err := New(OPUS); err != nil && !errors.Is(err, ErrUnsupportedCodec) {
+		t.Fatalf("New(OPUS) err = %v, want nil or ErrUnsupportedCodec", err)
 	}
 	if _, err := New(99); !errors.Is(err, ErrUnsupportedCodec) {
 		t.Fatalf("New(99) err = %v, want ErrUnsupportedCodec", err)

@@ -145,7 +145,7 @@ func newTestOrigin(c codec.Codec, f fec.FEC, src *fakeSource, cfg testCfg) (*Ori
 	o.nowMono = clk.now
 	caps := map[string]*captureWriter{}
 	var capMu sync.Mutex
-	o.sender.dial = func(addr *net.UDPAddr) (packetWriter, error) {
+	o.sender.(*sender).dial = func(addr *net.UDPAddr) (packetWriter, error) {
 		w := &captureWriter{}
 		capMu.Lock()
 		caps[addr.String()] = w

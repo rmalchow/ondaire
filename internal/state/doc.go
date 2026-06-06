@@ -61,8 +61,28 @@ type NodeRecord struct {
 	HWDelayUs int          `json:"hwDelayUs"`
 	Channel   string       `json:"channel"` // "stereo"|"left"|"right"
 	GainDB    float64      `json:"gainDb"`
+	// Device is the node's persisted audio-output device override (e.g. an ALSA
+	// "hw:1" or an exec sink device); "" = the backend default / the node-local
+	// --device flag. Per-node config, gossiped like channel/gain (07 §2).
+	Device string `json:"device,omitempty"`
+	// AudioDevices is the node's SELF-probed playback device list (a fact, like
+	// Addrs — each node publishes its own and gossips it so any member's UI can
+	// offer the choices). Refreshed by the owning node's role loop.
+	AudioDevices []AudioDevice `json:"audioDevices,omitempty"`
 	Caps      Capabilities `json:"caps"`
-	LastSeen  string       `json:"lastSeen,omitempty"` // RFC3339; best-effort hint
+	// RenderAutoOff marks that Caps.Render was AUTO-disabled because the owning
+	// node found no usable audio sink (06 §1.5 last-resort control-only). When a
+	// sink becomes usable again the node flips Render back on and clears this —
+	// an operator's explicit Render=false (flag unset) is never overridden.
+	RenderAutoOff bool   `json:"renderAutoOff,omitempty"`
+	LastSeen      string `json:"lastSeen,omitempty"` // RFC3339; best-effort hint
+}
+
+// AudioDevice is one enumerated playback device on a node (ID is the string
+// the sink registry opens, e.g. "hw:1,0"; Label the human stream name).
+type AudioDevice struct {
+	ID    string `json:"id"`
+	Label string `json:"label,omitempty"`
 }
 
 // Capabilities is a node's probed render/encode/decode profile (06, P2.6).

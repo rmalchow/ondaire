@@ -172,6 +172,24 @@ func (s *Store) MergeGossip(b []byte) {
 	s.Merge(env.Doc, env.NodeID)
 }
 
+// Reset wipes the store back to the zero ConfigDoc (Version 0) and REMOVES the
+// persisted file — the node-release path (forget/leave/takeover, 03 §4): the
+// departing node must not retain the old cluster's secrets, and a version-0 doc
+// loses every gossip merge so a stale replica cannot resurrect it. Signals
+// Changed like any other write.
+func (s *Store) Reset() {
+	s.mu.Lock()
+	s.doc = ConfigDoc{}
+	s.mu.Unlock()
+
+	if s.path != "" {
+		s.saveMu.Lock()
+		_ = os.Remove(s.path)
+		s.saveMu.Unlock()
+	}
+	s.signal()
+}
+
 // save persists doc to config.json (best-effort, atomic temp+rename, mode 0600 —
 // the doc carries the plaintext CA private key and credential verifiers, D18 /
 // 07 §5.3). It runs OUTSIDE s.mu on the caller-supplied snapshot, serialized by

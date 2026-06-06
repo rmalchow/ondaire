@@ -29,19 +29,23 @@ import (
 // probe a controller reads to learn this node's id, self-signed cert fingerprint
 // (to pin before the PIN), init state, protocol epoch, and caps. It returns 403
 // once this node is a healthy member — bootstrap is then closed.
-func (s *Server) handleBootstrapInfo(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleBootstrapInfo(w http.ResponseWriter, r *http.Request) {
+	src := srcAddr(r.RemoteAddr)
 	if s.deps.Bootstrap == nil || s.deps.Bootstrap.Info == nil {
+		s.logf("bootstrap/info from %s -> 503 (bootstrap seam not wired)", src)
 		writeErr(w, http.StatusServiceUnavailable, codeNotReady, "bootstrap unavailable")
 		return
 	}
 	info := s.deps.Bootstrap.Info()
 	if info.State == "member" {
+		s.logf("bootstrap/info from %s -> 403 (node is a member; bootstrap closed)", src)
 		writeErr(w, http.StatusForbidden, codeForbidden, "node is a cluster member; bootstrap is closed")
 		return
 	}
 	if info.ProtocolEpoch == 0 {
 		info.ProtocolEpoch = adopt.ProtocolEpoch
 	}
+	s.logf("bootstrap/info from %s -> 200 (id=%s state=%s epoch=%d)", src, info.NodeID, info.State, info.ProtocolEpoch)
 	writeJSON(w, info)
 }
 
@@ -50,25 +54,30 @@ func (s *Server) handleBootstrapInfo(w http.ResponseWriter, _ *http.Request) {
 // bodyLimit; an unknown phase is 400 invalid_request. Each phase dispatches to the
 // adopt.Node half through the Bootstrap seam.
 func (s *Server) handleBootstrapAdopt(w http.ResponseWriter, r *http.Request) {
+	src := srcAddr(r.RemoteAddr)
 	bd := s.deps.Bootstrap
 	if bd == nil || bd.Node == nil || bd.Guard == nil {
+		s.logf("bootstrap/adopt from %s -> 503 (bootstrap seam not wired)", src)
 		writeErr(w, http.StatusServiceUnavailable, codeNotReady, "bootstrap unavailable")
 		return
 	}
 	// A member no longer adopts: bootstrap is closed (mirror of /info's 403).
 	if bd.Info != nil && bd.Info().State == "member" {
+		s.logf("bootstrap/adopt from %s -> 403 (node is a member; bootstrap closed)", src)
 		writeErr(w, http.StatusForbidden, codeForbidden, "node is a cluster member; bootstrap is closed")
 		return
 	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, bodyLimit))
 	if err != nil {
+		s.logf("bootstrap/adopt from %s -> 400 (body read error: %v)", src, err)
 		writeErr(w, http.StatusBadRequest, codeInvalidRequest, "could not read body")
 		return
 	}
-	src := srcAddr(r.RemoteAddr)
 
-	switch adopt.Phase(r.URL.Query().Get("phase")) {
+	phase := adopt.Phase(r.URL.Query().Get("phase"))
+	s.logf("bootstrap/adopt phase=%q from %s", phase, src)
+	switch phase {
 	case adopt.PhaseKey:
 		s.bootstrapKey(w, body)
 	case adopt.PhaseCSR:
@@ -76,6 +85,7 @@ func (s *Server) handleBootstrapAdopt(w http.ResponseWriter, r *http.Request) {
 	case adopt.PhaseComplete:
 		s.bootstrapComplete(w, body, src)
 	default:
+		s.logf("bootstrap/adopt from %s -> 400 (unknown phase %q)", src, phase)
 		writeErr(w, http.StatusBadRequest, codeInvalidRequest, "unknown adopt phase")
 	}
 }
@@ -130,13 +140,16 @@ func (s *Server) bootstrapCSR(w http.ResponseWriter, body []byte, src string) {
 	if err != nil {
 		if errors.Is(err, adopt.ErrBadPIN) {
 			bd.Guard.RecordFail(src) // audit: failed PIN proof from src
+			s.logf("bootstrap/adopt csr from %s -> 401 (bad PIN proof; recorded fail)", src)
 			writeErr(w, http.StatusUnauthorized, codeUnauthenticated, "bad PIN proof")
 			return
 		}
+		s.logf("bootstrap/adopt csr from %s -> 400 (csr phase failed: %v)", src, err)
 		writeErr(w, http.StatusBadRequest, codeInvalidRequest, "csr phase failed")
 		return
 	}
 	bd.Guard.RecordSuccess(src)
+	s.logf("bootstrap/adopt csr from %s -> 200 (PIN proof OK)", src)
 	writeJSON(w, resp)
 }
 
@@ -164,10 +177,13 @@ func (s *Server) bootstrapComplete(w http.ResponseWriter, body []byte, src strin
 		switch {
 		case errors.Is(err, adopt.ErrBadPIN):
 			bd.Guard.RecordFail(src)
+			s.logf("bootstrap/adopt complete from %s -> 401 (bad PIN proof; recorded fail)", src)
 			writeErr(w, http.StatusUnauthorized, codeUnauthenticated, "bad PIN proof")
 		case errors.Is(err, adopt.ErrBadPayload):
+			s.logf("bootstrap/adopt complete from %s -> 422 (malformed adoption payload)", src)
 			writeErr(w, http.StatusUnprocessableEntity, codeUnprocessable, "malformed adoption payload")
 		default:
+			s.logf("bootstrap/adopt complete from %s -> 422 (complete phase failed: %v)", src, err)
 			writeErr(w, http.StatusUnprocessableEntity, codeUnprocessable, "complete phase failed")
 		}
 		return
@@ -176,12 +192,14 @@ func (s *Server) bootstrapComplete(w http.ResponseWriter, body []byte, src strin
 	// bootstrap). On failure the node stays uninitialized (takeover atomicity).
 	if bd.Install != nil {
 		if err := bd.Install(inst); err != nil {
+			s.logf("bootstrap/adopt complete from %s -> 500 (install failed: %v); node stays uninitialized", src, err)
 			writeErr(w, http.StatusInternalServerError, codeInternal, "install failed: "+err.Error())
 			return
 		}
 	}
 	bd.Guard.RecordSuccess(src)
 	bd.Node.Drop(req.NonceA)
+	s.logf("bootstrap/adopt complete from %s -> 200 (adoption installed; bootstrap closing)", src)
 	writeJSON(w, resp)
 }
 
@@ -200,6 +218,58 @@ func (s *Server) guardAllow(w http.ResponseWriter, src string) bool {
 	if errors.Is(err, adopt.ErrLockedOut) {
 		msg = "locked out, retry later"
 	}
+	s.logf("bootstrap/adopt from %s -> 429 (%s; retry in %ds)", src, msg, retryAfterSeconds(retry))
 	writeErr(w, http.StatusTooManyRequests, codeRateLimited, msg)
 	return false
+}
+
+// takeoverRequest is the POST /bootstrap/takeover body (03 §4): the CURRENT
+// cluster's admin password authorizes this node's release for re-adoption.
+type takeoverRequest struct {
+	Password string `json:"password"`
+}
+
+// handleBootstrapTakeover serves POST /bootstrap/takeover: a foreign controller
+// presents THIS node's current cluster admin password; on success the node
+// self-releases (wipes its cluster state) and reopens its bootstrap surface so
+// the normal A.9 adopt can run. Only meaningful on a member (409 otherwise).
+// Password attempts ride the same A.12 brute-force guard as the adoption PIN.
+func (s *Server) handleBootstrapTakeover(w http.ResponseWriter, r *http.Request) {
+	src := srcAddr(r.RemoteAddr)
+	bd := s.deps.Bootstrap
+	if bd == nil || bd.Guard == nil || bd.VerifyPassword == nil || bd.Release == nil {
+		s.logf("bootstrap/takeover from %s -> 503 (takeover seam not wired)", src)
+		writeErr(w, http.StatusServiceUnavailable, codeNotReady, "takeover unavailable")
+		return
+	}
+	if bd.Info != nil && bd.Info().State != "member" {
+		s.logf("bootstrap/takeover from %s -> 409 (node is not a member)", src)
+		writeErr(w, http.StatusConflict, codeConflict, "node is not a cluster member; use adopt")
+		return
+	}
+	if !s.guardAllow(w, src) {
+		return
+	}
+	var req takeoverRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, bodyLimit)).Decode(&req); err != nil {
+		s.logf("bootstrap/takeover from %s -> 400 (malformed body)", src)
+		writeErr(w, http.StatusBadRequest, codeInvalidRequest, "malformed JSON body")
+		return
+	}
+	if !bd.VerifyPassword(req.Password) {
+		bd.Guard.RecordFail(src) // audit: failed takeover password from src
+		s.logf("bootstrap/takeover from %s -> 401 (wrong password)", src)
+		writeErr(w, http.StatusUnauthorized, codeUnauthenticated, "wrong password")
+		return
+	}
+	if err := bd.Release(); err != nil {
+		s.logf("bootstrap/takeover from %s -> 500 (release failed: %v)", src, err)
+		writeErr(w, http.StatusInternalServerError, codeInternal, "release failed")
+		return
+	}
+	bd.Guard.RecordSuccess(src)
+	s.logf("bootstrap/takeover from %s -> 200 (cluster released; bootstrap reopened)", src)
+	writeJSON(w, struct {
+		Released bool `json:"released"`
+	}{Released: true})
 }

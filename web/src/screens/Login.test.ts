@@ -54,6 +54,29 @@ describe('Login', () => {
     await waitFor(() => expect(pushSpy).toHaveBeenCalledWith(expect.anything(), '', '/groups'))
   })
 
+  it('success fires onAuthenticated BEFORE navigating (guard flag flip)', async () => {
+    const fetchSpy = mockFetch({
+      '/api/v1/auth/login': () => jsonResp(200, { session: { expiresAt: 't' } }),
+      '/api/v1/auth/session': () =>
+        jsonResp(200, { authenticated: true, method: 'session', nodeId: 'n-1', configVersion: 5 }),
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const order: string[] = []
+    const onAuthenticated = vi.fn(() => order.push('auth'))
+    const pushSpy = vi
+      .spyOn(history, 'pushState')
+      .mockImplementation(() => order.push('navigate'))
+
+    render(Login, { onAuthenticated })
+    await fireEvent.input(screen.getByLabelText(/Admin password/), { target: { value: 'pw' } })
+    await fireEvent.click(screen.getByText('Sign in'))
+
+    await waitFor(() => expect(pushSpy).toHaveBeenCalled())
+    // The guard flag must flip before the navigate runs, or the stale guard
+    // bounces the redirect straight back to /login.
+    expect(order).toEqual(['auth', 'navigate'])
+  })
+
   it('401 shows generic "Wrong password." (no enumeration)', async () => {
     vi.stubGlobal(
       'fetch',

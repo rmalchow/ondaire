@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/state"
@@ -49,7 +51,9 @@ func (f *fakePeer) MemberStatus(nodeID, _ string) (web.MemberStatus, error) {
 	}
 	return f.statuses[nodeID], nil
 }
-func (f *fakePeer) ListMedia(_ string) ([]web.MediaFile, error) { return f.listFiles, nil }
+func (f *fakePeer) ListMedia(_, _ string) ([]web.MediaFile, []string, error) {
+	return f.listFiles, nil, nil
+}
 func (f *fakePeer) CalibratePlay(nodeID string, _ int) error {
 	if f.calibErr != nil {
 		return f.calibErr
@@ -336,12 +340,71 @@ func TestListMedia(t *testing.T) {
 	local := []web.MediaFile{{File: "a.mp3", SizeBytes: 10}}
 	n, _ := newMediaNode(t, self, docWithGroup("g1", []string{self}, "", false), &fakePeer{listFiles: []web.MediaFile{{File: "remote.mp3"}}}, local)
 
-	got, err := n.listMedia("")
+	got, _, err := n.listMedia("", "")
 	if err != nil || len(got) != 1 || got[0].File != "a.mp3" {
 		t.Fatalf("local list = (%v, %v), want [a.mp3]", got, err)
 	}
-	got, err = n.listMedia("peer")
+	got, _, err = n.listMedia("peer", "")
 	if err != nil || len(got) != 1 || got[0].File != "remote.mp3" {
 		t.Fatalf("peer list = (%v, %v), want [remote.mp3]", got, err)
+	}
+}
+
+// TestListLocalMediaDirs covers the F.1 directory browsing: subdirectories are
+// surfaced, nested files carry data/-relative slash paths (so selection plays
+// unchanged), and a hostile ../ path cannot escape the data root.
+func TestListLocalMediaDirs(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite := func(rel string, b []byte) {
+		t.Helper()
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Minimal MP3 frame-sync header so the lister's extension filter passes.
+	mp3 := []byte{0xFF, 0xFB, 0x90, 0x00}
+	mustWrite("root.mp3", mp3)
+	mustWrite("albums/one.mp3", mp3)
+	mustWrite("albums/notes.txt", []byte("x"))
+
+	files, dirs, err := listLocalMedia(dir, "")
+	if err != nil {
+		t.Fatalf("root list: %v", err)
+	}
+	if len(files) != 1 || files[0].File != "root.mp3" {
+		t.Fatalf("root files = %+v, want [root.mp3]", files)
+	}
+	if len(dirs) != 1 || dirs[0] != "albums" {
+		t.Fatalf("root dirs = %+v, want [albums]", dirs)
+	}
+
+	files, dirs, err = listLocalMedia(dir, "albums")
+	if err != nil {
+		t.Fatalf("subdir list: %v", err)
+	}
+	if len(files) != 1 || files[0].File != "albums/one.mp3" {
+		t.Fatalf("subdir files = %+v, want [albums/one.mp3] (data/-relative)", files)
+	}
+	if len(dirs) != 0 {
+		t.Fatalf("subdir dirs = %+v, want none", dirs)
+	}
+
+	// Traversal: "../" collapses against the root — the listing stays inside
+	// data/ (here: resolves to data/etc, which does not exist).
+	if got := cleanRelPath("../../etc"); got != "etc" {
+		t.Fatalf("cleanRelPath(../../etc) = %q, want etc", got)
+	}
+	if got := cleanRelPath(`..\..\etc`); got != "etc" {
+		t.Fatalf(`cleanRelPath(..\..\etc) = %q, want etc`, got)
+	}
+	if !statLocalMedia(dir, "albums/one.mp3") {
+		t.Fatal("statLocalMedia(albums/one.mp3) = false, want true")
+	}
+	if statLocalMedia(dir, "nope/none.mp3") {
+		t.Fatal("statLocalMedia(missing) = true, want false")
 	}
 }

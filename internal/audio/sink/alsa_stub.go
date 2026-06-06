@@ -37,4 +37,12 @@ func newALSASink(string) (*alsaSink, error) {
 // the alsa backend off a Linux kernel.
 func probeALSA(string) bool { return false }
 
+// probeAlsaLib / newAlsaLibSink mirror the stubs for the shared libasound
+// (dlopen) backend: linux-only, never usable elsewhere.
+func probeAlsaLib(string) bool { return false }
+
+func newAlsaLibSink(string) (AudioSink, error) {
+	return nil, fmt.Errorf("alsalib: libasound sink unsupported on %s (linux only)", runtime.GOOS)
+}
+
 var _ AudioSink = (*alsaSink)(nil)

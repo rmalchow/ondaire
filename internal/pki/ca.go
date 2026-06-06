@@ -46,6 +46,21 @@ func (ca *CA) CertPEM() []byte {
 	return ca.certPEM
 }
 
+// Signer returns the CA's PRIVATE Ed25519 signer. It is exposed so genesis can
+// persist the freshly-minted key into ClusterSecrets.caKeyPEM (D18 §1.2) without
+// re-deriving it; the key still never leaves the node except as the plaintext-
+// replicated cluster secret. Treat the result as secret material.
+func (ca *CA) Signer() crypto.Signer {
+	return ca.key
+}
+
+// KeyPEM marshals the CA private key to plaintext PKCS#8 PEM (the round-trip
+// source for ClusterSecrets.caKeyPEM, D18 §1.2). It is the convenience pairing of
+// Signer()+MarshalCAKey genesis uses to capture the key for the ConfigDoc.
+func (ca *CA) KeyPEM() ([]byte, error) {
+	return MarshalCAKey(ca.key)
+}
+
 // randomSerial returns a random 128-bit positive serial number (doc 03 §1.1/§1.3).
 func randomSerial() (*big.Int, error) {
 	// Upper bound 2^128; rand.Int yields [0, max), all non-negative.

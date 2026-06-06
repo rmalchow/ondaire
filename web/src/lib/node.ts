@@ -29,6 +29,10 @@ export interface NodeDetailView {
   hwDelayUs: number // integer µs; "Hardware delay (HWDelayUs)" (09 §6 naming note)
   channel: Channel // 'stereo' | 'left' | 'right' (D13)
   gainDb: number
+  device?: string // persisted audio-output device override ('' = auto)
+  // audioDevices is the node's self-probed playback device list (the selectable
+  // choices for `device`), gossiped from the owning node.
+  audioDevices?: { id: string; label?: string }[]
   caps: Capabilities // EFFECTIVE = detected(runtime) ∩ enabled(config) (D16)
   // probed (optional) is the pre-mask runtime-discovered superset, if the record
   // ever surfaces it directly; absent, caps.ts reconstructs it from effective ∪
@@ -50,6 +54,7 @@ export interface NodePatch {
   channel?: Channel
   gainDb?: number
   hwDelayUs?: number
+  device?: string // '' clears back to auto
   capabilities?: CapabilityMask
 }
 

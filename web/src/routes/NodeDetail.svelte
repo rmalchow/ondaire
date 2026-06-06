@@ -175,6 +175,7 @@
   const channel = $derived($draft.channel ?? node?.channel ?? 'stereo')
   const gainDb = $derived($draft.gainDb ?? node?.gainDb ?? 0)
   const hwDelayUs = $derived($draft.hwDelayUs ?? node?.hwDelayUs ?? 0)
+  const device = $derived($draft.device ?? node?.device ?? '')
   // disabled = offline || saving (threaded into audio + capability components).
   const controlsDisabled = $derived($offline || saving)
   const servingNode = $derived($session?.nodeId ?? 'this node')
@@ -237,6 +238,7 @@
           {channel}
           {gainDb}
           {hwDelayUs}
+          {device}
           liveSyncErrorUs={$liveSyncErrorUs}
         />
       </Card>
@@ -249,6 +251,7 @@
           {channel}
           {gainDb}
           {hwDelayUs}
+          {device}
           liveSyncErrorUs={$liveSyncErrorUs}
         />
       </Card>
@@ -264,7 +267,7 @@
     </Card>
 
     <Card title="Network">
-      <NetworkPanel addrs={node.addrs} fingerprint={node.fingerprint} />
+      <NetworkPanel addrs={node.addrs ?? []} fingerprint={node.fingerprint} />
     </Card>
 
     <SaveBar dirty={$isDirty} {saving} onSave={onSave} onRevert={onRevert} />

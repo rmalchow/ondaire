@@ -320,6 +320,53 @@ func TestParseCARejectsGarbage(t *testing.T) {
 	}
 }
 
+// TestCASignerAndKeyPEMRoundTrip asserts the GAP 1 accessors: Signer() hands back
+// the live signer (its public key matches the CA cert's), and KeyPEM() marshals a
+// key that ParseCAKey re-parses into an equivalent signer (so genesis can persist
+// ClusterSecrets.caKeyPEM and reload it).
+func TestCASignerAndKeyPEMRoundTrip(t *testing.T) {
+	ca, err := CreateCA("home", time.Now())
+	if err != nil {
+		t.Fatalf("CreateCA: %v", err)
+	}
+
+	signer := ca.Signer()
+	if signer == nil {
+		t.Fatal("Signer() returned nil")
+	}
+	caPub, ok := ca.Cert.PublicKey.(ed25519.PublicKey)
+	if !ok {
+		t.Fatalf("CA cert public key type = %T, want ed25519.PublicKey", ca.Cert.PublicKey)
+	}
+	signerPub, ok := signer.Public().(ed25519.PublicKey)
+	if !ok {
+		t.Fatalf("Signer().Public() type = %T, want ed25519.PublicKey", signer.Public())
+	}
+	if !signerPub.Equal(caPub) {
+		t.Error("Signer() public key does not match the CA certificate public key")
+	}
+
+	keyPEM, err := ca.KeyPEM()
+	if err != nil {
+		t.Fatalf("KeyPEM: %v", err)
+	}
+	want, err := MarshalCAKey(signer)
+	if err != nil {
+		t.Fatalf("MarshalCAKey: %v", err)
+	}
+	if !bytes.Equal(keyPEM, want) {
+		t.Error("KeyPEM() != MarshalCAKey(Signer())")
+	}
+	reparsed, err := ParseCAKey(keyPEM)
+	if err != nil {
+		t.Fatalf("ParseCAKey(KeyPEM()): %v", err)
+	}
+	rePub, ok := reparsed.Public().(ed25519.PublicKey)
+	if !ok || !rePub.Equal(caPub) {
+		t.Error("KeyPEM round-trip lost the key identity")
+	}
+}
+
 func blockType(b *pem.Block) string {
 	if b == nil {
 		return "<nil>"

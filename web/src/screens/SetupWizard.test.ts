@@ -48,7 +48,7 @@ describe('SetupWizard', () => {
     expect(submit.disabled).toBe(false)
   })
 
-  it('create path: successful setup() calls navigate("/")', async () => {
+  it('create path: successful setup() calls navigate("/") without onComplete', async () => {
     const fetchSpy = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
         jsonResp(
@@ -84,6 +84,40 @@ describe('SetupWizard', () => {
     await waitFor(() =>
       expect(pushSpy).toHaveBeenCalledWith(expect.anything(), '', '/'),
     )
+  })
+
+  it('create path: successful setup() fires onComplete (App re-probe → Dashboard)', async () => {
+    const fetchSpy = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResp(
+          200,
+          {
+            cluster: { name: 'Home', caFingerprint: 'sha256:aa', created: 't' },
+            node: { id: 'n-7a3f', name: 'x' },
+            version: 1,
+          },
+          '"1"',
+        ),
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+    const pushSpy = vi.spyOn(history, 'pushState')
+    const onComplete = vi.fn()
+
+    render(SetupWizard, { probe, onComplete })
+    await fireEvent.input(screen.getByLabelText(/Cluster name/), { target: { value: 'Home' } })
+    await fireEvent.input(screen.getByLabelText(/^Admin password/), {
+      target: { value: 'a-good-passphrase' },
+    })
+    await fireEvent.input(screen.getByLabelText(/Confirm password/), {
+      target: { value: 'a-good-passphrase' },
+    })
+    await fireEvent.click(screen.getByText('Create cluster →'))
+
+    // The wizard delegates the redirect to App's re-probe (whose guard lands on
+    // '/'); it must NOT navigate itself — that would run App's stale pre-setup
+    // guard and bounce back to /setup.
+    await waitFor(() => expect(onComplete).toHaveBeenCalledOnce())
+    expect(pushSpy).not.toHaveBeenCalled()
   })
 
   it('adopt path: shows node id, fingerprint, PIN 0 0 0 0 with secret note', async () => {

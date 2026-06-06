@@ -26,6 +26,10 @@ const nodesStore = writable<MemberNode[]>([])
 // so the D.1 NodeRecord projection (which has no liveness of its own) can be
 // joined into a single online flag per member.
 const livenessStore = writable<Record<string, boolean>>({})
+// liveAddrsStore maps node id → the C.2 members[] addrs (the LIVE control
+// endpoints, host:port). Preferred over the bare D.1 record addrs in the
+// members view so the table shows reachable addresses.
+const liveAddrsStore = writable<Record<string, string[]>>({})
 const discoveredStore = writable<DiscoveredNode[]>([])
 
 // rowStateStore holds per-row transient UI state (busy spinner / inline error),
@@ -54,9 +58,13 @@ export { configVersion }
 // When liveness has no entry for a node (e.g. discovery hasn't reported it yet)
 // the node defaults to offline rather than silently appearing online.
 export const members: Readable<MemberNode[]> = derived(
-  [nodesStore, livenessStore],
-  ([$nodes, $live]) =>
-    $nodes.map((n) => ({ ...n, online: $live[n.id] ?? n.online ?? false })),
+  [nodesStore, livenessStore, liveAddrsStore],
+  ([$nodes, $live, $addrs]) =>
+    $nodes.map((n) => ({
+      ...n,
+      online: $live[n.id] ?? n.online ?? false,
+      addrs: $addrs[n.id]?.length ? $addrs[n.id] : n.addrs,
+    })),
 )
 
 export const discovered: Readable<DiscoveredNode[]> = derived(
@@ -122,8 +130,13 @@ export async function refreshCluster(): Promise<void> {
   })
   nodesStore.set(nodes.nodes)
   const live: Record<string, boolean> = {}
-  for (const m of disco.members) live[m.id] = m.online
+  const liveAddrs: Record<string, string[]> = {}
+  for (const m of disco.members) {
+    live[m.id] = m.online
+    if (m.addrs?.length) liveAddrs[m.id] = m.addrs
+  }
   livenessStore.set(live)
+  liveAddrsStore.set(liveAddrs)
   discoveredStore.set(disco.discovered)
   const v = Math.max(info.version ?? 0, nodes.version ?? 0, get(configVersion) ?? 0)
   configVersion.set(v)

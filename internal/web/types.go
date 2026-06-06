@@ -14,6 +14,19 @@ type ConfigView struct {
 	Groups  []GroupView `json:"groups"`
 }
 
+// ClusterInfoView is the GET /api/v1/cluster/info body (the dashboard's cluster
+// header). It carries the cluster's public identity only — never ClusterSecrets
+// (the CA private key / shared secret are never projected, doc 09 §2.8). Version
+// mirrors the ConfigDoc version so the SPA can show staleness; it is also set as
+// the ETag.
+type ClusterInfoView struct {
+	ClusterName   string `json:"clusterName"`
+	CAFingerprint string `json:"caFingerprint"`
+	Created       string `json:"created"` // RFC3339
+	NodeCount     int    `json:"nodeCount"`
+	Version       uint64 `json:"version"`
+}
+
 // NodeView is one node in the ConfigView.
 type NodeView struct {
 	ID        string   `json:"id"`
@@ -22,9 +35,40 @@ type NodeView struct {
 	HWDelayUs int      `json:"hwDelayUs"`
 	Channel   string   `json:"channel"` // "stereo" | "left" | "right"
 	GainDB    float64  `json:"gainDb"`
+	Device    string   `json:"device"` // audio-output device override ("" = auto)
+	// AudioDevices is the node's self-probed playback device list (the UI's
+	// selectable choices for Device). Always non-nil.
+	AudioDevices []AudioDeviceView `json:"audioDevices"`
 	// Caps mirrors README §6.5 Capabilities as a structured object, not a flat
 	// array.
 	Caps Capabilities `json:"caps"`
+}
+
+// AudioDeviceView is one selectable playback device on a node.
+type AudioDeviceView struct {
+	ID    string `json:"id"`
+	Label string `json:"label,omitempty"`
+}
+
+// MemberView is one cluster-members row (GET /api/v1/discovery members[]): the
+// NodeView record joined with gossip liveness and, when the member is live, its
+// observed control endpoint (host:port) so the UI shows reachable addresses.
+type MemberView struct {
+	NodeView
+	Online   bool `json:"online"`
+	IsMaster bool `json:"isMaster,omitempty"`
+}
+
+// NodeDetailView is the full GET /api/v1/nodes/{id} projection (08 §D.2): the
+// NodeView record joined with the cert/liveness/group facts the Node-detail
+// screen renders. The embedded NodeView fields are inlined in the JSON body.
+type NodeDetailView struct {
+	NodeView
+	Fingerprint    string `json:"fingerprint,omitempty"` // "sha256:<hex>" of the node cert
+	CertSignedByCA bool   `json:"certSignedByCa"`
+	Online         bool   `json:"online"`            // gossip liveness (self is always online)
+	GroupID        string `json:"groupId,omitempty"` // the group this node belongs to
+	IsMaster       bool   `json:"isMaster"`          // elected master of its group
 }
 
 // GroupView is one group in the ConfigView.
@@ -90,6 +134,7 @@ type NodePatch struct {
 	Channel   *string  `json:"channel,omitempty"` // "stereo" | "left" | "right"
 	HWDelayUs *int     `json:"hwDelayUs,omitempty"`
 	GainDB    *float64 `json:"gainDb,omitempty"`
+	Device    *string  `json:"device,omitempty"` // "" clears back to auto
 }
 
 // CalibrateSel selects calibration targets: exactly one of GroupID / NodeIDs.

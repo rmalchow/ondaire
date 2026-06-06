@@ -116,9 +116,11 @@ describe('Cluster screen', () => {
     )
     render(Cluster)
     await waitFor(() => expect(screen.getByText('node-b')).toBeTruthy())
+    // The credential input appears only AFTER Adopt is clicked (two-stage flow).
+    expect(screen.queryByLabelText(/Adoption PIN/i)).toBeNull()
+    await fireEvent.click(screen.getByText('Adopt'))
     const pin = screen.getByLabelText(/Adoption PIN/i) as HTMLInputElement
     expect(pin.value).toBe('0000')
-    expect(screen.getByText('Adopt')).toBeTruthy()
   })
 
   it('renders a list-fetch error as an inline banner with code + message + retry', async () => {
@@ -150,7 +152,8 @@ describe('Cluster screen', () => {
     await waitFor(() => expect(screen.getByText('Adopt')).toBeTruthy())
 
     const reloadCountBefore = getNodes.mock.calls.length
-    await fireEvent.click(screen.getByText('Adopt'))
+    await fireEvent.click(screen.getByText('Adopt')) // arm: reveal PIN
+    await fireEvent.click(screen.getByText('Adopt')) // confirm
 
     // The conflict banner asks the operator to reapply (reload-&-reapply, 09 §0):
     // both the message copy and the "Reload & reapply" button mention reapply.

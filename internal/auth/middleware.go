@@ -64,6 +64,14 @@ type Deps struct {
 	// path is in this set skips [1] refusal and [3] human auth. If nil, the
 	// pinned defaults (DefaultPublicPaths) are used.
 	PublicPaths map[string]bool
+
+	// ProbePaths are auth-OPTIONAL read paths (08 §B.4 "who am I"): they still
+	// honor the [1] uninitialized gate (503) and still attach the method when a
+	// credential IS presented, but an anonymous request passes through with no
+	// method instead of 401 — the handler answers authenticated:false. This is
+	// what lets the SPA boot probe distinguish "not logged in" (render the login
+	// form) from "unreachable" (render the error card).
+	ProbePaths map[string]bool
 }
 
 // DefaultPublicPaths are the chain's bootstrap-of-the-human-path exceptions
@@ -139,6 +147,13 @@ func (d Deps) Authenticate(next http.Handler) http.Handler {
 					return
 				}
 			}
+		}
+
+		// Auth-optional probe paths proceed anonymously (no method in context);
+		// the handler reports authenticated:false instead of this 401.
+		if d.ProbePaths[r.URL.Path] {
+			next.ServeHTTP(w, r)
+			return
 		}
 
 		WriteError(w, http.StatusUnauthorized, codeUnauthenticated,

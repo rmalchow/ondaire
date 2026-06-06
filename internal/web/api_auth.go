@@ -146,12 +146,18 @@ type sessionResponse struct {
 	ConfigVersion uint64 `json:"configVersion"`
 }
 
-// handleSession serves GET /api/v1/auth/session (08 §B.4): "who am I". Reachable
-// by session OR api-key OR node cert (the chain authenticated the caller). It
-// reflects the method and the current config version (so the SPA can seed
-// If-Match) and sets ETag:<version>.
+// handleSession serves GET /api/v1/auth/session (08 §B.4): "who am I". It is an
+// auth-OPTIONAL probe (chain ProbePaths): an anonymous request gets 200
+// {authenticated:false} — the SPA's signal to render the login form — leaking
+// neither the config version nor the node id. A credentialed caller (session OR
+// api-key OR node cert) gets its method reflected plus the current config
+// version (so the SPA can seed If-Match) and ETag:<version>.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
-	method, _ := auth.MethodFromContext(r.Context())
+	method, ok := auth.MethodFromContext(r.Context())
+	if !ok {
+		writeJSON(w, sessionResponse{Authenticated: false})
+		return
+	}
 	var version uint64
 	if s.deps.ConfigVersion != nil {
 		version = s.deps.ConfigVersion()

@@ -27,7 +27,6 @@ function renderRow(props: {
   node?: MemberNode
   busy?: boolean
   error?: ApiError
-  onTakeover?: () => void
   onForget?: () => void
   onOpenNode?: () => void
 }) {
@@ -38,7 +37,6 @@ function renderRow(props: {
         node: props.node ?? baseNode,
         busy: props.busy ?? false,
         error: props.error,
-        onTakeover: props.onTakeover ?? (() => {}),
         onForget: props.onForget ?? (() => {}),
         onOpenNode: props.onOpenNode ?? (() => {}),
       },
@@ -77,13 +75,11 @@ describe('MemberRow', () => {
     expect(screen.queryByText('master (no local audio)')).toBeNull()
   })
 
-  it('offline node shows the offline chip, dims the row, but keeps actions enabled', () => {
+  it('offline node shows the offline chip, dims the row, but keeps Forget enabled', () => {
     const { container } = renderRow({ node: { ...baseNode, online: false } })
     expect(screen.getByText(/offline/i)).toBeTruthy()
     expect(container.querySelector('tr.offline')).toBeTruthy()
-    const takeover = screen.getByText('Takeover').closest('button') as HTMLButtonElement
-    const forget = screen.getByText('Forget').closest('button') as HTMLButtonElement
-    expect(takeover.disabled).toBe(false)
+    const forget = screen.getByLabelText(/^Forget /) as HTMLButtonElement
     expect(forget.disabled).toBe(false)
   })
 
@@ -93,19 +89,23 @@ describe('MemberRow', () => {
     expect(screen.getByText('Node unreachable.')).toBeTruthy()
   })
 
-  it('clicking Takeover/Forget invokes the parent callback (which the screen gates via confirmAction)', async () => {
-    const onTakeover = vi.fn()
+  it('clicking the trashcan invokes onForget (the screen gates it via confirmAction)', async () => {
     const onForget = vi.fn()
-    renderRow({ onTakeover, onForget })
-    await fireEvent.click(screen.getByText('Takeover'))
-    await fireEvent.click(screen.getByText('Forget'))
-    expect(onTakeover).toHaveBeenCalledTimes(1)
+    renderRow({ onForget })
+    await fireEvent.click(screen.getByLabelText(/^Forget /))
     expect(onForget).toHaveBeenCalledTimes(1)
+  })
+
+  it('the name is a link to the node detail page (onOpenNode)', async () => {
+    const onOpenNode = vi.fn()
+    renderRow({ onOpenNode })
+    await fireEvent.click(screen.getByText('Living Room'))
+    expect(onOpenNode).toHaveBeenCalledTimes(1)
   })
 })
 
 // The confirm gate itself lives in the screen's action handlers (Cluster.svelte
-// wires onForget/onTakeover through confirmAction). These tests assert that
+// wires onForget through confirmAction). These tests assert that
 // contract directly: a confirmed dialog runs the action; a cancelled one is a
 // no-op. They drive confirmAction's activeConfirm store the way ConfirmModal
 // does, without rendering the modal.

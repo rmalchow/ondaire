@@ -23,11 +23,14 @@
   interface Props {
     // probe is the boot status (nodeId/fingerprint for the adopt panel).
     probe: StatusProbe
-    // onAdopted re-probes + advances the app (to /login) when this node flips to
-    // initialized via gossip. App supplies the re-probe; the wizard polls.
-    onAdopted?: () => void
+    // onComplete re-probes + advances the app once this node flips to
+    // initialized — after a successful create (genesis auto-logs-in, so the
+    // re-probe lands on the Dashboard) or after being adopted (lands on
+    // /login). App supplies the re-probe; navigating directly would run the
+    // route guard against App's STALE pre-setup flags and bounce back here.
+    onComplete?: () => void
   }
-  let { probe, onAdopted }: Props = $props()
+  let { probe, onComplete }: Props = $props()
 
   type Path = 'create' | 'adopt'
   let path = $state<Path>('create')
@@ -57,13 +60,16 @@
         clusterName: clusterName.trim(),
         adminPassword,
       })
-      // B.1 set a session cookie (auto-login). Seed the header + land on
-      // Dashboard (09 §1 user flow 1).
+      // B.1 set a session cookie (auto-login). Seed the header, then let App
+      // re-probe (initialized:true + authenticated:true) so its route guard
+      // lands on the Dashboard (09 §1 user flow 1) — a direct navigate would
+      // hit the stale pre-setup guard and bounce back to /setup.
       clusterInfo.set({
         name: res.cluster.name,
         caFingerprint: res.cluster.caFingerprint,
       })
-      navigate('/')
+      if (onComplete) onComplete()
+      else navigate('/')
     } catch (e) {
       err =
         e instanceof ApiError
@@ -91,7 +97,7 @@
         const st = await probeStatus()
         if (st.initialized) {
           stopAdoptPoll()
-          if (onAdopted) onAdopted()
+          if (onComplete) onComplete()
           else navigate('/login')
         }
       } catch {

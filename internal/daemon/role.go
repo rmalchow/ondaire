@@ -29,9 +29,12 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/allowlist"
@@ -58,45 +61,72 @@ type roleEngine struct {
 	inputs func(self, master string, gen uint64) group.Inputs
 }
 
-// buildTransport constructs the live transport seam for an active session: a
-// state.Store (loaded from <Root>/config.json), the group MasterTimeline, the
-// group.Engine wired to the stream/audio/clock hooks, and the inputs resolver
-// reading the replicated doc. It returns nil on a hard failure so activate stays
-// non-fatal (the closures then degrade to not-ready). The cross-node peer proxy
-// and the cluster election are left nil here (the pending P2-wiring step); a
-// single-node group therefore elects itself master/solo and decodes+renders
-// locally — the P4.9 end-goal substrate.
-func (n *Node) buildTransport(groupID string) *transport {
-	storePath := ""
-	if n.options.Paths.Root != "" {
-		storePath = filepath.Join(n.options.Paths.Root, "config.json")
-	}
-	store := state.Load(n.options.NodeID, storePath)
+// buildTransport constructs the live transport seam for an active session over
+// the daemon's ONE persistent store (n.store — so genesis, adoption and gossip
+// merges flow straight into the engine, doc 07 §5): the group MasterTimeline,
+// the group.Engine wired to the stream/audio/clock hooks, the inputs resolver
+// reading the replicated doc, and the multi-node plane (election-resolved master
+// addressing + the allowlist gating the clock server and audio receiver). cp may
+// be nil only in unit tests; activate always supplies a plane (which itself
+// degrades to the solo doc-elected substrate without a gossip port).
+func (n *Node) buildTransport(groupID string, cp *clusterPlane) *transport {
+	store := n.store
 
-	ap := canonicalAudio(
-		n.options.Device,
-		portAddr(n.options.ClockPort, 9000),
-		portAddr(n.options.AudioPort, 9100),
-	)
-	cfgFn := store.Get
-	hs := &hookState{
-		n:   n,
-		ap:  ap,
-		tl:  group.NewMasterTimeline(ap.rate),
-		cfg: cfgFn,
+	clockAddr := portAddr(n.options.ClockPort, defaultClockPort)
+	audioAddr := portAddr(n.options.AudioPort, defaultAudioPort)
+	if cp != nil {
+		// The plane resolved the ACTUAL free ports for this session (several
+		// instances may share a host); bind what it advertises.
+		clockAddr = ":" + itoa(cp.clockPort)
+		audioAddr = ":" + itoa(cp.audioPort)
 	}
-	engine := group.NewEngine(n.options.NodeID, hs.buildHooks()).
-		WithMasterAddr(func(_, masterID string) string {
-			// Single-node substrate: the master clock plane is local. The P2-wiring
-			// step replaces this with the elected master's NodeRecord clock addr.
-			return ap.clockAddr
-		})
+	ap := canonicalAudio(n.options.Device, clockAddr, audioAddr)
+	hs := &hookState{
+		n:        n,
+		ap:       ap,
+		cp:       cp,
+		tl:       group.NewMasterTimeline(ap.rate),
+		cfg:      store.Get,
+		loopRing: ring.NewRing(ringSamples(ap)),
+	}
+	if cp != nil {
+		hs.allow = cp.allow
+	}
+	masterAddr := func(_, _ string) string { return ap.clockAddr } // solo: local clock plane
+	if cp != nil {
+		masterAddr = cp.clockAddrOf // elected master's live clock endpoint
+	}
+	engine := group.NewEngine(n.options.NodeID, hs.buildHooks()).WithMasterAddr(masterAddr)
+
+	live := func(string) bool { return false }
+	if cp != nil {
+		live = func(nodeID string) bool {
+			if cp.mem == nil {
+				return false
+			}
+			for _, m := range cp.mem.Members() {
+				if m.Meta.NodeID == nodeID {
+					return true
+				}
+			}
+			return false
+		}
+	}
 
 	tx := &transport{
 		store:   store,
 		self:    n.options.NodeID,
 		dataDir: n.options.Paths.Data,
-		master:  func(gid string) string { return masterOf(store.Get(), gid, n.options.NodeID) },
+		hooks:   hs,
+		live:    live,
+		master: func(gid string) string {
+			if cp != nil && cp.mem != nil {
+				if m := cp.elections.Master(gid); m != "" {
+					return m
+				}
+			}
+			return masterOf(store.Get(), gid, n.options.NodeID)
+		},
 		roleEngine: &roleEngine{
 			engine: engine,
 			inputs: func(self, master string, gen uint64) group.Inputs {
@@ -243,6 +273,8 @@ func (n *Node) runFollower(rctx context.Context, gen uint64, master string) {
 // applyRoleEngine resolves inputs and drives group.Engine.Apply. The engine's own
 // reconcile is generation/streamGen fenced; the daemon role fence (roleState) has
 // already cancelled the prior role ctx, so the hooks started here run under rctx.
+// After the reconcile it syncs the doc-driven transport state the engine's
+// Decision cannot express (media selection / Playing flips — syncTransport).
 func (n *Node) applyRoleEngine(rctx context.Context, master string, gen uint64) {
 	re := n.engineFor()
 	if re == nil || re.engine == nil {
@@ -254,7 +286,20 @@ func (n *Node) applyRoleEngine(rctx context.Context, master string, gen uint64) 
 	// itself is ctx-agnostic, so the closures captured at build time read the live
 	// rctx from the transport (set just below) — see buildHooks.
 	n.setRoleCtx(rctx)
-	re.engine.Apply(in)
+	d := re.engine.Apply(in)
+	if hs := n.hooksFor(); hs != nil {
+		hs.syncTransport(d, in)
+	}
+}
+
+// hooksFor returns the live hookState under sessMu (nil before activate).
+func (n *Node) hooksFor() *hookState {
+	n.sessMu.Lock()
+	defer n.sessMu.Unlock()
+	if n.tx == nil {
+		return nil
+	}
+	return n.tx.hooks
 }
 
 // engineFor returns the live roleEngine under sessMu (nil before activate).
@@ -277,8 +322,9 @@ func (n *Node) setRoleCtx(ctx context.Context) {
 }
 
 // roleCtxNow reads the current fenced role ctx (the hooks start goroutines under
-// it). Falls back to the session ctx, then context.Background, so a hook never
-// starts an un-cancelable goroutine.
+// it). Falls back to the session ctx; with NO live session it returns a
+// pre-cancelled ctx so a hook racing deactivate can never start an
+// un-cancelable goroutine.
 func (n *Node) roleCtxNow() context.Context {
 	n.sessMu.Lock()
 	defer n.sessMu.Unlock()
@@ -288,8 +334,15 @@ func (n *Node) roleCtxNow() context.Context {
 	if n.activeCtx != nil {
 		return n.activeCtx
 	}
-	return context.Background()
+	return closedCtx
 }
+
+// closedCtx is a pre-cancelled context: the no-session fallback for roleCtxNow.
+var closedCtx = func() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
+}()
 
 // --- subsystem-construction config (A.12 canonical, threaded through) -------
 
@@ -323,20 +376,54 @@ func canonicalAudio(device, clockAddr, audioAddr string) audioParams {
 // --- group.Hooks construction ------------------------------------------------
 
 // hookState holds the per-session live subsystem handles the hooks create and
-// tear down. One per active session; guarded by its own mutex because Apply can
-// be called from the role loop while a prior teardown is in flight.
+// tear down. One per active session. The engine serializes hook calls under its
+// own mutex (Apply/Shutdown); mu additionally guards the handles against the
+// loop's syncTransport racing a deactivate-driven engine.Shutdown.
 type hookState struct {
 	n     *Node
 	ap    audioParams
+	cp    *clusterPlane // live member endpoint resolution; nil in unit tests
 	tl    *group.MasterTimeline // master timeline (origin + local loopback render)
 	cfg   func() state.ConfigDoc
 	allow *allowlist.Set
 
+	mu   sync.Mutex
 	srv  *clock.Server
 	orig *originPlane
 	fol  *clock.Follower
 	recv *receiverPlane
 	rend *renderPlane
+
+	// loopRing buffers the origin's PCM tee for the master's OWN render (the
+	// solo/master local playback path — without it a lone node plays silence
+	// while its followers hear audio). Allocated once per session and Reset on
+	// every origin (re)start so the running renderer's reader stays valid.
+	loopRing *ring.Ring
+
+	// lastTick is the renderer's most recent control-tick snapshot (sync /
+	// want/played/error/underruns), kept for the -v status line. Guarded by mu.
+	lastTick render.RenderTick
+
+	// lastMedia/lastPlaying track the doc-driven transport state already applied
+	// to the running origin, so syncTransport (re)starts/repoints it exactly when
+	// the replicated selection or Playing changes (08 §F.2-§F.4).
+	lastMedia   string
+	lastPlaying bool
+
+	// lastDevice is the audio-output device the running renderer's sink was
+	// opened with; a doc-level device change (per-node persisted config, §D.3)
+	// re-opens the sink via a render restart in syncTransport.
+	lastDevice string
+}
+
+// deviceFor resolves THIS node's audio-output device: the persisted per-node
+// NodeRecord.Device wins (set from the node detail screen, gossiped), falling
+// back to the node-local --device flag, then the backend default ("").
+func (h *hookState) deviceFor() string {
+	if nr := nodeRecord(h.cfg(), h.n.options.NodeID); nr != nil && nr.Device != "" {
+		return nr.Device
+	}
+	return h.ap.device
 }
 
 // originPlane bundles a running master origin + its cancel.
@@ -365,25 +452,102 @@ type renderPlane struct {
 // Every hook starts its goroutine under the LIVE fenced role ctx (n.roleCtxNow),
 // so a role change (which cancels that ctx via roleState) unwinds the plane. The
 // hooks are idempotent w.r.t. the engine's reconcile (the engine never double-
-// starts a running plane).
+// starts a running plane). Each entry takes h.mu so an engine reconcile and the
+// loop's syncTransport never interleave on the subsystem handles.
 func (h *hookState) buildHooks() group.Hooks {
+	locked := func(fn func()) func() {
+		return func() { h.mu.Lock(); defer h.mu.Unlock(); fn() }
+	}
 	return group.Hooks{
-		StartClockServer: h.startClockServer,
-		StopClockServer:  h.stopClockServer,
+		StartClockServer: func(g string) error {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.startClockServer(g)
+		},
+		StopClockServer: locked(h.stopClockServer),
 
-		StartOrigin:    h.startOrigin,
-		StopOrigin:     h.stopOrigin,
-		OriginResumeAt: h.originResumeAt,
+		StartOrigin: func(g string, sg uint64) error {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.startOrigin(g, sg)
+		},
+		StopOrigin: locked(h.stopOrigin),
+		OriginResumeAt: func(si int64, playing bool) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.originResumeAt(si, playing)
+		},
 
-		StartClockFollower: h.startClockFollower,
-		StopClockFollower:  h.stopClockFollower,
+		StartClockFollower: func(g, addr string) error {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.startClockFollower(g, addr)
+		},
+		StopClockFollower: locked(h.stopClockFollower),
 
-		StartReceiver:        h.startReceiver,
-		StopReceiver:         h.stopReceiver,
-		ReceiverFlushReprime: h.receiverFlushReprime,
+		StartReceiver: func(g string) error {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.startReceiver(g)
+		},
+		StopReceiver:         locked(h.stopReceiver),
+		ReceiverFlushReprime: locked(h.receiverFlushReprime),
 
-		StartRender: h.startRender,
-		StopRender:  h.stopRender,
+		StartRender: func() error {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.startRender()
+		},
+		StopRender: locked(h.stopRender),
+	}
+}
+
+// syncTransport reconciles the doc-driven transport state the engine's Decision
+// does not encode: media selection and the Playing flag (08 §F.2-§F.4). The
+// engine starts the origin when the role demands it, but media may be selected
+// only later (play{file}); a running origin must re-point on a media change and
+// pause/resume on a Playing flip (Timeline.Seed + origin.ResumeAt, 04 §4.4.4).
+// It also refreshes the origin's listener set so a follower that appeared after
+// origin start still receives (AddListener is idempotent by id). Called by
+// applyRoleEngine after every engine.Apply — i.e. on every loop signal.
+func (h *hookState) syncTransport(d group.Decision, in group.Inputs) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	// Persisted per-node device change (§D.3) applies to ANY rendering role
+	// (master loopback AND follower): the sink is opened once at render start,
+	// so a doc-level device switch re-opens it via a render restart.
+	if h.rend != nil {
+		if dev := h.deviceFor(); dev != h.lastDevice {
+			h.stopRender()
+			_ = h.startRender()
+		}
+	}
+	if !d.RunOrigin {
+		return
+	}
+	doc := h.cfg()
+	media := mediaFor(doc, in.GroupID)
+	switch {
+	case h.orig == nil && media != "":
+		// Media selected after the role start: bring the origin up now. The
+		// already-running renderer reads the persistent loopRing; the streamGen
+		// flip (0 → live) triggers its built-in reseek, so no restart is needed.
+		if h.startOrigin(in.GroupID, d.StreamGen) == nil && h.orig != nil {
+			h.originResumeAt(in.SampleIndex, in.Playing)
+		}
+	case h.orig != nil && media != "" && media != h.lastMedia:
+		// Selection changed: re-point the origin at the new source.
+		h.stopOrigin()
+		if h.startOrigin(in.GroupID, d.StreamGen) == nil && h.orig != nil {
+			h.originResumeAt(in.SampleIndex, in.Playing)
+		}
+	case h.orig != nil && in.Playing != h.lastPlaying:
+		// Play/stop flip: reseed the timeline + bump the stream generation so
+		// receivers flush+reprime (R11/D22).
+		h.originResumeAt(in.SampleIndex, in.Playing)
+	}
+	if h.orig != nil {
+		h.addListeners(h.orig.o, doc, in.GroupID)
 	}
 }
 
@@ -445,11 +609,16 @@ func (h *hookState) startOrigin(groupID string, streamGen uint64) error {
 		StreamGen:      streamGen,
 		Transport:      transportFor(doc, groupID), // UDP default; TCP forces fec.None (05 §5.9)
 	})
+	// Local render tee: the master hears its own stream through the loop ring
+	// (no UDP self-loop). Reset drops any prior generation's samples.
+	h.loopRing.Reset()
+	o.WithLoopback(func(pcm []float32) { h.loopRing.Write(pcm) })
 	// Register render-capable listeners (other members) at the audio plane.
 	h.addListeners(o, doc, groupID)
 
 	ctx, cancel := context.WithCancel(h.n.roleCtxNow())
 	h.orig = &originPlane{o: o, cancel: cancel}
+	h.lastMedia = media
 	go func() {
 		defer src.Close()
 		_ = o.Run(ctx)
@@ -473,7 +642,11 @@ func (h *hookState) originResumeAt(sampleIndex int64, playing bool) {
 	}
 	if h.orig != nil {
 		h.orig.o.ResumeAt(sampleIndex, playing)
+		// The bump re-keys the stream; drop the prior generation's local PCM so
+		// the master's own render re-primes cleanly (the R11 analog).
+		h.loopRing.Reset()
 	}
+	h.lastPlaying = playing
 }
 
 // startClockFollower runs the clock follower against the master's clock-plane
@@ -576,23 +749,44 @@ func (h *hookState) receiverFlushReprime() {
 	}
 }
 
-// startRender opens the node's audio sink and runs the renderer. For the master/
-// solo it loops back the master timeline; for a follower it chases the follower
+// startRender opens the node's audio sink (Options.OpenSink override first —
+// tests inject a capturing fake) and runs the renderer. For the master/solo it
+// loops back the master timeline; for a follower it chases the follower
 // timeline projected over the receiver's chunk meta + clock follower. Idempotent.
 func (h *hookState) startRender() error {
 	if h.rend != nil {
 		return nil
 	}
-	snk, err := sink.Open(nil, h.ap.device)
+	device := h.deviceFor()
+	open := func() (sink.AudioSink, error) {
+		s, backend, err := sink.OpenNamed(nil, device)
+		if err != nil {
+			logf(h.n.options.Log, "render: no usable audio sink (device=%q): %v", device, err)
+			return nil, err
+		}
+		logf(h.n.options.Log, "render: sink=%s device=%q", backend, device)
+		return s, nil
+	}
+	if h.n.options.OpenSink != nil {
+		open = h.n.options.OpenSink // injected fake (tests)
+	}
+	snk, err := open()
 	if err != nil {
 		return err
 	}
+	h.lastDevice = device
 	tl := h.renderTimeline()
 	src := h.renderSource()
 	rd := render.NewRenderer(snk, tl, h.cfg, src, h.n.options.NodeID, render.RendererParams{
 		Rate:     h.ap.rate,
 		Channels: h.ap.channels,
 		LeadMs:   h.ap.leadMs,
+	})
+	// Keep the latest control-tick snapshot for the -v status line.
+	rd.SetOnTick(func(ti render.RenderTick) {
+		h.mu.Lock()
+		h.lastTick = ti
+		h.mu.Unlock()
 	})
 	ctx, cancel := context.WithCancel(h.n.roleCtxNow())
 	h.rend = &renderPlane{rd: rd, cancel: cancel}
@@ -622,21 +816,29 @@ func (h *hookState) renderTimeline() group.Timeline {
 }
 
 // renderSource returns the renderer's FrameReader: the receiver ring on a
-// follower, or a silent reader on a sink-less/loopback master with no recv (the
-// loopback master renders the same PCM the origin reads; for the MVP the master's
-// local render reads from its own recv ring only when it is also a follower — a
-// pure master loopback feeds the renderer from the source via a tee is out of P4.9
-// scope, so a master loopback renders silence until a recv path exists).
+// follower; on a master/solo the origin's local PCM tee (loopRing) — so a lone
+// node actually HEARS what it plays — with a silent reader only when neither
+// path exists (no origin and no receiver: nothing to render yet).
 func (h *hookState) renderSource() render.FrameReader {
 	if h.recv != nil {
 		return ringReader{rng: h.recv.rng, gen: func() uint64 { return h.recv.r.StreamGen() }}
 	}
-	return silentReader{}
+	return ringReader{rng: h.loopRing, gen: func() uint64 {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if h.orig != nil {
+			return h.orig.o.StreamGen()
+		}
+		return 0
+	}}
 }
 
 // addListeners registers the audio-plane unicast destination for every OTHER
-// render-capable member of the group (D17: only Render=true members receive). The
-// destination addr is resolved from the member's NodeRecord.Addrs + the audio port.
+// render-capable member of the group (D17: only Render=true members receive).
+// The destination is resolved from the live gossip Meta (correct per-node audio
+// port) when the plane runs, falling back to NodeRecord.Addrs + the local audio
+// port. AddListener is idempotent by id, so re-running this on every
+// syncTransport refresh is safe and picks up late-joining followers.
 func (h *hookState) addListeners(o *origin.Origin, doc state.ConfigDoc, groupID string) {
 	g := groupRecord(doc, groupID)
 	if g == nil {
@@ -648,15 +850,69 @@ func (h *hookState) addListeners(o *origin.Origin, doc state.ConfigDoc, groupID 
 			continue
 		}
 		nr := nodeRecord(doc, id)
-		if nr == nil || !nr.Caps.Render || len(nr.Addrs) == 0 {
+		if nr == nil || !nr.Caps.Render {
 			continue
 		}
-		addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(nr.Addrs[0], portStr))
+		hostPort := ""
+		if h.cp != nil {
+			if a, ok := h.cp.audioAddrOf(id); ok {
+				hostPort = a
+			}
+		}
+		if hostPort == "" {
+			if len(nr.Addrs) == 0 {
+				continue
+			}
+			hostPort = net.JoinHostPort(nr.Addrs[0], portStr)
+		}
+		addr, err := net.ResolveUDPAddr("udp", hostPort)
 		if err != nil {
 			continue
 		}
 		_ = o.AddListener(id, addr)
 	}
+}
+
+// statusLine renders the -v playback/stream/clock status snapshot the role loop
+// logs periodically: role + replicated transport state, origin generation /
+// listener count / local loop-ring fill, receiver chunk meta + ring fill, the
+// renderer's latest control tick (sync, want/played, drift error+ratio,
+// underruns) and the clock follower's offset/min-delay.
+func (h *hookState) statusLine(role string, doc state.ConfigDoc, groupID string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "status: role=%s", role)
+	if g := groupRecord(doc, groupID); g != nil {
+		fmt.Fprintf(&b, " playing=%t media=%q", g.Playing, g.Media.File)
+	}
+	if h.orig != nil {
+		fmt.Fprintf(&b, " origin{gen=%d listeners=%d loopring=%d}",
+			h.orig.o.StreamGen(), h.orig.o.Listeners(), h.loopRing.Len())
+	}
+	if h.recv != nil {
+		si, _, gen, playing, ok := h.recv.r.LatestChunkMeta()
+		fmt.Fprintf(&b, " recv{gen=%d sample=%d playing=%t meta=%t ring=%d}",
+			gen, si, playing, ok, h.recv.rng.Len())
+	}
+	if h.rend != nil {
+		ti := h.lastTick
+		fmt.Fprintf(&b, " render{sync=%t want=%d played=%d err=%d ppm=%+.0f underruns=%d}",
+			ti.HaveSync, ti.WantSample, ti.PlayedSample, ti.ErrorSamples, ti.RatioPPM, ti.Underruns)
+	}
+	if h.fol != nil {
+		if off, ok := h.fol.Offset(); ok {
+			fmt.Fprintf(&b, " clock{offset=%s", off)
+			if md, mok := h.fol.MinDelay(); mok {
+				fmt.Fprintf(&b, " mindelay=%s", md)
+			}
+			b.WriteString("}")
+		} else {
+			b.WriteString(" clock{unsynced}")
+		}
+	}
+	return b.String()
 }
 
 // engineSetClockHealth feeds the orphan gate from the clock follower sample hook.
@@ -745,14 +1001,16 @@ func nodeRecord(doc state.ConfigDoc, id string) *state.NodeRecord {
 	return nil
 }
 
-// mediaPath resolves a media file name to its absolute path under the node's data/
-// folder (08 §F.2: master-side decode reads from data/). An http(s):// URL or an
-// already-absolute path is returned unchanged.
+// mediaPath resolves a media file name (possibly a nested data/-relative path)
+// to its absolute path under the node's data/ folder (08 §F.2: master-side
+// decode reads from data/). The relative path is traversal-sanitized so a doc
+// entry can never escape data/. An http(s):// URL or an already-absolute path
+// is returned unchanged.
 func (n *Node) mediaPath(file string) string {
 	if n.options.Paths.Data == "" || isURL(file) || filepath.IsAbs(file) {
 		return file
 	}
-	return filepath.Join(n.options.Paths.Data, file)
+	return filepath.Join(n.options.Paths.Data, filepath.FromSlash(cleanRelPath(file)))
 }
 
 // isURL reports whether s is an http(s) stream URL (source.Open accepts those).

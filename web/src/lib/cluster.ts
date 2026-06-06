@@ -92,6 +92,10 @@ export interface AdoptReq {
   fingerprint: string
   pin: string
   name?: string
+  // password is the C.4 takeover release credential: the TARGET node's CURRENT
+  // cluster admin password (its operator authorizes the move, 03 §4). Unused
+  // for a plain adopt.
+  password?: string
 }
 
 // adopt signs + records a discovered uninitialized node (C.3). The PIN is sent

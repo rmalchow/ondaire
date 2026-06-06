@@ -24,9 +24,13 @@ export interface MediaFile {
 }
 
 // MediaListing is the 08 §F.1 response: the resolved node id whose data/ was
-// listed (the scoped master) plus its mp3 entries.
+// listed (the scoped master), the data/-relative folder listed ("" = root),
+// its subdirectories (browse targets) and its mp3 entries (data/-relative
+// paths, so a nested file plays unchanged).
 export interface MediaListing {
   nodeId: string
+  path: string
+  dirs: string[]
   files: MediaFile[]
 }
 
@@ -37,18 +41,22 @@ interface GroupWriteBody {
   group?: GroupRecord
 }
 
-function buildQuery(nodeId?: string): string {
-  if (!nodeId) return ''
-  return `?nodeId=${encodeURIComponent(nodeId)}`
+function buildQuery(nodeId?: string, path?: string): string {
+  const sp = new URLSearchParams()
+  if (nodeId) sp.set('node', nodeId)
+  if (path) sp.set('path', path)
+  const q = sp.toString()
+  return q ? `?${q}` : ''
 }
 
-// listMedia lists a node's data/ folder (08 §F.1). `nodeId` defaults to the
-// receiving node server-side; the Media screen passes the scoped master's id so
-// the listing is proxied to the master whose disk holds the files. Read-only
-// (data/ is not part of ConfigDoc) → no If-Match. A 502 means the target node is
-// unreachable (offline master → the screen shows the offline state).
-export function listMedia(nodeId?: string): Promise<Read<MediaListing>> {
-  return apiFetch<MediaListing>(`/api/v1/media${buildQuery(nodeId)}`)
+// listMedia lists one folder of a node's data/ media tree (08 §F.1). `nodeId`
+// defaults to the receiving node server-side; the Media screen passes the
+// scoped master's id so the listing is proxied to the master whose disk holds
+// the files. `path` selects a subfolder ("" = root). Read-only (data/ is not
+// part of ConfigDoc) → no If-Match. A 502 means the target node is unreachable
+// (offline master → the screen shows the offline state).
+export function listMedia(nodeId?: string, path?: string): Promise<Read<MediaListing>> {
+  return apiFetch<MediaListing>(`/api/v1/media${buildQuery(nodeId, path)}`)
 }
 
 // selectAndPlay selects a file and starts playback in one shot (08 §F.3, body

@@ -40,6 +40,7 @@ type adoptRequest struct {
 	Fingerprint string `json:"fingerprint"`
 	PIN         string `json:"pin"`
 	Name        string `json:"name"`
+	Password    string `json:"password"` // C.4 takeover release credential
 	Force       bool   `json:"force"` // C.4 takeover; C.3 ignores it
 }
 
@@ -87,7 +88,7 @@ func (s *Server) adoptCommon(w http.ResponseWriter, r *http.Request, force bool)
 	// honoured for adopt only as an explicit opt-in (normally false).
 	useForce := force || req.Force
 
-	if err := s.deps.Adopt(req.Addr, req.Fingerprint, req.PIN, req.NodeID, req.Name, useForce); err != nil {
+	if err := s.deps.Adopt(req.Addr, req.Fingerprint, req.PIN, req.NodeID, req.Name, req.Password, useForce); err != nil {
 		writeAdoptErr(w, err)
 		return
 	}
@@ -226,6 +227,8 @@ func writeAdoptErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusUnprocessableEntity, codeUnprocessable, "fingerprint mismatch")
 	case errors.Is(err, ErrVersionConflict):
 		writeErr(w, http.StatusConflict, codeVersionConflict, "config version conflict")
+	case errors.Is(err, ErrWrongPassword):
+		writeErr(w, http.StatusUnauthorized, codeUnauthenticated, "wrong takeover password")
 	case errors.Is(err, ErrUnreachable):
 		writeErr(w, http.StatusBadGateway, codeProxyFailed, "target unreachable")
 	default:

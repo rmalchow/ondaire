@@ -40,13 +40,20 @@ type transport struct {
 	// P2.3). "" => unknown / no master yet.
 	master func(groupID string) string
 
+	// live reports gossip liveness for a node id (the G.2 Online flag when no
+	// peer telemetry proxy is wired — without it every non-self member renders
+	// as offline on the dashboard while the cluster screen says online). nil =>
+	// liveness unknown (offline).
+	live func(nodeID string) bool
+
 	// peer is the cross-node seam: media-existence proxy + start/stop fan-out +
 	// per-member status fan-out, all over mTLS. nil => no peers wired (solo); the
 	// ops then treat the local node as authoritative.
 	peer peerProxy
 
-	// listLocal lists this node's playable media; injected so tests need no disk.
-	// nil => read the dataDir via the media source helper.
+	// listLocal lists this node's playable media (flat); injected so tests need
+	// no disk — it also short-circuits the media existence check. nil => read
+	// the dataDir via the media source helper (which browses subdirectories).
 	listLocal func() ([]web.MediaFile, error)
 
 	// statusOf returns this node's live per-group telemetry (render counters /
@@ -61,6 +68,11 @@ type transport struct {
 	// roleEngine is the live group.Engine + inputs resolver the role loop drives
 	// (role.go). nil => no realtime plane wired (runMaster/runFollower no-op).
 	roleEngine *roleEngine
+
+	// hooks is the live subsystem hookState behind roleEngine's engine, kept so
+	// the role loop can sync the doc-driven transport state (media/Playing) after
+	// each engine.Apply (role.go syncTransport). nil in tests that fake the engine.
+	hooks *hookState
 
 	// roleCtx is the current fenced role ctx the hook goroutines start under; it is
 	// republished by applyRoleEngine on every role apply (set by setRoleCtx).
@@ -90,8 +102,9 @@ type peerProxy interface {
 	FanOutTransport(nodeID, groupID string) error
 	// MemberStatus reads nodeID's live per-group telemetry over mTLS (08 §G.2).
 	MemberStatus(nodeID, groupID string) (web.MemberStatus, error)
-	// ListMedia proxies the F.1 list to a peer node.
-	ListMedia(nodeID string) ([]web.MediaFile, error)
+	// ListMedia proxies the F.1 list (one data/-relative folder: files + its
+	// subdirectories) to a peer node.
+	ListMedia(nodeID, path string) ([]web.MediaFile, []string, error)
 	// CalibratePlay fans the A.10b signal out to nodeID for durationSec (F2.1).
 	CalibratePlay(nodeID string, durationSec int) error
 }
@@ -112,23 +125,25 @@ func (n *Node) txn() *transport {
 
 // --- F.1 list ---------------------------------------------------------------
 
-// listMedia backs Deps.ListMedia (08 §F.1). nodeID=="" or ==self lists locally;
-// a peer id proxies over mTLS.
-func (n *Node) listMedia(nodeID string) ([]web.MediaFile, error) {
+// listMedia backs Deps.ListMedia (08 §F.1): one data/-relative folder of the
+// node's media tree (files + subdirectories, so the UI can browse into album
+// folders). nodeID=="" or ==self lists locally; a peer id proxies over mTLS.
+func (n *Node) listMedia(nodeID, path string) ([]web.MediaFile, []string, error) {
 	tx := n.txn()
 	if tx == nil {
-		return nil, nil // skeleton: empty list (handler returns []), not an error
+		return nil, nil, nil // skeleton: empty list (handler returns []), not an error
 	}
 	if nodeID == "" || nodeID == tx.self {
 		if tx.listLocal != nil {
-			return tx.listLocal()
+			files, err := tx.listLocal() // injected flat list (tests)
+			return files, nil, err
 		}
-		return listLocalMedia(tx.dataDir)
+		return listLocalMedia(tx.dataDir, path)
 	}
 	if tx.peer == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return tx.peer.ListMedia(nodeID)
+	return tx.peer.ListMedia(nodeID, path)
 }
 
 // --- F.2 select / F.3 play / F.4 stop ---------------------------------------
@@ -282,26 +297,24 @@ func (n *Node) fanOut(tx *transport, groupID string) error {
 	return nil
 }
 
-// localMediaExists reports whether file is present in this node's media list.
+// localMediaExists reports whether file (a data/-relative path, possibly
+// nested) is present on this node. The injected listLocal seam (tests) compares
+// against the flat list; the disk path stats the sanitized file directly so a
+// nested selection validates without walking the whole tree.
 func localMediaExists(tx *transport, file string) (bool, error) {
-	files, err := n_listLocal(tx)
-	if err != nil {
-		return false, err
-	}
-	for _, f := range files {
-		if f.File == file {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// n_listLocal returns the transport's local media list (injected or disk-read).
-func n_listLocal(tx *transport) ([]web.MediaFile, error) {
 	if tx.listLocal != nil {
-		return tx.listLocal()
+		files, err := tx.listLocal()
+		if err != nil {
+			return false, err
+		}
+		for _, f := range files {
+			if f.File == file {
+				return true, nil
+			}
+		}
+		return false, nil
 	}
-	return listLocalMedia(tx.dataDir)
+	return statLocalMedia(tx.dataDir, file), nil
 }
 
 // --- G.2 group status -------------------------------------------------------
@@ -341,12 +354,15 @@ func (n *Node) groupStatus(groupID string) (web.GroupStatus, error) {
 
 // memberStatus reads one member's live telemetry: locally for self, else over the
 // peer proxy. An unreachable peer is reported Online=false (08 §G.2 per-member).
+// With no proxy wired, Online still reflects gossip liveness (zeroed telemetry)
+// so the dashboard agrees with the cluster screen about who is alive.
 func (n *Node) memberStatus(tx *transport, groupID, nodeID string) web.MemberStatus {
 	if nodeID == tx.self {
 		return localMemberStatus(tx, groupID, nodeID)
 	}
 	if tx.peer == nil {
-		return web.MemberStatus{NodeID: nodeID, Online: false}
+		online := tx.live != nil && tx.live(nodeID)
+		return web.MemberStatus{NodeID: nodeID, Online: online}
 	}
 	ms, err := tx.peer.MemberStatus(nodeID, groupID)
 	if err != nil {

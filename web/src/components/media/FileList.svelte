@@ -18,6 +18,12 @@
     loop: boolean
     busyFile?: string | null // a file whose command is in flight → spinner
     disabled?: boolean // offline master → browse/play disabled
+    // Directory browsing (F.1 path/dirs): the current data/-relative folder,
+    // its subdirectories, and the navigation callback. Optional so existing
+    // call sites (offline last-selection) render flat.
+    path?: string
+    dirs?: string[]
+    onOpenDir?: (path: string) => void
     onPlay: (file: string) => void
     onStop: () => void
     onToggleLoop: (loop: boolean) => void
@@ -30,6 +36,9 @@
     loop,
     busyFile = null,
     disabled = false,
+    path = '',
+    dirs = [],
+    onOpenDir,
     onPlay,
     onStop,
     onToggleLoop,
@@ -50,11 +59,22 @@
   function toggle(next: boolean) {
     if (!disabled) onToggleLoop(next)
   }
+
+  // Directory navigation: enter a subfolder / go one level up. Paths are
+  // slash-separated and data/-relative ("" = root).
+  function enter(dir: string) {
+    if (!disabled && onOpenDir) onOpenDir(path ? `${path}/${dir}` : dir)
+  }
+  function up() {
+    if (disabled || !onOpenDir) return
+    const i = path.lastIndexOf('/')
+    onOpenDir(i >= 0 ? path.slice(0, i) : '')
+  }
 </script>
 
 <div class="filelist">
   <div class="head">
-    <span class="src">{masterNodeName}</span>
+    <span class="src">{masterNodeName}{path ? `/${path}` : ''}</span>
   </div>
 
   <table>
@@ -66,6 +86,24 @@
       </tr>
     </thead>
     <tbody>
+      {#if path}
+        <tr class="dir">
+          <td class="c-file" colspan="3">
+            <button type="button" class="dirlink" {disabled} onclick={up}>
+              ↩ ..
+            </button>
+          </td>
+        </tr>
+      {/if}
+      {#each dirs as d (d)}
+        <tr class="dir">
+          <td class="c-file" colspan="3">
+            <button type="button" class="dirlink" {disabled} onclick={() => enter(d)}>
+              📁 {d}/
+            </button>
+          </td>
+        </tr>
+      {/each}
       {#each files as f (f.file)}
         {@const isSel = f.file === selectedFile}
         {@const isPlaying = isSel && playing}
@@ -172,6 +210,21 @@
   .marker {
     width: 0.8rem;
     color: var(--success-bright);
+  }
+  .dirlink {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .dirlink:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+  .dirlink:disabled {
+    color: var(--text-dim);
+    cursor: default;
   }
   .fname {
     color: var(--text);

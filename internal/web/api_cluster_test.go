@@ -37,7 +37,7 @@ func newClusterServer(spy *clusterSpy) *Server {
 		VerifyAdminPassword: func(pw string) bool { return pw == testPw },
 		ConfigVersion:       func() uint64 { return spy.view.Version },
 		State:               func() ConfigView { return spy.view },
-		Adopt: func(addr, fingerprint, pin, nodeID, name string, force bool) error {
+		Adopt: func(addr, fingerprint, pin, nodeID, name, _ string, force bool) error {
 			spy.adoptCalls = append(spy.adoptCalls, adoptCall{addr, fingerprint, pin, nodeID, name, force})
 			return spy.adoptErr
 		},

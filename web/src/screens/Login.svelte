@@ -15,8 +15,12 @@
     // nodeId/clusterName drive the footer chips; supplied by App from the probe.
     nodeId?: string
     clusterName?: string
+    // onAuthenticated lets App flip its live `authenticated` guard flag BEFORE
+    // the navigate below — without it the route guard still holds the stale
+    // pre-login value and bounces the navigation straight back to /login.
+    onAuthenticated?: () => void
   }
-  let { nodeId, clusterName }: Props = $props()
+  let { nodeId, clusterName, onAuthenticated }: Props = $props()
 
   let password = $state('')
   let keep = $state(false)
@@ -38,8 +42,10 @@
     errorMsg = ''
     try {
       await login(password, keep)
-      // Refresh identity + configVersion, then return to the intended route.
+      // Refresh identity + configVersion, flip App's guard flag, then return to
+      // the intended route (?next) or the Dashboard.
       await refreshSession()
+      onAuthenticated?.()
       navigate(nextRoute())
     } catch (e) {
       if (e instanceof ApiError) {

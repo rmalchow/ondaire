@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/config"
+	"gitlab.rand0m.me/ruben/go/ensemble/internal/discovery"
+	"gitlab.rand0m.me/ruben/go/ensemble/internal/state"
 	"gitlab.rand0m.me/ruben/go/ensemble/internal/web"
 )
 
@@ -196,15 +198,24 @@ func TestDepsSeam(t *testing.T) {
 		t.Errorf("Deps.Paths.Root = %q, want /tmp/x", d.Paths.Root)
 	}
 
-	// Mutating stubs whose owning piece has not landed still return errNotImplemented.
-	for name, fn := range map[string]error{
-		"Adopt":         d.Adopt("addr", "sha256:fp", "pin", "n-id", "name", false),
-		"Forget":        d.Forget("id"),
-		"SetNodeConfig": d.SetNodeConfig("id", web.NodePatch{}),
-	} {
-		if !errors.Is(fn, errNotImplemented) {
-			t.Errorf("Deps.%s err = %v, want errNotImplemented", name, fn)
-		}
+	// SetNodeConfig is WIRED (§D.3): an unknown node id on the current version
+	// surfaces ErrNotFound.
+	if err := d.SetNodeConfig("id", web.NodePatch{}, 0); !errors.Is(err, web.ErrNotFound) {
+		t.Errorf("Deps.SetNodeConfig err = %v, want ErrNotFound", err)
+	}
+	// NodeDetail is WIRED (§D.2): unknown id => ok=false.
+	if _, ok := d.NodeDetail("nope"); ok {
+		t.Error("Deps.NodeDetail(unknown) ok = true, want false")
+	}
+
+	// Adopt is now WIRED (GAP 2): on this unconfigured node (no cluster CA) it
+	// surfaces a not-ready (ErrUnreachable-class) error rather than errNotImplemented.
+	if err := d.Adopt("addr", "sha256:fp", "pin", "n-id", "name", "", false); !errors.Is(err, web.ErrUnreachable) {
+		t.Errorf("Deps.Adopt (unconfigured) err = %v, want ErrUnreachable", err)
+	}
+	// Forget is WIRED (GAP 2): forgetting an unknown node id returns ErrNotFound.
+	if err := d.Forget("nope"); !errors.Is(err, web.ErrNotFound) {
+		t.Errorf("Deps.Forget (unknown id) err = %v, want ErrNotFound", err)
 	}
 
 	// The P4.9 media/transport/status/calibrate closures are wired (media.go), not
@@ -213,7 +224,7 @@ func TestDepsSeam(t *testing.T) {
 	if _, _, err := d.CalibratePlay(web.CalibrateSel{NodeIDs: []string{"x"}}, 1); !errors.Is(err, errNoSession) {
 		t.Errorf("Deps.CalibratePlay (no session) err = %v, want errNoSession", err)
 	}
-	if files, err := d.ListMedia(""); err != nil || files != nil {
+	if files, _, err := d.ListMedia("", ""); err != nil || files != nil {
 		t.Errorf("Deps.ListMedia (no session) = (%v, %v), want (nil, nil)", files, err)
 	}
 	if _, err := d.GroupStatus("g"); !errors.Is(err, web.ErrGroupNotReady) {
@@ -239,4 +250,127 @@ func TestDepsSeam(t *testing.T) {
 
 func reflect_DeepEqualEmpty(v web.ConfigView) bool {
 	return v.Version == 0 && len(v.Nodes) == 0 && len(v.Groups) == 0
+}
+
+// TestConfigViewNonNilSlices pins that the projection never emits nil slices: a
+// genesis NodeRecord has no Addrs, and a JSON null there crashes the SPA's
+// members-table render (`addrs.join` TypeError).
+func TestConfigViewNonNilSlices(t *testing.T) {
+	v := configView(state.ConfigDoc{
+		Nodes:  []state.NodeRecord{{ID: "a"}},
+		Groups: []state.GroupRecord{{ID: "default"}},
+	})
+	n := v.Nodes[0]
+	if n.Addrs == nil || n.Caps.Sinks == nil || n.Caps.EncodeCodecs == nil ||
+		n.Caps.DecodeCodecs == nil || n.Caps.FEC == nil {
+		t.Fatalf("configView emitted nil slices (JSON null): %+v", n)
+	}
+	if v.Groups[0].MemberNodeIDs == nil {
+		t.Fatalf("configView emitted nil MemberNodeIDs: %+v", v.Groups[0])
+	}
+}
+
+// TestStoreDiscoveredControlAddr pins that the discovery cache advertises the
+// target's CONTROL endpoint as host:port. A bare IP would make the adopt flow
+// dial the default control port — on a multi-node host that is a DIFFERENT node
+// (usually ourselves), whose member-closed bootstrap answers with a misleading
+// "foreign cluster" refusal.
+func TestStoreDiscoveredControlAddr(t *testing.T) {
+	n := New(Options{NodeID: "self"})
+	n.storeDiscovered([]discovery.DiscoveredNode{
+		{NodeID: "n-1", Name: "B", Addr: "192.0.2.10", ControlPort: 8444},
+		{NodeID: "n-2", Name: "C", Addr: "192.0.2.11"}, // no ctrl TXT: bare IP fallback
+		{NodeID: "self", Addr: "192.0.2.1", ControlPort: 8443},
+	})
+	d := buildDeps(n).Discovery()
+	if len(d) != 2 {
+		t.Fatalf("discovered = %+v, want 2 rows (self filtered)", d)
+	}
+	if got := d[0].Addrs[0]; got != "192.0.2.10:8444" {
+		t.Errorf("discovered addr = %q, want host:ctrlPort 192.0.2.10:8444", got)
+	}
+	if got := d[1].Addrs[0]; got != "192.0.2.11" {
+		t.Errorf("no-ctrl discovered addr = %q, want bare IP fallback", got)
+	}
+}
+
+// TestSyncSelfAddrs pins the renumber behavior: a node whose host IPs changed
+// rewrites ITS OWN NodeRecord.Addrs (gossiped to peers), never another node's,
+// and never wipes the record when interface info is unavailable.
+func TestSyncSelfAddrs(t *testing.T) {
+	n := New(Options{NodeID: "self"})
+	seed := state.ConfigDoc{Nodes: []state.NodeRecord{
+		{ID: "self", Addrs: []string{"10.0.0.5"}},
+		{ID: "peer", Addrs: []string{"10.0.0.9"}},
+	}}
+	if _, err := n.store.Apply(seed); err != nil {
+		t.Fatal(err)
+	}
+
+	// Renumbered: own record updates, the peer's is untouched, version bumps.
+	n.syncSelfAddrs([]string{"192.168.1.7", "fd00::7"})
+	doc := n.store.Get()
+	if got := doc.Nodes[0].Addrs; len(got) != 2 || got[0] != "192.168.1.7" {
+		t.Fatalf("self addrs = %v, want the new IPs", got)
+	}
+	if got := doc.Nodes[1].Addrs; len(got) != 1 || got[0] != "10.0.0.9" {
+		t.Fatalf("peer addrs touched: %v", got)
+	}
+	v := doc.Version
+
+	// Unchanged set (any order): no write, no version churn.
+	n.syncSelfAddrs([]string{"fd00::7", "192.168.1.7"})
+	if n.store.Get().Version != v {
+		t.Fatal("unchanged addrs must not bump the version")
+	}
+
+	// No interface info: never wipe.
+	n.syncSelfAddrs(nil)
+	if got := n.store.Get().Nodes[0].Addrs; len(got) != 2 {
+		t.Fatalf("empty input wiped addrs: %v", got)
+	}
+}
+
+// TestSyncSelfRender pins the 06 §1.5 last-resort fallback: no usable sink ⇒
+// the node auto-disables its own render (control-only) and marks RenderAutoOff;
+// a sink returning re-enables it; an operator's explicit Render=false is never
+// overridden.
+func TestSyncSelfRender(t *testing.T) {
+	n := New(Options{NodeID: "self"})
+	seed := state.ConfigDoc{Nodes: []state.NodeRecord{
+		{ID: "self", Caps: state.Capabilities{Render: true}},
+	}}
+	if _, err := n.store.Apply(seed); err != nil {
+		t.Fatal(err)
+	}
+
+	// No usable sink: render flips off, marked auto.
+	n.syncSelfRender(false)
+	nr := n.store.Get().Nodes[0]
+	if nr.Caps.Render || !nr.RenderAutoOff {
+		t.Fatalf("after no-sink: %+v, want Render=false RenderAutoOff=true", nr)
+	}
+
+	// Sink back: auto-disabled render recovers.
+	n.syncSelfRender(true)
+	nr = n.store.Get().Nodes[0]
+	if !nr.Caps.Render || nr.RenderAutoOff {
+		t.Fatalf("after recovery: %+v, want Render=true RenderAutoOff=false", nr)
+	}
+
+	// Operator-forced off (no auto flag): NEVER auto re-enabled.
+	doc := n.store.Get()
+	doc.Nodes[0].Caps.Render = false
+	if _, err := n.store.Apply(doc); err != nil {
+		t.Fatal(err)
+	}
+	n.syncSelfRender(true)
+	if n.store.Get().Nodes[0].Caps.Render {
+		t.Fatal("operator-forced Render=false must not be auto re-enabled")
+	}
+	v := n.store.Get().Version
+	n.syncSelfRender(true) // consistent state: no version churn
+	if n.store.Get().Version != v {
+		t.Fatal("consistent render state must not bump the version")
+	}
 }

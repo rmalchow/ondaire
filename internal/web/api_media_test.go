@@ -29,7 +29,7 @@ func newMediaServer(spy *mediaSpy) *Server {
 		VerifyAdminPassword: func(pw string) bool { return pw == testPw },
 		ConfigVersion:       func() uint64 { return spy.view.Version },
 		State:               func() ConfigView { return spy.view },
-		ListMedia:           func(string) ([]MediaFile, error) { return spy.listFiles, spy.listErr },
+		ListMedia:           func(string, string) ([]MediaFile, []string, error) { return spy.listFiles, nil, spy.listErr },
 		SelectMedia: func(g, f string, loop bool, _ uint64) (ConfigView, error) {
 			spy.lastSelect = [3]any{g, f, loop}
 			return spy.view, spy.selectErr

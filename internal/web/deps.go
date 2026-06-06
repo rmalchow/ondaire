@@ -105,6 +105,12 @@ type Deps struct {
 	// Discovery returns the discovered-but-unadopted nodes (mDNS cache read). It
 	// must be cheap (no synchronous browse). Nil => no rows.
 	Discovery func() []Discovered
+	// ClusterInfo returns the cluster's public identity header (name, CA
+	// fingerprint, created, node count, config version) for GET
+	// /api/v1/cluster/info. It NEVER carries ClusterSecrets. Nil => the handler
+	// degrades to a zero/empty cluster (uninitialised node), so the dashboard
+	// still renders.
+	ClusterInfo func() ClusterInfoView
 
 	// --- cluster mutations (proxied node->node over mTLS as needed) ---
 
@@ -117,7 +123,7 @@ type Deps struct {
 	// signature is the C.3 request body (08 §C.3): addr, fingerprint, pin, the
 	// assigned nodeId, an optional display name, and the takeover flag. Nil =>
 	// adoption unavailable (503).
-	Adopt func(addr, fingerprint, pin, nodeID, name string, force bool) error
+	Adopt func(addr, fingerprint, pin, nodeID, name, password string, force bool) error
 	// Forget revokes a node's cert and drops it from the ConfigDoc. Nil =>
 	// unavailable.
 	Forget func(nodeID string) error
@@ -127,9 +133,23 @@ type Deps struct {
 
 	// --- node/group config ---
 
+	// Members returns the cluster-members rows for the discovery snapshot
+	// (C.2): each ConfigDoc node joined with gossip liveness + its live control
+	// endpoint. Nil => the handler degrades to the bare State() records
+	// (online unknown ⇒ false).
+	Members func() []MemberView
+
+	// NodeDetail returns the full §D.2 node projection (the record joined with
+	// cert fingerprint, gossip liveness, group membership and mastership).
+	// ok=false => unknown id (404). Nil => the handler degrades to the bare
+	// State() record.
+	NodeDetail func(nodeID string) (NodeDetailView, bool)
+
 	// SetNodeConfig applies a node config patch (name / channel / hwDelayUs /
-	// gain). Nil => unavailable.
-	SetNodeConfig func(nodeID string, patch NodePatch) error
+	// gain) to the replicated ConfigDoc under optimistic concurrency at ifMatch
+	// (ErrVersionConflict on a stale version, ErrNotFound on an unknown id).
+	// Nil => unavailable.
+	SetNodeConfig func(nodeID string, patch NodePatch, ifMatch uint64) error
 
 	// --- calibration ---
 
@@ -151,9 +171,11 @@ type Deps struct {
 	// ErrUnreachable) so the handlers map a cmd-side failure to its locked status
 	// code without web importing group/stream/state internals.
 
-	// ListMedia lists the playable media on the given node (F.1). nodeID=="" means
-	// this node. Nil => no rows.
-	ListMedia func(nodeID string) ([]MediaFile, error)
+	// ListMedia lists one data/-relative folder of the given node's media tree
+	// (F.1): the playable files (data/-relative slash paths) plus the folder's
+	// subdirectories, so the media browser can descend. nodeID=="" means this
+	// node; path=="" means the data/ root. Nil => no rows.
+	ListMedia func(nodeID, path string) ([]MediaFile, []string, error)
 
 	// SelectMedia writes GroupRecord.Media={file,loop} under If-Match, gossips, and
 	// proxies the existence check to the group master (F.2). ifMatch is the caller's
@@ -247,10 +269,26 @@ type Deps struct {
 	// state / cluster. Nil Bootstrap => the bootstrap surface is unavailable (503).
 	Bootstrap *BootstrapDeps
 
+	// Logf is the optional verbose log sink (bound to the daemon's logf). It lets
+	// the web layer emit operational/audit lines (bootstrap probes, adoption
+	// phases, setup) without importing the daemon. Nil => logging is discarded
+	// (the logf helper below is fully nil-safe), so tests and the bare skeleton
+	// run silently.
+	Logf func(format string, args ...any)
+
 	// NodeID is this node's stable id (P0.1 Identity), supplied by cmd.
 	NodeID string
 	// Paths are the node's resolved data-directory locations (P0.1).
 	Paths config.Paths
+}
+
+// logf emits a line through the Deps.Logf sink if one is wired (nil-safe). It is
+// the single logging entry point for the web layer so handlers never touch a
+// concrete logger.
+func (s *Server) logf(format string, args ...any) {
+	if s.deps.Logf != nil {
+		s.deps.Logf(format, args...)
+	}
 }
 
 // BootstrapDeps is the node-side adoptee seam consumed by the /bootstrap/*
@@ -283,6 +321,15 @@ type BootstrapDeps struct {
 	// Info returns the live GET /bootstrap/info projection (id, fingerprint, state,
 	// epoch, caps). The handler closes the surface (403) when State == "member".
 	Info func() BootstrapInfo
+
+	// VerifyPassword checks a takeover-release password against THIS node's
+	// current cluster admin credential (03 §4: the target cluster's operator
+	// authorizes the release). Nil => takeover release unavailable (503).
+	VerifyPassword func(pw string) bool
+
+	// Release performs the full self-release (wipe cluster state, reopen
+	// bootstrap) after a verified takeover password. Nil => unavailable.
+	Release func() error
 }
 
 // srcAddr extracts the source IP (for the per-source guard) from an http request

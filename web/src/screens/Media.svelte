@@ -109,17 +109,21 @@
   let listPhase = $state<ListPhase>('idle')
   let listErr = $state<{ code: string; message: string } | null>(null)
   let files = $state<MediaFile[]>([])
+  let dirs = $state<string[]>([])
+  let browsePath = $state('') // data/-relative folder being browsed ("" = root)
   let listedFor = $state<string | null>(null) // masterNodeId the list belongs to
 
-  async function loadFiles(nodeId: string | undefined) {
+  async function loadFiles(nodeId: string | undefined, path = browsePath) {
     if (!nodeId) return
     listPhase = 'loading'
     listErr = null
     try {
-      const r = await listMedia(nodeId)
+      const r = await listMedia(nodeId, path)
       files = r.data.files ?? []
+      dirs = r.data.dirs ?? []
+      browsePath = r.data.path ?? path
       listedFor = nodeId
-      listPhase = files.length === 0 ? 'empty' : 'ready'
+      listPhase = files.length === 0 && dirs.length === 0 && !browsePath ? 'empty' : 'ready'
     } catch (e) {
       const err = toErr(e)
       // A 502 proxy_failed means the scoped master is unreachable → offline state
@@ -133,11 +137,21 @@
     }
   }
 
-  // Reload the listing whenever the resolved master changes.
+  // Enter a subfolder (or ".." back up) of the master's data/ tree.
+  function openDir(path: string) {
+    browsePath = path
+    void loadFiles(masterNodeId, path)
+  }
+
+  // Reload the listing whenever the resolved master changes (back at the root —
+  // the browse path belongs to the previous master's tree).
   $effect(() => {
     if (phase !== 'ready') return
     const id = masterNodeId
-    if (id && id !== listedFor) void loadFiles(id)
+    if (id && id !== listedFor) {
+      browsePath = ''
+      void loadFiles(id, '')
+    }
   })
 
   // ---- Live poll lifecycle (now-playing position / playing flag) ------------
@@ -352,6 +366,9 @@
         {:else}
           <FileList
             {files}
+            {dirs}
+            path={browsePath}
+            onOpenDir={openDir}
             masterNodeName={masterLabel}
             {selectedFile}
             {playing}

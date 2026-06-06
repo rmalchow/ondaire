@@ -53,6 +53,10 @@ func (s *Server) registerAPIRoutes() {
 		VerifyKey:   s.verifyAPIKey,
 		NodeAuth:    nodeAuthFromTLS,
 		PublicPaths: public,
+		// session is the SPA's auth-OPTIONAL boot probe (08 §B.4): anonymous gets
+		// 200 {authenticated:false} (render the login form), a credentialed caller
+		// gets its method reflected. The [1] uninitialized 503 gate still applies.
+		ProbePaths: map[string]bool{"/api/v1/auth/session": true},
 	}
 
 	api := http.NewServeMux()
@@ -78,6 +82,14 @@ func (s *Server) registerAPIRoutes() {
 	// Operator-initiated (admin-session), so they add RequireAdminSession on top of
 	// the [0..3] chain like the other mutating endpoints.
 	s.registerClusterRoutes(api)
+
+	// Cluster READ endpoints the dashboard fires after login (cluster/info,
+	// discovery, nodes, groups). Reads only — they sit under the [0..3] chain
+	// (no admin-session requirement) like GET /status.
+	s.registerClusterReadRoutes(api)
+
+	// Per-node detail (08 §D.2 read + §D.3 admin PATCH) for the Node screen.
+	s.registerNodeRoutes(api)
 
 	// Media / transport (08 §F): GET /media + POST /groups/{id}/{media,play,stop}.
 	// Calibration (08 §F2.1): POST /calibrate/play. Group status (08 §G.2): GET

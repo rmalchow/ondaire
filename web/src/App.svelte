@@ -26,7 +26,7 @@
   // are downstream pieces; this scaffold mounts lightweight placeholders so the
   // shell + routing + guard are exercisable end-to-end. (P0.4 §5.)
   import { onMount } from 'svelte'
-  import { getStatus, getSession, ApiError, type StatusProbe } from './lib/api'
+  import { getStatus, getSession, clusterInfoFull, ApiError, type StatusProbe } from './lib/api'
   import { session, configVersion, clusterInfo } from './lib/stores'
   import { authGuard, currentRoute, startRouter } from './lib/router'
   import AppShell from './components/shell/AppShell.svelte'
@@ -71,11 +71,12 @@
       const st = await getStatus()
       probe = st.data
       initialized = st.data.initialized
-      clusterInfo.set(
-        st.data.clusterName
-          ? { name: st.data.clusterName, caFingerprint: st.data.fingerprint }
-          : null,
-      )
+      // Seed the header when the probe carries the identity (bootstrap-open
+      // path); never CLEAR it here — a member node's probe has no clusterName
+      // (bootstrap 403) and must not wipe a value set by setup/login flows.
+      if (st.data.clusterName) {
+        clusterInfo.set({ name: st.data.clusterName, caFingerprint: st.data.fingerprint })
+      }
       if (!initialized) {
         authenticated = false
         installRouter()
@@ -86,6 +87,7 @@
       if (se.data.authenticated) {
         session.set({ authenticated: true, nodeId: se.data.nodeId })
         configVersion.set(se.data.configVersion)
+        seedHeader()
       } else {
         session.set(null)
       }
@@ -107,6 +109,19 @@
     phase = 'ready'
   }
 
+  // seedHeader refreshes the header's cluster identity (name + CA fingerprint)
+  // best-effort once authenticated; failures leave the current value in place.
+  function seedHeader() {
+    void clusterInfoFull()
+      .then(({ data }) =>
+        clusterInfo.set({
+          name: data.cluster.name,
+          caFingerprint: data.cluster.caFingerprint,
+        }),
+      )
+      .catch(() => {})
+  }
+
   onMount(() => {
     void boot()
     return () => disposeRouter?.()
@@ -126,9 +141,19 @@
     <StateMachine state="loading" />
   </div>
 {:else if routeName === 'setup' && probe}
-  <SetupWizard {probe} onAdopted={boot} />
+  <SetupWizard {probe} onComplete={boot} />
 {:else if routeName === 'login'}
-  <Login nodeId={probe?.nodeId} clusterName={$clusterInfo?.name} />
+  <Login
+    nodeId={probe?.nodeId}
+    clusterName={$clusterInfo?.name}
+    onAuthenticated={() => {
+      // Flip the live guard flag so Login's post-login navigate is allowed
+      // through (the guard closure reads this state at call time); Login itself
+      // already refreshed the session/configVersion stores. Re-seed the header.
+      authenticated = true
+      seedHeader()
+    }}
+  />
 {:else if routeName === 'settings'}
   <AppShell>
     <Settings />

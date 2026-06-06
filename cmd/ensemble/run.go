@@ -132,6 +132,7 @@ func buildOptions(set map[string]bool, cfg config.Config, rf *runFlags, paths co
 		UseMDNS:   useMDNS,
 		Device:    device,
 		Log:       log,
+		Version:   version,
 	}
 }
 

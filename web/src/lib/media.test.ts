@@ -43,13 +43,20 @@ beforeEach(() => {
 })
 
 describe('listMedia (08 F.1)', () => {
-  it('issues GET /api/v1/media?nodeId=<id>', async () => {
+  it('issues GET /api/v1/media?node=<id>', async () => {
     const spy = spyFetch({ nodeId: 'n-7', files: [{ file: 'a.mp3' }] })
     const r = await listMedia('n-7')
     const c = lastCall(spy)
     expect(c.method).toBe('GET')
-    expect(c.path).toBe('/api/v1/media?nodeId=n-7')
+    expect(c.path).toBe('/api/v1/media?node=n-7')
     expect(r.data.files).toHaveLength(1)
+  })
+
+  it('threads the browse path: GET /api/v1/media?node=<id>&path=<dir>', async () => {
+    const spy = spyFetch({ nodeId: 'n-7', path: 'albums', dirs: [], files: [] })
+    const r = await listMedia('n-7', 'albums')
+    expect(lastCall(spy).path).toBe('/api/v1/media?node=n-7&path=albums')
+    expect(r.data.path).toBe('albums')
   })
 
   it('omits the query when nodeId is undefined (defaults server-side)', async () => {

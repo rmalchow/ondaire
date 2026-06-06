@@ -33,22 +33,31 @@ func (s *Server) registerMediaRoutes(api *http.ServeMux) {
 	api.Handle("POST /api/v1/groups/{id}/stop", auth.RequireAdminSession(http.HandlerFunc(s.handleStop)))
 }
 
-// mediaListResponse is the F.1 success body: {node, files:[…]}.
+// mediaListResponse is the F.1 success body: {node, path, dirs, files}.
 type mediaListResponse struct {
 	NodeID string      `json:"nodeId"`
+	Path   string      `json:"path"` // the data/-relative folder listed ("" = root)
+	Dirs   []string    `json:"dirs"` // subdirectories of Path (browse targets)
 	Files  []MediaFile `json:"files"`
 }
 
-// handleListMedia serves GET /api/v1/media (08 §F.1): the playable media in a
-// node's data/ folder. An optional ?node=<id> selects a peer (default this node);
-// the closure proxies to the peer over mTLS. An unknown closure => 503.
+// handleListMedia serves GET /api/v1/media (08 §F.1): one folder of a node's
+// data/ media tree — the playable files plus the subdirectories the browser can
+// enter. Optional ?node=<id> (the SPA historically sent ?nodeId= — both are
+// accepted) selects a peer (default this node); ?path=<rel> selects a subfolder
+// (default the root; traversal-sanitized in the closure). Unknown closure => 503.
 func (s *Server) handleListMedia(w http.ResponseWriter, r *http.Request) {
 	if s.deps.ListMedia == nil {
 		writeErr(w, http.StatusServiceUnavailable, codeNotReady, "media listing unavailable")
 		return
 	}
-	node := r.URL.Query().Get("node")
-	files, err := s.deps.ListMedia(node)
+	q := r.URL.Query()
+	node := q.Get("node")
+	if node == "" {
+		node = q.Get("nodeId")
+	}
+	path := q.Get("path")
+	files, dirs, err := s.deps.ListMedia(node, path)
 	if err != nil {
 		writeMediaErr(w, err)
 		return
@@ -56,7 +65,10 @@ func (s *Server) handleListMedia(w http.ResponseWriter, r *http.Request) {
 	if files == nil {
 		files = []MediaFile{}
 	}
-	resp := mediaListResponse{NodeID: node, Files: files}
+	if dirs == nil {
+		dirs = []string{}
+	}
+	resp := mediaListResponse{NodeID: node, Path: path, Dirs: dirs, Files: files}
 	if resp.NodeID == "" {
 		resp.NodeID = s.deps.NodeID
 	}

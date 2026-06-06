@@ -18,6 +18,8 @@
   import type { NodeDetailView } from '../../lib/node'
   import type { Channel } from '../../lib/types'
 
+  import DeviceField from './DeviceField.svelte'
+
   interface Props {
     node: NodeDetailView
     renderEnabled: boolean
@@ -25,6 +27,7 @@
     channel: Channel
     gainDb: number
     hwDelayUs: number
+    device: string
     liveSyncErrorUs: number | null
   }
   let {
@@ -34,12 +37,21 @@
     channel,
     gainDb,
     hwDelayUs,
+    device,
     liveSyncErrorUs,
   }: Props = $props()
 </script>
 
 {#if renderEnabled}
   <div class="audio-out" data-variant="A">
+    <Field
+      label="Audio device"
+      id="audio-device"
+      hint="persisted per-node — empty = auto-select backend default"
+    >
+      <DeviceField value={device} {node} {disabled} />
+    </Field>
+
     <Field label="Channel role" id="channel-role">
       <ChannelRoleRadio value={channel} {disabled} />
     </Field>

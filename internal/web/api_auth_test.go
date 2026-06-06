@@ -148,6 +148,31 @@ func TestLogoutRevokesSession(t *testing.T) {
 	}
 }
 
+// TestSessionAnonymousProbe pins the SPA boot-probe contract (08 §B.4): on an
+// INITIALIZED node, an anonymous GET /auth/session is 200 {authenticated:false}
+// (the login-form signal) — never 401 — and leaks neither the config version
+// nor the node id.
+func TestSessionAnonymousProbe(t *testing.T) {
+	var keys []state.APIKey
+	version := uint64(42)
+	s := New(authTestDeps(&keys, &version), "")
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/auth/session", nil, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("anonymous session: got %d want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	var resp sessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Authenticated || resp.Method != "" || resp.NodeID != "" || resp.ConfigVersion != 0 {
+		t.Fatalf("anonymous session must be the zero probe, got %+v", resp)
+	}
+	if rec.Header().Get("ETag") != "" {
+		t.Fatalf("anonymous session must not leak the config version via ETag")
+	}
+}
+
 func TestSession(t *testing.T) {
 	var keys []state.APIKey
 	version := uint64(42)

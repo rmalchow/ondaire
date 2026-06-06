@@ -20,6 +20,7 @@ function renderRow(props: {
   busy?: boolean
   error?: ApiError
   onAdopt?: (pin: string) => void
+  onTakeover?: (password: string) => void
 }) {
   return render(TableHost, {
     props: {
@@ -29,6 +30,7 @@ function renderRow(props: {
         busy: props.busy ?? false,
         error: props.error,
         onAdopt: props.onAdopt ?? (() => {}),
+        onTakeover: props.onTakeover ?? (() => {}),
       },
     },
   })
@@ -40,16 +42,20 @@ afterEach(() => {
 })
 
 describe('DiscoveredRow', () => {
-  it('renders the PIN input pre-filled with the D9 default "0000"', () => {
+  it('hides the PIN input until Adopt is clicked, then pre-fills the D9 default "0000"', async () => {
     renderRow({})
+    expect(screen.queryByLabelText(/Adoption PIN/i)).toBeNull()
+    await fireEvent.click(screen.getByText('Adopt'))
     const input = screen.getByLabelText(/Adoption PIN/i) as HTMLInputElement
     expect(input.value).toBe('0000')
   })
 
-  it('fires onAdopt with the default PIN value', async () => {
+  it('fires onAdopt with the default PIN value (arm then confirm)', async () => {
     const onAdopt = vi.fn()
     renderRow({ onAdopt })
-    await fireEvent.click(screen.getByText('Adopt'))
+    await fireEvent.click(screen.getByText('Adopt')) // arm: reveals the PIN
+    expect(onAdopt).not.toHaveBeenCalled()
+    await fireEvent.click(screen.getByText('Adopt')) // confirm
     expect(onAdopt).toHaveBeenCalledTimes(1)
     expect(onAdopt).toHaveBeenCalledWith('0000')
   })
@@ -57,6 +63,7 @@ describe('DiscoveredRow', () => {
   it('fires onAdopt with an edited PIN value (sent verbatim)', async () => {
     const onAdopt = vi.fn()
     renderRow({ onAdopt })
+    await fireEvent.click(screen.getByText('Adopt'))
     const input = screen.getByLabelText(/Adoption PIN/i) as HTMLInputElement
     await fireEvent.input(input, { target: { value: '8421' } })
     await fireEvent.click(screen.getByText('Adopt'))
@@ -86,8 +93,14 @@ describe('DiscoveredRow', () => {
     expect(screen.getByText('Adoption rejected.')).toBeTruthy()
   })
 
-  it('a foreign node shows the Takeover-instead hint', () => {
-    renderRow({ node: { ...baseNode, state: 'foreign' } })
-    expect(screen.getByText(/use/i).textContent).toContain('Takeover')
+  it('a foreign node offers Take over and collects the cluster password', async () => {
+    const onTakeover = vi.fn()
+    renderRow({ node: { ...baseNode, state: 'foreign' }, onTakeover })
+    expect(screen.queryByText('Adopt')).toBeNull()
+    await fireEvent.click(screen.getByText('Take over')) // arm: reveals password
+    const pw = screen.getByLabelText(/Current cluster password/i) as HTMLInputElement
+    await fireEvent.input(pw, { target: { value: 'their-admin-password' } })
+    await fireEvent.click(screen.getByText('Take over'))
+    expect(onTakeover).toHaveBeenCalledWith('their-admin-password')
   })
 })

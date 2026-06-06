@@ -78,6 +78,13 @@ type Origin struct {
 	fecID   wire.FECID
 	rate100 uint16
 
+	// loopback, when set, receives every produced chunk's interleaved PCM before
+	// encode — the master's LOCAL render tee (a solo/master node hears its own
+	// stream without a UDP self-loop; doc 01 §4.2 D17 loopback render). The
+	// callee must copy (the buffer is reused); ring.Ring.Write does. Set via
+	// WithLoopback before Run.
+	loopback func(pcm []float32)
+
 	// nowMono stamps the master monotonic instant at source time (05 §5.2.2) and is
 	// the pacer timebase (the master is the reference, so no offset). Injectable for
 	// deterministic tests; defaults to clock.NowMono.
@@ -130,6 +137,15 @@ func New(tl Timeline, c codec.Codec, f fec.FEC, src source.Reader, cfg Config) *
 		ctrl:       streamgen.NewController(cfg.StreamGen),
 	}
 	o.gen.Store(cfg.StreamGen)
+	return o
+}
+
+// WithLoopback registers the local PCM tee fn (the master's own render path).
+// fn is called from the Run goroutine once per produced chunk with the
+// interleaved samples; it must copy them (the chunk buffer is reused). Returns
+// the origin for chaining. Must be set before Run.
+func (o *Origin) WithLoopback(fn func(pcm []float32)) *Origin {
+	o.loopback = fn
 	return o
 }
 
@@ -214,6 +230,9 @@ func (o *Origin) Run(ctx context.Context) error {
 		pcm, err := o.chunk.next()
 		if err != nil {
 			return err
+		}
+		if o.loopback != nil {
+			o.loopback(pcm) // local render tee (solo/master hears its own stream)
 		}
 		payload, err := o.codec.Encode(pcm)
 		if err != nil {

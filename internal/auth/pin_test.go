@@ -11,6 +11,17 @@ func TestVerifyPIN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Tamper the SECOND-TO-LAST hash char with a guaranteed-different value.
+	// Not the last char: the PHC hash is unpadded base64, whose final char
+	// carries unused trailing bits that Go's (non-Strict) decoder ignores — so
+	// several distinct final chars decode to the SAME bytes and a last-char
+	// tamper is flakily a no-op. Every other char is fully significant.
+	ti := len(good) - 2
+	tb := byte('x')
+	if good[ti] == 'x' {
+		tb = 'y'
+	}
+	tampered := good[:ti] + string(tb) + good[ti+1:]
 
 	tests := []struct {
 		name    string
@@ -22,7 +33,7 @@ func TestVerifyPIN(t *testing.T) {
 		{"default empty hash rejects other", "1234", "", false},
 		{"correct against hash", "4271", good, true},
 		{"wrong against hash", "0000", good, false},
-		{"tampered hash", "4271", good[:len(good)-1] + "x", false},
+		{"tampered hash", "4271", tampered, false},
 		{"garbage hash", "4271", "not-a-phc", false},
 	}
 	for _, tc := range tests {

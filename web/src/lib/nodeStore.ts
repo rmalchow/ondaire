@@ -185,6 +185,8 @@ export function minimalPatch(
     out.gainDb = d.gainDb
   if (d.hwDelayUs !== undefined && d.hwDelayUs !== loadedNode.hwDelayUs)
     out.hwDelayUs = d.hwDelayUs
+  if (d.device !== undefined && d.device !== (loadedNode.device ?? ''))
+    out.device = d.device
   if (d.capabilities !== undefined && capsMaskDiffers(loadedNode, d.capabilities))
     out.capabilities = d.capabilities
   return out

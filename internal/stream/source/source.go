@@ -310,6 +310,25 @@ func List(dataDir string) ([]MediaInfo, error) {
 	return out, nil
 }
 
+// SubDirs enumerates the immediate subdirectories of dir (non-recursive,
+// sorted, hidden dot-dirs skipped) so a media browser can descend into a
+// per-album folder layout. An empty dir yields an empty slice and nil error.
+func SubDirs(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		out = append(out, e.Name())
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // probeHeader reads the native rate/channels from a file header cheaply (no full
 // decode). Returns 0,0 on any error so List degrades gracefully.
 func probeHeader(path, format string) (rate, channels int) {

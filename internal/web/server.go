@@ -64,6 +64,10 @@ func (s *Server) registerRoutes() {
 	// auth + the A.12 guard are enforced inside the handlers, not by the chain.
 	s.mux.HandleFunc("GET /bootstrap/info", s.handleBootstrapInfo)
 	s.mux.HandleFunc("POST /bootstrap/adopt", s.handleBootstrapAdopt)
+	// /bootstrap/takeover (03 §4): the password-authorized self-release a foreign
+	// controller drives before re-adopting a node that is already a member of
+	// another cluster. Guarded by the same A.12 brute-force throttle as the PIN.
+	s.mux.HandleFunc("POST /bootstrap/takeover", s.handleBootstrapTakeover)
 	// The 08 §B setup/auth surface under the [0..4] auth chain (routes.go). It is
 	// registered before the asset catch-all so /api/v1/* is handled by the API mux
 	// (the catch-all's /api/ guard only 404s genuinely-unmatched API paths).

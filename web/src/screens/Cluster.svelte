@@ -61,7 +61,16 @@
     }
   }
 
-  onMount(load)
+  onMount(() => {
+    void load()
+    // Near-realtime: quiet 5s refresh while the screen is open (liveness flips,
+    // freshly discovered/adopted nodes) — no loading flicker, errors keep the
+    // last good data (the next write/load surfaces a persistent failure).
+    const t = setInterval(() => {
+      if (phase === 'ready') void refreshCluster().catch(() => {})
+    }, 5000)
+    return () => clearInterval(t)
+  })
 
   // ifMatch reads the freshest config version; a missing version is a guard
   // (412 would otherwise fire) — apiFetch attaches it from this value.
@@ -97,7 +106,15 @@
     setRowBusy(node.nodeId, true)
     try {
       const res = await adopt(
-        { nodeId: node.nodeId, addr: node.addrs[0] ?? '', fingerprint: node.fingerprint, pin },
+        {
+          nodeId: node.nodeId,
+          addr: node.addrs[0] ?? '',
+          fingerprint: node.fingerprint,
+          pin,
+          // Carry the mDNS-advertised friendly name into the NodeRecord so the
+          // members table shows it instead of a bare id.
+          name: node.name,
+        },
         v,
       )
       configVersion.set(res.version)
@@ -110,36 +127,33 @@
     }
   }
 
-  async function onTakeover(node: MemberNode) {
-    const ok = await confirmAction({
-      type: 'takeover',
-      title: 'Take over node',
-      message: "Force re-issue this node's identity into this cluster?",
-      confirmLabel: 'Take over',
-      danger: true,
-    })
-    if (!ok) return
+  // Takeover (C.4): a FOREIGN discovered node is moved into this cluster by
+  // presenting its CURRENT cluster's admin password (03 §4) — the row collects
+  // the password, so no extra confirm dialog.
+  async function onTakeover(node: DiscoveredNode, password: string) {
     const v = ifMatch()
     if (v === null) return
-    setRowBusy(node.id, true)
+    setRowBusy(node.nodeId, true)
     try {
       const res = await takeover(
         {
-          nodeId: node.id,
+          nodeId: node.nodeId,
           addr: node.addrs[0] ?? '',
           fingerprint: node.fingerprint ?? '',
           pin: '0000',
+          password,
+          name: node.name,
           force: true,
         },
         v,
       )
       configVersion.set(res.version)
-      pushToast(`Took over ${node.name || node.id}.`, 'success')
+      pushToast(`Took over ${res.node.name || node.nodeId}.`, 'success')
       await load()
     } catch (e) {
-      handleWriteError(node.id, e)
+      handleWriteError(node.nodeId, e)
     } finally {
-      setRowBusy(node.id, false)
+      setRowBusy(node.nodeId, false)
     }
   }
 
@@ -211,6 +225,7 @@
             busy={$rowState[node.nodeId]?.busy ?? false}
             error={$rowState[node.nodeId]?.error}
             onAdopt={(pin) => onAdopt(node, pin)}
+            onTakeover={(password) => onTakeover(node, password)}
           />
         {/snippet}
       </DiscoveredList>
@@ -223,7 +238,6 @@
             {node}
             busy={$rowState[node.id]?.busy ?? false}
             error={$rowState[node.id]?.error}
-            onTakeover={() => onTakeover(node)}
             onForget={() => onForget(node)}
             onOpenNode={() => openNode(node.id)}
           />

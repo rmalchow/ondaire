@@ -17,8 +17,9 @@ type Backend struct {
 // Backend Name constants — the canonical strings used in Caps.Sinks and in
 // ProbeConfig.Disabled/Prefer (06 §1.1, §1.5).
 const (
-	BackendALSA      = "alsa"
-	BackendExecAplay = "exec:aplay"
+	BackendALSA       = "alsa"
+	BackendALSALib    = "alsalib" // shared-access libasound via dlopen (plugin layer)
+	BackendExecAplay  = "exec:aplay"
 	BackendExecPwPlay = "exec:pw-play"
 )
 
@@ -31,11 +32,14 @@ type ProbeConfig struct {
 	Prefer   []string // preference order; missing names keep the default order after the prefixed ones
 }
 
-// defaultPrefer is the registry's built-in preference order. pw-play is ahead of
-// aplay because a PipeWire box is exactly the case where the precise alsa backend
-// is unavailable (its card is owned by the sound server), so pw-play is the right
-// coarse path there. Operators override via ProbeConfig.Prefer (06 §1.1 note 3).
-var defaultPrefer = []string{BackendALSA, BackendExecPwPlay, BackendExecAplay}
+// defaultPrefer is the registry's built-in preference order. The shared
+// libasound path (alsalib) leads: it is PRECISE (snd_pcm_delay) like the raw hw
+// backend but opens devices through the plugin layer, so it works both on a
+// bare Pi (dmix) AND on a desktop whose card a sound server owns — exactly
+// where raw hw fails. Raw hw is next (no libasound needed), then the coarse
+// exec players (pw-play ahead of aplay for the PipeWire case). Operators
+// override via ProbeConfig.Prefer (06 §1.1 note 3).
+var defaultPrefer = []string{BackendALSALib, BackendALSA, BackendExecPwPlay, BackendExecAplay}
 
 // backendProbe is one compiled-in backend and its real liveness check. probe
 // returns true only when the backend ACTUALLY works on this machine (06 §1.1:
@@ -53,6 +57,11 @@ type backendProbe struct {
 // usable"/error on non-linux via the alsa_stub.go build split.
 func backends() []backendProbe {
 	return []backendProbe{
+		{
+			backend: Backend{Name: BackendALSALib, Precise: true},
+			probe:   probeAlsaLib,
+			open:    newAlsaLibSink,
+		},
 		{
 			backend: Backend{Name: BackendALSA, Precise: true},
 			probe:   probeALSA,
@@ -168,10 +177,20 @@ func MaxRate(cfg ProbeConfig) int {
 const canonicalRate = 48000
 
 // Open opens the first backend in `preferred` that passes a fresh usability
-// check, binding it to `device` but NOT calling Start (the renderer commits
-// rate/channels later via Start). An empty `preferred` falls back to the default
-// preference order. Returns an error if none of `preferred` is usable (06 §1.1).
+// check AND constructs, binding it to `device` but NOT calling Start (the
+// renderer commits rate/channels later via Start). The fallback is graceful at
+// BOTH stages: a backend that probes ok but fails to open (lost a race for the
+// device, library vanished) is skipped and the next one tried — never a hard
+// stop while a later choice would work (06 §1.1). An empty `preferred` falls
+// back to the default preference order. Returns an error only when NONE opens.
 func Open(preferred []string, device string) (AudioSink, error) {
+	s, _, err := OpenNamed(preferred, device)
+	return s, err
+}
+
+// OpenNamed is Open returning also the chosen backend's name (for status/log
+// lines: the operator must be able to SEE which fallback tier is playing).
+func OpenNamed(preferred []string, device string) (AudioSink, string, error) {
 	if len(preferred) == 0 {
 		preferred = defaultPrefer
 	}
@@ -183,20 +202,22 @@ func Open(preferred []string, device string) (AudioSink, error) {
 		known = append(known, bp.backend.Name)
 	}
 
-	var unusable []string
+	var failures []string
 	for _, name := range preferred {
 		bp, ok := byName[name]
 		if !ok {
-			return nil, fmt.Errorf("audio: unknown backend %q (known: %v)", name, known)
+			return nil, "", fmt.Errorf("audio: unknown backend %q (known: %v)", name, known)
 		}
 		if !bp.probe(device) {
-			unusable = append(unusable, name)
+			failures = append(failures, name+": probe failed")
 			continue
 		}
-		return bp.open(device)
+		s, err := bp.open(device)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", name, err))
+			continue
+		}
+		return s, name, nil
 	}
-	if len(unusable) > 0 {
-		return nil, fmt.Errorf("audio: no usable backend among %v (probed-but-unusable: %v)", preferred, unusable)
-	}
-	return nil, fmt.Errorf("audio: no usable backend among %v", preferred)
+	return nil, "", fmt.Errorf("audio: no usable backend among %v (%v)", preferred, failures)
 }

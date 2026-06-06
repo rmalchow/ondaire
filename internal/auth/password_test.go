@@ -16,6 +16,18 @@ func TestHashVerifyPasswordRoundTrip(t *testing.T) {
 		t.Errorf("PHC = %q, want $argon2id$v=19$ prefix", phc)
 	}
 
+	// Tamper the SECOND-TO-LAST hash char with a guaranteed-different value.
+	// Not the last char: the PHC hash is unpadded base64, whose final char
+	// carries unused trailing bits that Go's (non-Strict) decoder ignores — so
+	// several distinct final chars decode to the SAME bytes and a last-char
+	// tamper is flakily a no-op. Every other char is fully significant.
+	ti := len(phc) - 2
+	tb := byte('x')
+	if phc[ti] == 'x' {
+		tb = 'y'
+	}
+	tampered := phc[:ti] + string(tb) + phc[ti+1:]
+
 	tests := []struct {
 		name string
 		pw   string
@@ -25,7 +37,7 @@ func TestHashVerifyPasswordRoundTrip(t *testing.T) {
 		{"correct", pw, phc, true},
 		{"wrong password", "wrong", phc, false},
 		{"empty password", "", phc, false},
-		{"tampered hash", pw, phc[:len(phc)-1] + "x", false},
+		{"tampered hash", pw, tampered, false},
 		{"truncated phc", pw, phc[:len(phc)/2], false},
 		{"empty phc", pw, "", false},
 		{"garbage phc", pw, "not-a-phc-string", false},

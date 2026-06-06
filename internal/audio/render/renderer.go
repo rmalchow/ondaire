@@ -408,43 +408,53 @@ func (r *Renderer) control(ctx context.Context) error {
 // drainFrames is the per-channel frame count pulled per drain pass.
 const drainFrames = 480 // 10 ms @ 48k (FramesPerChunk, A.12)
 
-// drain reads up to one chunk from the ring and writes it to the sink, bumping
-// framesWritten (the coarse-Delay() counter only). On a ring underrun it does NOT
-// push silence (that would advance counters and fight the upcoming reseek) — it
-// bumps underruns and lets the next tick observe the gross error (doc 06 §2.3,
-// §6.4). On an ALSA -EPIPE (sink.ErrUnderrun) it reseeks immediately (doc 06 §6.4).
+// drain moves the ring's buffered audio into the sink in chunk-sized writes
+// until the ring is empty, bumping framesWritten (the coarse-Delay() counter
+// only). The sink's blocking Write provides the playout pacing, so draining
+// everything available never runs ahead of the device — while a single
+// chunk-per-tick drain would cap throughput at half real time (480 frames per
+// 20 ms tick). On a ring underrun it does NOT push silence (that would advance
+// counters and fight the upcoming reseek) — it bumps underruns and lets the next
+// tick observe the gross error (doc 06 §2.3, §6.4). On an ALSA -EPIPE
+// (sink.ErrUnderrun) it reseeks immediately (doc 06 §6.4).
 func (r *Renderer) drain(ctx context.Context) {
-	select {
-	case <-ctx.Done():
-		return
-	default:
-	}
 	p := r.params()
 	outCh := p.Channels
 	buf := make([]float32, drainFrames*outCh)
-	got := r.ring.Read(buf)
-	if got == 0 {
-		// Producer fell behind: the next tick sees playedContent lag past HardErrSamp
-		// and reseeks. Do not push silence here.
-		r.underruns++
-		return
-	}
-	got -= got % outCh
-	if got == 0 {
-		return
-	}
-	n, err := r.sink.Write(buf[:got])
-	if err != nil {
-		if errors.Is(err, sink.ErrUnderrun) {
-			// Device underrun: gross error. The sink already re-PREPAREd the PCM;
-			// reseek to the current want so the loop re-converges from neutral.
-			r.underruns++
-			r.reseekToNow()
+	wrote := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
 		}
-		return
+		got := r.ring.Read(buf)
+		if got == 0 {
+			if !wrote {
+				// Nothing buffered at all this pass: the producer fell behind. The
+				// next tick sees playedContent lag past HardErrSamp and reseeks.
+				r.underruns++
+			}
+			return
+		}
+		got -= got % outCh
+		if got == 0 {
+			return
+		}
+		n, err := r.sink.Write(buf[:got])
+		if err != nil {
+			if errors.Is(err, sink.ErrUnderrun) {
+				// Device underrun: gross error. The sink already re-PREPAREd the PCM;
+				// reseek to the current want so the loop re-converges from neutral.
+				r.underruns++
+				r.reseekToNow()
+			}
+			return
+		}
+		wrote = true
+		r.framesWritten += int64(n / outCh)
+		r.lastWriteAt = time.Now()
 	}
-	r.framesWritten += int64(n / outCh)
-	r.lastWriteAt = time.Now()
 }
 
 // reseekToNow reseeks to the current wantContent (used by the device-underrun path

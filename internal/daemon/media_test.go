@@ -154,7 +154,7 @@ func TestSelectMedia(t *testing.T) {
 			if tc.ifMatchOff {
 				ifMatch += 99
 			}
-			out, err := n.selectMedia("g1", tc.file, false, ifMatch)
+			out, err := n.selectMedia("g1", tc.file, false, "", ifMatch)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("err = %v, want %v", err, tc.wantErr)
@@ -183,7 +183,7 @@ func TestPlayStop(t *testing.T) {
 	t.Run("play with no media => 409 conflict", func(t *testing.T) {
 		doc := docWithGroup("g1", []string{self}, "", false)
 		n, store := newMediaNode(t, self, doc, nil, nil)
-		_, err := n.play("g1", "", false, curVersion(store))
+		_, err := n.play("g1", "", false, "", curVersion(store))
 		if !errors.Is(err, web.ErrNoMedia) {
 			t.Fatalf("err = %v, want ErrNoMedia", err)
 		}
@@ -200,7 +200,7 @@ func TestPlayStop(t *testing.T) {
 		peer := &fakePeer{exists: map[string]bool{"t.mp3": true}}
 		doc := docWithGroup("g1", []string{"node-a", me}, "t.mp3", false)
 		n, store := newMediaNode(t, me, doc, peer, nil)
-		out, err := n.play("g1", "", false, curVersion(store))
+		out, err := n.play("g1", "", false, "", curVersion(store))
 		if err != nil {
 			t.Fatalf("play err: %v", err)
 		}
@@ -216,7 +216,7 @@ func TestPlayStop(t *testing.T) {
 		doc := docWithGroup("g1", []string{self}, "t.mp3", false)
 		n, store := newMediaNode(t, self, doc, nil, nil)
 		_ = store
-		_, err := n.play("g1", "", false, 0) // store version is 1 after seed Apply
+		_, err := n.play("g1", "", false, "", 0) // store version is 1 after seed Apply
 		if !errors.Is(err, web.ErrVersionConflict) {
 			t.Fatalf("err = %v, want ErrVersionConflict", err)
 		}
@@ -406,5 +406,43 @@ func TestListLocalMediaDirs(t *testing.T) {
 	}
 	if statLocalMedia(dir, "nope/none.mp3") {
 		t.Fatal("statLocalMedia(missing) = true, want false")
+	}
+}
+
+// TestSelectMediaSetsMasterHint pins the master-follows-source rule: selecting
+// a file FROM node X's library writes GroupRecord.MasterHint=X, so the election
+// moves mastership to the node that holds (and decodes) the media.
+func TestSelectMediaSetsMasterHint(t *testing.T) {
+	const me = "node-a"
+	peer := &fakePeer{exists: map[string]bool{"b/tune.mp3": true}}
+	doc := docWithGroup("g1", []string{me, "node-b"}, "", false)
+	n, store := newMediaNode(t, me, doc, peer, nil)
+
+	// Selecting node-b's file: existence checked on node-b (the future master),
+	// MasterHint written alongside the media in one Apply.
+	out, err := n.selectMedia("g1", "b/tune.mp3", false, "node-b", curVersion(store))
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	g := groupRecord(out, "g1")
+	if g.Media.File != "b/tune.mp3" || g.MasterHint != "node-b" {
+		t.Fatalf("group = %+v, want media=b/tune.mp3 masterHint=node-b", g)
+	}
+
+	// One-shot play from MY library moves the hint back to me (local existence
+	// check, no peer involved).
+	out, err = n.play("g1", "mine.mp3", true, me, out.Version)
+	if !errors.Is(err, web.ErrMissingOnMaster) {
+		t.Fatalf("play missing local file err = %v, want ErrMissingOnMaster", err)
+	}
+	n2, store2 := newMediaNode(t, me, docWithGroup("g1", []string{me, "node-b"}, "", false), peer,
+		[]web.MediaFile{{File: "mine.mp3"}})
+	out, err = n2.play("g1", "mine.mp3", true, me, curVersion(store2))
+	if err != nil {
+		t.Fatalf("play: %v", err)
+	}
+	g = groupRecord(out, "g1")
+	if g.MasterHint != me || !g.Playing {
+		t.Fatalf("group = %+v, want masterHint=%s playing=true", g, me)
 	}
 }

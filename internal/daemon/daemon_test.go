@@ -374,3 +374,65 @@ func TestSyncSelfRender(t *testing.T) {
 		t.Fatal("consistent render state must not bump the version")
 	}
 }
+
+// TestClaimMasterHint pins the incumbency anchor: the elected master writes
+// itself as the group's MasterHint when the hint is empty or names a DEAD
+// predecessor — and never contests a live hinted node. With the hint anchored,
+// a lower-id joiner no longer steals mastership mid-stream (the A.5 election
+// honors a live hint over the lowest id).
+func TestClaimMasterHint(t *testing.T) {
+	n := New(Options{NodeID: "bbbb"})
+	seed := state.ConfigDoc{
+		Nodes:  []state.NodeRecord{{ID: "bbbb"}},
+		Groups: []state.GroupRecord{{ID: "default", MemberNodeIDs: []string{"bbbb"}}},
+	}
+	if _, err := n.store.Apply(seed); err != nil {
+		t.Fatal(err)
+	}
+	cp := newClusterPlane(n, "default") // no gossip: every peer is "dead"
+
+	// Empty hint: the master claims it.
+	n.claimMasterHint(cp, "bbbb")
+	if got := n.store.Get().Groups[0].MasterHint; got != "bbbb" {
+		t.Fatalf("hint = %q, want bbbb (claimed)", got)
+	}
+	v := n.store.Get().Version
+
+	// Already anchored: no churn.
+	n.claimMasterHint(cp, "bbbb")
+	if n.store.Get().Version != v {
+		t.Fatal("anchored hint must not bump the version")
+	}
+
+	// Not the master / no master: never claims.
+	doc := n.store.Get()
+	doc.Groups[0].MasterHint = "dead-node"
+	if _, err := n.store.Apply(doc); err != nil {
+		t.Fatal(err)
+	}
+	n.claimMasterHint(cp, "someone-else")
+	n.claimMasterHint(cp, "")
+	if got := n.store.Get().Groups[0].MasterHint; got != "dead-node" {
+		t.Fatalf("hint = %q, want dead-node (untouched)", got)
+	}
+
+	// Dead predecessor: the failover master claims over it.
+	n.claimMasterHint(cp, "bbbb")
+	if got := n.store.Get().Groups[0].MasterHint; got != "bbbb" {
+		t.Fatalf("hint = %q, want bbbb (claimed over dead predecessor)", got)
+	}
+
+	// And the anchored hint WINS the election against a lower-id joiner: with
+	// both alive, the hint holds mastership (A.5 hint-over-lowest).
+	el := cluster.NewGroupElections("bbbb")
+	doc = n.store.Get()
+	doc.Groups[0].MemberNodeIDs = []string{"aaaa", "bbbb"}
+	alive := []cluster.Member{
+		{Meta: cluster.Meta{NodeID: "aaaa", GroupID: "default"}},
+		{Meta: cluster.Meta{NodeID: "bbbb", GroupID: "default"}},
+	}
+	el.Recompute(doc, alive)
+	if got := el.Master("default"); got != "bbbb" {
+		t.Fatalf("master = %q, want bbbb (anchored incumbent beats lower-id joiner)", got)
+	}
+}

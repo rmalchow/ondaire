@@ -68,10 +68,14 @@ export async function selectAndPlay(
   file: string,
   loop: boolean,
   ifMatch: number,
+  // sourceNodeId is the node whose data/ holds the file: the server writes it
+  // as the group's MasterHint, so the SOURCE node is elected master and decodes
+  // its own file locally (master-follows-source).
+  sourceNodeId?: string,
 ): Promise<Read<{ group?: GroupRecord; version: number }>> {
   const { data, version } = await apiFetch<GroupWriteBody>(
     `/api/v1/groups/${encodeURIComponent(groupId)}/play`,
-    { method: 'POST', body: { file, loop }, ifMatch },
+    { method: 'POST', body: { file, loop, nodeId: sourceNodeId }, ifMatch },
   )
   return { data: { group: data?.group, version: data?.version ?? version ?? ifMatch }, version }
 }
@@ -84,10 +88,12 @@ export async function setMedia(
   file: string,
   loop: boolean,
   ifMatch: number,
+  // sourceNodeId: see selectAndPlay (master-follows-source).
+  sourceNodeId?: string,
 ): Promise<Read<{ group?: GroupRecord; version: number }>> {
   const { data, version } = await apiFetch<GroupWriteBody>(
     `/api/v1/groups/${encodeURIComponent(groupId)}/media`,
-    { method: 'POST', body: { file, loop }, ifMatch },
+    { method: 'POST', body: { file, loop, nodeId: sourceNodeId }, ifMatch },
   )
   return { data: { group: data?.group, version: data?.version ?? version ?? ifMatch }, version }
 }

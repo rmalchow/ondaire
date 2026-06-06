@@ -113,12 +113,21 @@ func (n *Node) buildTransport(groupID string, cp *clusterPlane) *transport {
 		}
 	}
 
+	var peer peerProxy
+	if cp != nil {
+		// Cross-node control proxy (mTLS, node-cert authenticated): the Media
+		// screen's master-scoped listing + the §F.2 existence check work when the
+		// group master is a PEER (peer_proxy.go).
+		peer = &httpPeer{n: n, cp: cp}
+	}
+
 	tx := &transport{
 		store:   store,
 		self:    n.options.NodeID,
 		dataDir: n.options.Paths.Data,
 		hooks:   hs,
 		live:    live,
+		peer:    peer,
 		master: func(gid string) string {
 			if cp != nil && cp.mem != nil {
 				if m := cp.elections.Master(gid); m != "" {

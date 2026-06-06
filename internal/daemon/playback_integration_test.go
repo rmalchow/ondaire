@@ -250,7 +250,7 @@ func TestTwoNodeSyncedPlayback(t *testing.T) {
 	})
 
 	// === Play the tone on A (one-shot select+play, 08 §F.3). ===
-	if _, err := nodeA.play("default", "sine.mp3", true, nodeA.store.Get().Version); err != nil {
+	if _, err := nodeA.play("default", "sine.mp3", true, "", nodeA.store.Get().Version); err != nil {
 		t.Fatalf("play on A: %v", err)
 	}
 
@@ -346,7 +346,7 @@ func TestSoloPlaybackRendersAudio(t *testing.T) {
 	waitFor(t, 20*time.Second, "node to settle as solo master", func() bool {
 		return node.status().Role == "master"
 	})
-	if _, err := node.play("default", "sine.mp3", true, node.store.Get().Version); err != nil {
+	if _, err := node.play("default", "sine.mp3", true, "", node.store.Get().Version); err != nil {
 		t.Fatalf("play: %v", err)
 	}
 

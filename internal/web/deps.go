@@ -181,12 +181,16 @@ type Deps struct {
 	// proxies the existence check to the group master (F.2). ifMatch is the caller's
 	// If-Match version (the handler has already 412'd a missing header). Returns the
 	// post-write ConfigView.
-	SelectMedia func(groupID, file string, loop bool, ifMatch uint64) (ConfigView, error)
+	// sourceNodeID is the node whose data/ holds the file: selecting it also
+	// writes GroupRecord.MasterHint, so the SOURCE node is elected master and
+	// decodes its own file locally (A.5 soft hint; "" leaves the hint alone).
+	SelectMedia func(groupID, file string, loop bool, sourceNodeID string, ifMatch uint64) (ConfigView, error)
 
 	// Play flips GroupRecord.Playing=true under If-Match, gossips, and fans the
 	// start out to the master (F.3). A non-empty file (optional one-shot select+play)
-	// first selects the media. Returns the post-write ConfigView.
-	Play func(groupID, file string, loop bool, ifMatch uint64) (ConfigView, error)
+	// first selects the media (sourceNodeID as in SelectMedia). Returns the
+	// post-write ConfigView.
+	Play func(groupID, file string, loop bool, sourceNodeID string, ifMatch uint64) (ConfigView, error)
 
 	// Stop flips GroupRecord.Playing=false under If-Match, gossips, and fans the
 	// stop out to the master (F.4). Returns the post-write ConfigView.

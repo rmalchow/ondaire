@@ -337,7 +337,15 @@ func TestTakeoverWithPassword(t *testing.T) {
 	}
 	// Converge B's doc to A's (what gossip anti-entropy does in production): the
 	// admin hash B verifies the takeover password against rides the ConfigDoc.
-	nodeB.store.Merge(nodeA.store.Get(), idA)
+	// B's own background self-syncs (addrs/devices) bump B's version, so a
+	// version TIE would let B keep its sparse doc (the LWW id tiebreak favours
+	// the higher id — B); lift the merged version above B's, as a continuing
+	// gossip exchange eventually would.
+	remote := nodeA.store.Get()
+	if bv := nodeB.store.Get().Version; remote.Version <= bv {
+		remote.Version = bv + 1
+	}
+	nodeB.store.Merge(remote, idA)
 
 	// Cluster 2: C genesis.
 	nodeC := newDataNode(t, dirC, idC, "C")

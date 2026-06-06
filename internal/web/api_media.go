@@ -80,6 +80,9 @@ func (s *Server) handleListMedia(w http.ResponseWriter, r *http.Request) {
 type mediaRequest struct {
 	File string `json:"file"`
 	Loop bool   `json:"loop"`
+	// NodeID is the node whose data/ holds File (the browse scope): it becomes
+	// the group's MasterHint so the source node masters and decodes locally.
+	NodeID string `json:"nodeId"`
 }
 
 // playRequest is the F.3 POST /groups/{id}/play body (08 §F.3): an optional
@@ -87,6 +90,8 @@ type mediaRequest struct {
 type playRequest struct {
 	File string `json:"file,omitempty"`
 	Loop bool   `json:"loop,omitempty"`
+	// NodeID is the file's source node (see mediaRequest.NodeID).
+	NodeID string `json:"nodeId,omitempty"`
 }
 
 // groupOpResponse is the §F.2-F.4 success body: {version, group:{…}}.
@@ -120,7 +125,7 @@ func (s *Server) handleSelectMedia(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, codeInvalidRequest, "file is required")
 		return
 	}
-	cfg, err := s.deps.SelectMedia(groupID, req.File, req.Loop, ifMatch)
+	cfg, err := s.deps.SelectMedia(groupID, req.File, req.Loop, req.NodeID, ifMatch)
 	if err != nil {
 		writeMediaErr(w, err)
 		return
@@ -150,7 +155,7 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSONBody(w, r, &req) {
 		return
 	}
-	cfg, err := s.deps.Play(groupID, req.File, req.Loop, ifMatch)
+	cfg, err := s.deps.Play(groupID, req.File, req.Loop, req.NodeID, ifMatch)
 	if err != nil {
 		writeMediaErr(w, err)
 		return

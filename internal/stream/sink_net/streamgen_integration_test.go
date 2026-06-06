@@ -120,11 +120,13 @@ func TestIntegrationSeekReanchor(t *testing.T) {
 		}
 	}
 	var firstSeekIdx int64 = -1
+	firstSeekPos := -1
 	deadline = time.After(3 * time.Second)
 	for firstSeekIdx < 0 {
 		for i := 0; i < r.Pushes(); i++ {
 			if idx, _ := r.PushAtIdx(i); idx >= seek {
 				firstSeekIdx = idx
+				firstSeekPos = i
 				break
 			}
 		}
@@ -141,10 +143,14 @@ func TestIntegrationSeekReanchor(t *testing.T) {
 	if firstSeekIdx != seek {
 		t.Errorf("first post-seek push idx=%d want %d (crisp re-anchor)", firstSeekIdx, seek)
 	}
-	for i := 0; i < r.Pushes(); i++ {
+	// The re-anchor invariant is ORDER-based: once the seek anchor has pushed,
+	// no pre-seek sample may follow it. (How many pre-seek chunks ship BEFORE
+	// the bump is timing-dependent — the origin keeps pacing 10 ms chunks while
+	// the test observes — so a count/window assertion is inherently flaky.)
+	for i := firstSeekPos + 1; i < r.Pushes(); i++ {
 		idx, _ := r.PushAtIdx(i)
-		if idx > 3*tFrames && idx < seek {
-			t.Errorf("stale push at idx=%d between pre-seek and seek anchor", idx)
+		if idx < seek {
+			t.Errorf("stale pre-seek push at idx=%d AFTER the seek anchor", idx)
 		}
 	}
 }

@@ -662,6 +662,10 @@ func (n *Node) loop(ctx context.Context) error {
 	reapply := func() {
 		master, gen := n.electNow(cp)
 		rs.apply(master, gen)
+		// Anchor incumbency in the agreed doc (plane.go claimMasterHint): the
+		// elected master pins itself as the group's MasterHint so a lower-id
+		// joiner cannot steal the role mid-stream.
+		n.claimMasterHint(cp, master)
 		// Re-Apply the engine on EVERY signal (idempotent reconcile): role changes
 		// are handled inside rs.apply via runMaster/runFollower; unchanged-role
 		// ticks still need the engine to observe doc/clock-health updates.

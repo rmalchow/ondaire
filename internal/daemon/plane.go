@@ -226,6 +226,49 @@ func (n *Node) electNow(cp *clusterPlane) (master string, gen uint64) {
 	return "", 0
 }
 
+// isAlive reports whether nodeID is currently a live gossip member.
+func (cp *clusterPlane) isAlive(nodeID string) bool {
+	if cp.mem == nil {
+		return false
+	}
+	for _, m := range cp.mem.Members() {
+		if m.Meta.NodeID == nodeID {
+			return true
+		}
+	}
+	return false
+}
+
+// claimMasterHint anchors mastership in the AGREED doc (the A.5 soft hint):
+// when this node is the elected master but the hint does not name it (empty
+// legacy doc, or a dead predecessor after failover), it writes itself as the
+// group's MasterHint. Because the hint rides the replicated ConfigDoc, every
+// node applies it identically — incumbency becomes consistent cluster state,
+// not divergent local memory (the split-brain that killed naive stickiness).
+// Mastership thereafter changes ONLY when an operator starts playback from a
+// different source node (master-follows-source rewrites the hint) or this
+// master disappears; a lower-id node joining mid-stream can no longer steal
+// the role (which re-keyed the stream and permanently dropped sync). An ALIVE
+// hinted node is never contested — transient view skew resolves toward it on
+// the next recompute. Best-effort: a version conflict retries next tick.
+func (n *Node) claimMasterHint(cp *clusterPlane, master string) {
+	if cp == nil || master == "" || master != n.options.NodeID {
+		return
+	}
+	doc := n.store.Get()
+	i := indexGroup(doc.Groups, cp.groupID)
+	if i < 0 || doc.Groups[i].MasterHint == master {
+		return
+	}
+	if h := doc.Groups[i].MasterHint; h != "" && cp.isAlive(h) {
+		return // never contest a live hinted node
+	}
+	doc.Groups[i].MasterHint = master
+	if _, err := n.store.Apply(doc); err == nil {
+		logf(n.options.Log, "election: claimed master hint for group %q (anchor against id-steal)", cp.groupID)
+	}
+}
+
 // kickSync triggers an immediate anti-entropy push/pull with every live peer by
 // re-Joining their gossip addresses (memberlist exchanges full delegate state on
 // Join). The periodic push/pull interval is ~30s (A.14.2) — fine for an

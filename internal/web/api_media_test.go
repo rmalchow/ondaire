@@ -30,11 +30,11 @@ func newMediaServer(spy *mediaSpy) *Server {
 		ConfigVersion:       func() uint64 { return spy.view.Version },
 		State:               func() ConfigView { return spy.view },
 		ListMedia:           func(string, string) ([]MediaFile, []string, error) { return spy.listFiles, nil, spy.listErr },
-		SelectMedia: func(g, f string, loop bool, _ uint64) (ConfigView, error) {
+		SelectMedia: func(g, f string, loop bool, _ string, _ uint64) (ConfigView, error) {
 			spy.lastSelect = [3]any{g, f, loop}
 			return spy.view, spy.selectErr
 		},
-		Play: func(g, f string, loop bool, _ uint64) (ConfigView, error) {
+		Play: func(g, f string, loop bool, _ string, _ uint64) (ConfigView, error) {
 			spy.lastPlay = [3]any{g, f, loop}
 			return spy.view, spy.playErr
 		},

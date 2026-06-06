@@ -210,7 +210,9 @@
     busyFile = file
     cmdErr = null
     try {
-      const r = await selectAndPlay(targetGroup.id, file, loop, v)
+      // Master-follows-source: the node whose library is being browsed
+      // (listedFor) becomes the group's master and decodes the file locally.
+      const r = await selectAndPlay(targetGroup.id, file, loop, v, listedFor ?? undefined)
       configVersion.set(r.data.version)
       // Reflect the selection locally so the row flips before the next poll.
       await refreshGroups()
@@ -247,8 +249,8 @@
     cmdErr = null
     try {
       const r = playing
-        ? await selectAndPlay(targetGroup.id, selectedFile, next, v)
-        : await setMedia(targetGroup.id, selectedFile, next, v)
+        ? await selectAndPlay(targetGroup.id, selectedFile, next, v, listedFor ?? undefined)
+        : await setMedia(targetGroup.id, selectedFile, next, v, listedFor ?? undefined)
       configVersion.set(r.data.version)
       await refreshGroups()
     } catch (e) {

@@ -97,7 +97,10 @@ describe('Media screen (09 §7)', () => {
     await waitFor(() => expect(writeSpy).toHaveBeenCalled())
     const [path, init] = writeSpy.mock.calls[0]
     expect(path).toBe('/api/v1/groups/g1/play')
-    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ file: 'jazz-loop.mp3', loop: true })
+    const playBody = JSON.parse((init as RequestInit).body as string)
+    expect(playBody).toMatchObject({ file: 'jazz-loop.mp3', loop: true })
+    // Master-follows-source: the browsed library's node rides along as nodeId.
+    expect(typeof playBody.nodeId).toBe('string')
     expect(((init as RequestInit).headers as Record<string, string>)['If-Match']).toBe('5')
   })
 
@@ -109,7 +112,9 @@ describe('Media screen (09 §7)', () => {
     await waitFor(() => expect(writeSpy).toHaveBeenCalled())
     const [path, init] = writeSpy.mock.calls[0]
     expect(path).toBe('/api/v1/groups/g1/media')
-    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ file: 'jazz-loop.mp3', loop: false })
+    const loopBody = JSON.parse((init as RequestInit).body as string)
+    expect(loopBody).toMatchObject({ file: 'jazz-loop.mp3', loop: false })
+    expect(typeof loopBody.nodeId).toBe('string')
   })
 
   it('empty data/ → empty state', async () => {

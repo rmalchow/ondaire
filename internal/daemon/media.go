@@ -148,9 +148,12 @@ func (n *Node) listMedia(nodeID, path string) ([]web.MediaFile, []string, error)
 
 // --- F.2 select / F.3 play / F.4 stop ---------------------------------------
 
-// selectMedia is the F.2 core: validate the file (.mp3, exists on master), write
-// GroupRecord.Media={file,loop} under If-Match, gossip. Returns the post-write doc.
-func (n *Node) selectMedia(groupID, file string, loop bool, ifMatch uint64) (state.ConfigDoc, error) {
+// selectMedia is the F.2 core: validate the file (.mp3, exists on its SOURCE
+// node), write GroupRecord.Media={file,loop} — and the MasterHint: the node
+// whose data/ holds the file becomes the group's elected master and decodes it
+// locally (A.5 soft hint; selecting a source MOVES mastership). src=="" leaves
+// the hint alone (legacy callers). Under If-Match, gossiped.
+func (n *Node) selectMedia(groupID, file string, loop bool, src string, ifMatch uint64) (state.ConfigDoc, error) {
 	tx := n.txn()
 	if tx == nil {
 		return state.ConfigDoc{}, errNoSession
@@ -158,17 +161,20 @@ func (n *Node) selectMedia(groupID, file string, loop bool, ifMatch uint64) (sta
 	if !isMP3(file) {
 		return state.ConfigDoc{}, web.ErrNotMP3
 	}
-	if err := n.checkMediaOnMaster(tx, groupID, file); err != nil {
+	if err := n.checkMediaOnSource(tx, groupID, src, file); err != nil {
 		return state.ConfigDoc{}, err
 	}
 	return n.applyGroup(tx, groupID, ifMatch, func(g *state.GroupRecord) {
 		g.Media = state.MediaSelection{File: file, Loop: loop}
+		if src != "" {
+			g.MasterHint = src
+		}
 	})
 }
 
 // play is the F.3 core: optional one-shot select, then flip Playing=true under
 // If-Match, gossip, and fan out to the master. Play with no media selected => 409.
-func (n *Node) play(groupID, file string, loop bool, ifMatch uint64) (state.ConfigDoc, error) {
+func (n *Node) play(groupID, file string, loop bool, src string, ifMatch uint64) (state.ConfigDoc, error) {
 	tx := n.txn()
 	if tx == nil {
 		return state.ConfigDoc{}, errNoSession
@@ -179,13 +185,16 @@ func (n *Node) play(groupID, file string, loop bool, ifMatch uint64) (state.Conf
 		if !isMP3(file) {
 			return state.ConfigDoc{}, web.ErrNotMP3
 		}
-		if err := n.checkMediaOnMaster(tx, groupID, file); err != nil {
+		if err := n.checkMediaOnSource(tx, groupID, src, file); err != nil {
 			return state.ConfigDoc{}, err
 		}
 	}
 	doc, err := n.applyGroup(tx, groupID, ifMatch, func(g *state.GroupRecord) {
 		if file != "" {
 			g.Media = state.MediaSelection{File: file, Loop: loop}
+			if src != "" {
+				g.MasterHint = src // the source node masters + decodes locally
+			}
 		}
 		g.Playing = true
 	})
@@ -249,13 +258,14 @@ func (n *Node) applyGroup(tx *transport, groupID string, ifMatch uint64, mutate 
 	return out, nil
 }
 
-// checkMediaOnMaster proxies the media-existence check to the group's master
-// (08 §F.2: master-side decode, so the file must exist THERE). When this node is
-// the master (or no master/peer is wired — solo), it checks locally. A missing
-// file => ErrMissingOnMaster; an unreachable master => ErrUnreachable.
-func (n *Node) checkMediaOnMaster(tx *transport, groupID, file string) error {
-	master := ""
-	if tx.master != nil {
+// checkMediaOnSource verifies the file exists on its SOURCE node — the node
+// that will be hinted master and decode it (08 §F.2 master-side decode). An
+// empty src falls back to the group's current master (legacy callers). When the
+// target is this node (or no peer proxy is wired — solo), the check is local. A
+// missing file => ErrMissingOnMaster; an unreachable target => ErrUnreachable.
+func (n *Node) checkMediaOnSource(tx *transport, groupID, src, file string) error {
+	master := src
+	if master == "" && tx.master != nil {
 		master = tx.master(groupID)
 	}
 	if master == "" || master == tx.self || tx.peer == nil {
@@ -466,14 +476,14 @@ func canRender(tx *transport, nodeID string) bool {
 // --- Deps adapters (state.ConfigDoc -> web.ConfigView) ----------------------
 
 // selectMediaDep adapts selectMedia to the Deps.SelectMedia signature (web view).
-func (n *Node) selectMediaDep(groupID, file string, loop bool, ifMatch uint64) (web.ConfigView, error) {
-	doc, err := n.selectMedia(groupID, file, loop, ifMatch)
+func (n *Node) selectMediaDep(groupID, file string, loop bool, src string, ifMatch uint64) (web.ConfigView, error) {
+	doc, err := n.selectMedia(groupID, file, loop, src, ifMatch)
 	return configView(doc), wrapMediaErr(err)
 }
 
 // playDep adapts play to the Deps.Play signature.
-func (n *Node) playDep(groupID, file string, loop bool, ifMatch uint64) (web.ConfigView, error) {
-	doc, err := n.play(groupID, file, loop, ifMatch)
+func (n *Node) playDep(groupID, file string, loop bool, src string, ifMatch uint64) (web.ConfigView, error) {
+	doc, err := n.play(groupID, file, loop, src, ifMatch)
 	return configView(doc), wrapMediaErr(err)
 }
 

@@ -19,30 +19,37 @@
   let caps = $derived(node.capabilities || {});
   let portList = $derived(ports(node));
 
-  // local draft for the output-delay input; reverts to node.outputDelayMs on
-  // each new snapshot, committed on blur/Enter only (D36).
-  let delayDraft = $state(0);
+  // Output-delay slider (D36), wired exactly like VolumeSlider: the held draft
+  // tracks the thumb while dragging; a fresh snapshot re-syncs once released.
+  // Range 0..150 ms, step 5, debounced ~200ms PATCH {outputDelayMs}. The old
+  // number input reset to 0 mid-edit; this controlled pattern fixes it.
+  let delayDragging = $state(false);
+  let delayMs = $state(0);
   $effect(() => {
-    delayDraft = node.outputDelayMs ?? 0;
+    const v = node.outputDelayMs ?? 0;
+    if (!delayDragging) delayMs = v;
   });
 
-  function commitDelay() {
-    let ms = Math.round(Number(delayDraft));
-    if (Number.isNaN(ms)) {
-      delayDraft = node.outputDelayMs ?? 0;
-      return;
+  let delayTimer = null;
+  function fireDelay() {
+    if (delayTimer) {
+      clearTimeout(delayTimer);
+      delayTimer = null;
     }
-    if (ms > 500) ms = 500;
-    if (ms < -500) ms = -500;
-    if (ms === (node.outputDelayMs ?? 0)) return;
-    setOutputDelay(node.id, ms).catch(() => {});
+    setOutputDelay(node.id, delayMs).catch(() => {});
   }
-
-  function onkey(e) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      e.target.blur();
-    }
+  function onDelayInput(e) {
+    delayDragging = true;
+    delayMs = Number(e.target.value);
+    if (delayTimer) clearTimeout(delayTimer);
+    delayTimer = setTimeout(() => {
+      delayTimer = null;
+      setOutputDelay(node.id, delayMs).catch(() => {});
+    }, 200);
+  }
+  function onDelayCommit() {
+    fireDelay();
+    delayDragging = false;
   }
 
   // output-device selection (D37). List comes from the node's enumeration; the
@@ -119,8 +126,11 @@
       <span class="node-id small" title={node.id}>{shortId(node.id)}</span>
     </div>
     <span class="muted small">
-      {node.alive ? relTime(node.lastSeen) : "offline"}
-      {#if node.stale}<span class="offline"> · stale</span>{/if}
+      {#if node.alive}
+        {relTime(node.lastSeen)}
+      {:else}
+        offline{#if node.stale}<span class="offline"> · stale</span>{/if}
+      {/if}
     </span>
   </div>
 
@@ -166,18 +176,21 @@
     <VolumeSlider value={node.volume} onchange={(v) => setVolume(node.id, v)} />
     <span class="spacer"></span>
     <div class="delay">
-      <label class="row small muted">
-        output delay (ms)
+      <div class="row small muted delay-ctl">
+        <span>output delay</span>
         <input
-          type="number"
-          min="-500"
-          max="500"
-          bind:value={delayDraft}
-          onblur={commitDelay}
-          onkeydown={onkey}
-          style="width: 70px;"
+          type="range"
+          min="0"
+          max="150"
+          step="5"
+          value={delayMs}
+          oninput={onDelayInput}
+          onchange={onDelayCommit}
+          onpointerup={onDelayCommit}
+          aria-label="output delay (ms)"
         />
-      </label>
+        <span class="delay-val">{delayMs} ms</span>
+      </div>
       <div class="hint">
         compensates fixed device latency; causes a brief local restart
       </div>
@@ -209,8 +222,15 @@
   }
   /* address + port lines: breathing room and comfortable wrap spacing */
   .netinfo {
-    padding: 2px 0;
+    padding: 6px 0;
     line-height: 1.6;
+  }
+  /* a touch more separation around the whole netinfo block */
+  .netinfo:first-of-type {
+    margin-top: 2px;
+  }
+  .netinfo + .netinfo {
+    margin-top: -2px;
   }
   .delay {
     display: flex;
@@ -220,6 +240,18 @@
   }
   .delay .hint {
     text-align: right;
+  }
+  .delay-ctl {
+    align-items: center;
+    gap: 6px;
+  }
+  .delay-ctl input[type="range"] {
+    width: 110px;
+  }
+  .delay-val {
+    min-width: 3.2rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
   .device {
     gap: 6px;

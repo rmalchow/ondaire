@@ -206,6 +206,55 @@ func TestPlayOpusEncodes(t *testing.T) {
 	}
 }
 
+// TestRenegotiateDowngradesMidSession: an opus session whose member loses the
+// opus cap mid-session (operator disabled it) is auto-downgraded to pcm by the
+// master's reconcile, bumping gen and rewriting the playback record (D33).
+func TestRenegotiateDowngradesMidSession(t *testing.T) {
+	self := idN(1)
+	member := idN(2)
+	r := newRig(self, 1000, true) // live source: never EOFs during the test
+	r.e.p.Caps = contracts.Capabilities{Codecs: []string{"pcm", "opus"}}
+
+	// 2-node group, both opus-capable, settings=opus.
+	mn := node(self, id.Zero, true)
+	mn.Capabilities.Codecs = []string{"pcm", "opus"}
+	fn := node(member, self, true)
+	fn.Capabilities.Codecs = []string{"pcm", "opus"}
+	g := contracts.GroupView{
+		ID:       self,
+		Master:   self,
+		Members:  []id.ID{self, member},
+		Settings: contracts.GroupSettings{Codec: "opus", Transport: "udp", BufferMs: 150},
+		Playback: contracts.Playback{State: "playing"},
+	}
+	r.cl.setSnap(contracts.Snapshot{Nodes: []contracts.NodeView{mn, fn}, Groups: []contracts.GroupView{g}})
+
+	if err := r.e.Play("song.wav"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if pc, ok := r.cl.lastPlayback(); !ok || pc.pb.Codec != "opus" {
+		t.Fatalf("initial playback codec = %v, want opus", pc.pb.Codec)
+	}
+	genBefore := r.e.gen
+
+	// Member disables opus → its effective caps drop opus. Reconcile must
+	// renegotiate the live session to pcm.
+	fn.Capabilities.Codecs = []string{"pcm"}
+	g.Settings.Codec = "opus" // settings still want opus; membership can't do it
+	r.cl.setSnap(contracts.Snapshot{Nodes: []contracts.NodeView{mn, fn}, Groups: []contracts.GroupView{g}})
+
+	r.e.reconcile()
+
+	if r.e.gen == genBefore {
+		t.Fatalf("gen not bumped on renegotiation (%d)", r.e.gen)
+	}
+	pc, ok := r.cl.lastPlayback()
+	if !ok || pc.pb.Codec != "pcm" {
+		t.Fatalf("playback codec after renegotiation = %v, want pcm", pc.pb.Codec)
+	}
+	r.e.Close()
+}
+
 func TestPlayOpusUnavailableRejected(t *testing.T) {
 	self := idN(1)
 	r := newRig(self, 4, false)

@@ -33,6 +33,7 @@ type Playout struct {
 	toneBusy     bool // a TestTone writer goroutine is active
 	stats        contracts.SinkStats
 	lastPkt      int64 // local-ns of most recent accepted Push (watchdog)
+	devDelayEMA  int64 // smoothed DeviceDelay (ns); subtracted from deadlines
 	lastServoLog int64 // local ns of the last 1Hz servo debug line
 
 	// session servo accounting
@@ -175,6 +176,7 @@ func (p *Playout) Reset(gen uint32) {
 	bufMs := p.bufferNs / 1_000_000
 	delayMs := p.delayOffsetNs / 1_000_000
 	p.mu.Unlock()
+	p.devDelayEMA = 0 // re-learn the device queue for the new session
 	p.log.Info("session armed", "gen", gen, "bufferMs", bufMs, "delayOffsetMs", delayMs)
 	p.signal()
 }
@@ -366,7 +368,14 @@ func (p *Playout) loop() {
 
 		seq := p.jb.nextSeq
 		pts := p.slotPTS(seq)
-		target := pts + p.bufferNs - p.delayOffsetNs
+		// Deadline: pts + buffer − manual calibration − LIVE device queue.
+		// A DelayReporter backend (alsa) tells us exactly how much audio sits
+		// between our Write and the speaker; without subtracting it, a node
+		// whose device queues e.g. 180ms plays 180ms BEHIND a node whose
+		// device doesn't — an audible inter-room offset no rate servo can
+		// correct (rate ≠ phase). Smoothed (EMA) so per-write flutter doesn't
+		// jitter the deadlines.
+		target := pts + p.bufferNs - p.delayOffsetNs - p.devDelayEMA
 		local, ok := p.clock.MasterToLocal(target)
 		if !ok {
 			// unsynced gate (§7)
@@ -383,6 +392,13 @@ func (p *Playout) loop() {
 			dok := false
 			if p.delay != nil {
 				dDelay, dok = p.delay.DeviceDelay()
+			}
+			if dok {
+				if p.devDelayEMA == 0 {
+					p.devDelayEMA = dDelay
+				} else {
+					p.devDelayEMA += (dDelay - p.devDelayEMA) / 16
+				}
 			}
 			ppm := p.servo.observe(p.consumed, mNow, dDelay, dok)
 			p.rs.setRate(ppm)

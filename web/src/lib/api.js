@@ -91,6 +91,9 @@ export function setOutputDelay(nodeId, outputDelayMs) {
 export function setOutputDevice(nodeId, outputDevice) {
   return toasted(req("PATCH", base(nodeId) + "/node", { outputDevice }));
 }
+export function testTone(nodeId) {
+  return toasted(req("POST", base(nodeId) + "/tone"));
+}
 
 // --- group membership (issued ON the acting node) ---
 export function follow(nodeId, targetId) {

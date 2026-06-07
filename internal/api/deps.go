@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/netip"
+	"time"
 
 	"ensemble/internal/contracts"
 	"ensemble/internal/id"
@@ -78,6 +79,9 @@ type NodeConfig interface {
 type SinkControl interface {
 	SetGain(g float64)          // D35: g in [0.0, 1.0]
 	SetDelayOffset(nanos int64) // D36: outputDelayMs converted to ns
+	// TestTone plays a short local tone through the output backend (UI
+	// bring-up aid). Errors when a session is active or a tone is playing.
+	TestTone(d time.Duration) error
 }
 
 // StatusStats is the per-node sink/clock/source snapshot for GET /api/status

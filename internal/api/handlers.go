@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -374,5 +375,20 @@ func (s *Server) handleSetSettings(c echo.Context) error {
 	}
 	s.log.Info("ui mutation", append(auditAttrs(c, "groupSettings"),
 		"codec", body.Codec, "transport", body.Transport, "bufferMs", body.BufferMs)...)
+	return c.NoContent(http.StatusNoContent)
+}
+
+// handleTone plays a 1 s local test tone through this node's output backend —
+// the UI bring-up button. 409 while a session (or another tone) is active,
+// 503 when no sink is wired.
+func (s *Server) handleTone(c echo.Context) error {
+	sink := s.cfg.Sink()
+	if sink == nil {
+		return failCode(c, http.StatusServiceUnavailable, "no_sink", "no output sink on this node")
+	}
+	if err := sink.TestTone(time.Second); err != nil {
+		return failCode(c, http.StatusConflict, "busy", err.Error())
+	}
+	s.log.Info("ui mutation", "verb", "test-tone", "ip", c.RealIP())
 	return c.NoContent(http.StatusNoContent)
 }

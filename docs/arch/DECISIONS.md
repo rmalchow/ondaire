@@ -9,8 +9,9 @@ to S-skeleton.md are marked ✎S.)
 
 ## Decisions
 
-**D1 — node.json holds exactly `{id, name}`.** (A) Everything else (following,
-ports, observations) is runtime/replicated, in-memory only, rebuilt on start.
+**D1 — node.json holds exactly `{id, name, volume, outputDelayMs}`**
+*(amended by D35/D36)*. (A) Everything else (following, ports, observations)
+is runtime/replicated, in-memory only, rebuilt on start.
 
 **D2 — `ENSEMBLE_OUTPUT` is env-only** (`auto` default | `null` | `file:<path>`
 | explicit backend name). No flag. Added to spec §2. (A/E/K)
@@ -74,6 +75,8 @@ not in `contracts`; H and I declare small consumer-side interfaces, Go-style):
 
 ```go
 SetName(string)
+SetVolume(float64)                                   // D35
+SetOutputDelayMs(int)                                // D36
 SetFollowing(id.ID)                                  // Zero = solo
 SetPlayback(group id.ID, p contracts.Playback)
 SetGroupSettings(group id.ID, s contracts.GroupSettings)
@@ -261,6 +264,34 @@ same as pcm (§8.5); keep simple. (D/E/G/H)
 `snd_pcm_delay` implementing `contracts.DelayReporter` (exact servo
 measurement), `snd_pcm_close`. Registers in the backend registry only when
 the probe succeeds; first in `auto` order (D27). (E)
+
+---
+
+## Per-node volume & output-delay calibration (user addition)
+
+**D35 — per-node volume (live software gain)**: `volume` float `0.0–1.0`,
+default `1.0`. Stored in `node.json` (D1 amended: `{id, name, volume,
+outputDelayMs}`) and the replicated node record; set via
+`PATCH /api/node {volume}` (UI proxies to the node). Applied in the sink as
+the last stage before the backend (`Sink.SetGain`): per-sample int16
+multiply, target read atomically each frame, linear ramp over one 20 ms
+frame on change — continuous, no restart. Gain applies on every backend
+(incl. null/file). `0.0` is a real value (muted): absent-field defaulting to
+`1.0` happens **only** in A's presence-aware node.json decode; every layer
+downstream (K→C→E) treats the resolved value as authoritative — no
+zero-means-unset remapping anywhere. Hardware-mixer volume is out of scope
+v1. (A/C/E/I/J)
+
+**D36 — per-node output-delay calibration**: `outputDelayMs` int, default 0,
+clamped ±500. Compensates fixed downstream latency invisible to both the
+servo and `DeviceDelay()` (pipe player internals, DAC/amp/BT chains).
+Playout deadline = `MasterToLocal(pts) + bufferMs − outputDelayMs`. Stored
+like D35; set via `PATCH /api/node {outputDelayMs}`. Sign convention:
+**positive = the device chain is late → write earlier** (the deadline
+subtracts it); `Sink.SetDelayOffset` takes nanoseconds (I converts
+`ms · 1e6`). A live change calls `Sink.SetDelayOffset` → the sink drops its
+buffer and fires the restart hook (RESTART → burst re-prime, §8.6) — the
+user-visible cost is a sub-second blip on that node only. (A/C/E/I/J)
 
 ## Confirmed as designed (no change)
 

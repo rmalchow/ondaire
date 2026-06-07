@@ -8,7 +8,8 @@ stdlib.
 
 Scope: parse flags + env fallbacks (incl. `--source-port` and the dev `--join`
 seed list); resolve `DATA_DIR`/`MEDIA_DIR`; create or load `node.json`
-(immutable `id`, renameable `name`); atomic rename-rewrite; expose the
+(immutable `id`, renameable `name`, plus the persisted live knobs `volume` and
+`outputDelayMs`, D1/D35/D36); atomic rewrite on any field change; expose the
 `ENSEMBLE_OUTPUT` sink override. **Pure and unit-testable** — no
 sockets, no goroutines, no hardware. Capability *detection* (playback-backend
 probe, codec/format lists) is NOT this piece (sink/audio/main own it); config
@@ -26,9 +27,9 @@ Piece A creates and owns `internal/config/*` (replaces the S stub
 
 ```
 internal/config/config.go        Config struct, Load() (flags+env+dirs+node.json), Options, defaults
-internal/config/node.go          NodeFile (id,name), Store: read/create/atomic-rewrite of node.json
+internal/config/node.go          NodeFile (id,name,volume,outputDelayMs), Store: read/create/atomic-rewrite of node.json
 internal/config/config_test.go   flag/env precedence, dir resolution, ENSEMBLE_OUTPUT, --name first-start
-internal/config/node_test.go     create-on-missing immutable id, load, rename atomic rewrite, corrupt-file
+internal/config/node_test.go     create-on-missing immutable id, load (+ volume/delay back-compat defaults), rename/set-volume/set-delay atomic rewrite, clamp, corrupt-file
 ```
 
 No other files. `cmd/ensemble/main.go` (piece K) calls `config.Load` once at
@@ -78,6 +79,11 @@ type Config struct {
 	NodeID   id.ID  // immutable, persisted (§1)
 	NodeName string // current name; first 8 hex of id on first start (§1)
 
+	// Live per-node knobs (from node.json; see Store). Defaulted on a
+	// back-compat load when absent (§1, D35/D36).
+	Volume        float64 // playback software gain 0.0–1.0; default 1.0 (D35)
+	OutputDelayMs int     // hardware latency calibration; default 0, clamped ±500 (D36)
+
 	// Resolved, absolute directories (§2).
 	DataDir  string // e.g. /abs/data; contains node.json
 	MediaDir string // e.g. /abs/data/media; default DataDir/media
@@ -99,7 +105,8 @@ type Config struct {
 	// cluster.Join for hermetic loopback e2e tests; config only carries it.
 	Join []string
 
-	// store is the node.json handle for runtime renames. Unexported; use Rename.
+	// store is the node.json handle for runtime mutations. Unexported; use
+	// Rename / SetVolume / SetOutputDelayMs.
 	store *Store
 }
 
@@ -119,9 +126,11 @@ type Options struct {
 //     DataDir/media,
 //  4. MkdirAll(DataDir, 0o755) and MkdirAll(MediaDir, 0o755),
 //  5. open node.json via Store: on first start create it with a fresh id.New()
-//     and name = --name (if given) else first 8 hex chars of the id; on later
-//     starts load it and IGNORE --name (spec §2: "--name only applied on first
-//     start").
+//     and name = --name (if given) else first 8 hex chars of the id, plus
+//     volume=1.0 and outputDelayMs=0 (defaults, D35/D36); on later starts load
+//     it and IGNORE --name (spec §2: "--name only applied on first start") —
+//     volume/outputDelayMs absent from an older file default to 1.0/0
+//     (back-compat) and the in-range clamp is applied to outputDelayMs.
 //
 // Returns the resolved Config. Errors are fatal to main: bad flag, unwritable
 // data dir, corrupt node.json.
@@ -131,6 +140,19 @@ func Load(opts Options) (*Config, error)
 // c.NodeName on success only. The replicated copy (cluster SetName) is the
 // caller's responsibility (§1/§4); config owns only the on-disk persistence.
 func (c *Config) Rename(name string) error
+
+// SetVolume persists the playback gain (D35) and atomically rewrites node.json,
+// updating c.Volume on success only. v is clamped to [0.0, 1.0] before write.
+// The replicated copy (cluster.SetVolume) and the live sink gain
+// (Sink.SetGain) are the caller's (I); config owns only on-disk persistence.
+func (c *Config) SetVolume(v float64) error
+
+// SetOutputDelayMs persists the output-delay calibration (D36) and atomically
+// rewrites node.json, updating c.OutputDelayMs on success only. ms is clamped
+// to [-500, 500] before write. The replicated copy (cluster.SetOutputDelayMs)
+// and the live sink re-anchor (Sink.SetDelayOffset) are the caller's (I);
+// config owns only on-disk persistence.
+func (c *Config) SetOutputDelayMs(ms int) error
 
 // NodeFilePath returns DataDir/node.json (for logs / tests).
 func (c *Config) NodeFilePath() string
@@ -178,13 +200,15 @@ import (
 // nodeFileName is the fixed basename inside DataDir.
 const nodeFileName = "node.json"
 
-// NodeFile is the on-disk identity document (§1). Exactly these two fields are
-// persisted; everything else in the node record (addrs, ports, caps, following,
-// observed) is runtime/replicated state owned by the cluster piece (C), NOT
-// stored here.
+// NodeFile is the on-disk identity document (§1, D1). Exactly these four fields
+// are persisted; everything else in the node record (addrs, ports, caps,
+// following, observed) is runtime/replicated state owned by the cluster piece
+// (C), NOT stored here.
 type NodeFile struct {
-	ID   id.ID  `json:"id"`   // immutable, 32-hex (id.ID TextMarshaler)
-	Name string `json:"name"` // renameable
+	ID            id.ID   `json:"id"`            // immutable, 32-hex (id.ID TextMarshaler)
+	Name          string  `json:"name"`          // renameable
+	Volume        float64 `json:"volume"`        // playback gain 0.0–1.0, default 1.0 (D35)
+	OutputDelayMs int     `json:"outputDelayMs"` // hardware latency calibration, default 0, clamp ±500 (D36)
 }
 
 // Store owns a single node.json file. One Store per node. Methods are safe for
@@ -199,18 +223,37 @@ type Store struct {
 func NewStore(dataDir string) *Store
 
 // LoadOrCreate reads node.json. If it does not exist, it creates one with a
-// fresh id.New() and name = initialName (or first 8 hex of the id when
-// initialName == ""). If it exists, it is parsed and returned UNCHANGED — the
-// id is immutable (§1) and initialName is ignored on an existing file. A file
-// that exists but is empty/corrupt/has a malformed id is an error (we never
-// silently regenerate an id, which would orphan the node's cluster identity).
+// fresh id.New(), name = initialName (or first 8 hex of the id when
+// initialName == ""), volume = 1.0 and outputDelayMs = 0 (D35/D36 defaults).
+// If it exists, it is parsed and returned with the id+name UNCHANGED — the id
+// is immutable (§1) and initialName is ignored on an existing file — while a
+// MISSING volume defaults to 1.0 and a missing outputDelayMs to 0 (back-compat
+// for files written before D35/D36), and outputDelayMs is clamped to ±500 on
+// load (a hand-edited out-of-range value is corrected, not rejected). Because
+// the JSON zero value of `volume` is 0.0 (a legitimate, if silent, setting),
+// the parse uses a presence-aware decode (pointer field / json.RawMessage probe)
+// to tell "absent" (→ 1.0) from "explicitly 0.0". A file that exists but is
+// empty/corrupt/has a malformed id is an error (we never silently regenerate an
+// id, which would orphan the node's cluster identity).
 func (s *Store) LoadOrCreate(initialName string) (NodeFile, error)
 
-// Rename writes a new name while preserving the immutable id, via atomic
-// replace (write temp in same dir, fsync, os.Rename over node.json). The id
-// argument MUST equal the persisted id; a mismatch is ErrIDImmutable (defensive:
-// rename never changes identity). Returns the written NodeFile.
+// Rename writes a new name while preserving the immutable id, volume, and
+// outputDelayMs, via the atomic replace below. The id argument MUST equal the
+// persisted id; a mismatch is ErrIDImmutable (defensive: rename never changes
+// identity). Returns the written NodeFile.
 func (s *Store) Rename(nodeID id.ID, name string) (NodeFile, error)
+
+// SetVolume writes a new volume while preserving id/name/outputDelayMs, via the
+// same atomic replace. The id argument MUST equal the persisted id
+// (ErrIDImmutable on mismatch). vol is clamped to [0.0, 1.0] before write (D35).
+// Returns the written NodeFile.
+func (s *Store) SetVolume(nodeID id.ID, vol float64) (NodeFile, error)
+
+// SetOutputDelayMs writes a new outputDelayMs while preserving id/name/volume,
+// via the same atomic replace. The id argument MUST equal the persisted id
+// (ErrIDImmutable on mismatch). ms is clamped to [-500, 500] before write (D36).
+// Returns the written NodeFile.
+func (s *Store) SetOutputDelayMs(nodeID id.ID, ms int) (NodeFile, error)
 
 // Path returns the absolute node.json path.
 func (s *Store) Path() string
@@ -224,7 +267,11 @@ var (
 `defaultName(id.ID)` helper (unexported): `id.String()[:8]` — first 8 hex chars
 (§1).
 
-Atomic-rewrite detail (the spec's "atomic rewrite on rename", §1/§2): write to
+Atomic-rewrite detail (the spec's "atomic rewrite on change", §1/§2): all three
+mutators (`Rename`, `SetVolume`, `SetOutputDelayMs`) funnel through one private
+`writeAtomic(nodeID, mutate func(*NodeFile))` helper — it re-reads (or holds) the
+current `NodeFile`, asserts the id matches (`ErrIDImmutable`), applies the
+single-field `mutate` (with the per-field clamp), then writes to
 `node.json.tmp-<rand>` in the **same directory** (so `os.Rename` is on one
 filesystem), `f.Sync()` then `f.Close()`, then `os.Rename(tmp, path)`. On any
 error, `os.Remove(tmp)` best-effort and return the error; the old file is
@@ -250,11 +297,13 @@ A is leaf code.
 
 ### Steady state
 - No state in this package after `Load` returns, except the `*Store` path.
-- `cfg.Rename(name)` is called by the API rename handler (`PATCH /api/node`,
-  §9.1). It does an atomic file rewrite and updates `cfg.NodeName`. The API then
-  also calls `cluster.SetName` to replicate (§4); ordering is the API's choice,
-  but persist-then-replicate is recommended so a crash never replicates a name
-  that isn't on disk.
+- `cfg.Rename(name)` / `cfg.SetVolume(v)` / `cfg.SetOutputDelayMs(ms)` are
+  called by the API `PATCH /api/node` handler (§9.1). Each does an atomic file
+  rewrite and updates the matching `cfg` field. The API then also calls the
+  paired `cluster.SetName` / `SetVolume` / `SetOutputDelayMs` to replicate (§4)
+  and applies the live effect (`Sink.SetGain` / `Sink.SetDelayOffset`, D35/D36);
+  ordering is the API's choice, but persist-then-replicate is recommended so a
+  crash never replicates a value that isn't on disk.
 
 ### Shutdown
 - Nothing to close. `Config` holds no fds, no sockets, no goroutines.
@@ -275,9 +324,16 @@ A is leaf code.
   `os.Stat`. Missing → create with `id.New()` and `--name`-or-default. Present →
   load and **ignore `--name`** (spec §2: "only applied on first start"). The id
   is never regenerated for an existing file.
-- **Immutable id (§1):** `Rename` re-reads (or is given) the persisted id and
-  refuses to change it (`ErrIDImmutable`); only `name` is written. No API path
-  can mutate the id.
+- **Immutable id (§1):** every mutator (`Rename`/`SetVolume`/`SetOutputDelayMs`)
+  re-reads (or is given) the persisted id and refuses to change it
+  (`ErrIDImmutable`); only the one targeted field is written, all others
+  preserved. No API path can mutate the id.
+- **Volume/outputDelayMs back-compat & clamp (§1, D35/D36):** a `node.json`
+  written before D35/D36 has no `volume`/`outputDelayMs` keys; `LoadOrCreate`
+  defaults them to `1.0`/`0` (absence detected presence-aware so an explicit
+  `0.0` volume survives). `volume` is clamped to `[0.0, 1.0]` and
+  `outputDelayMs` to `[-500, 500]` on both load and every write — a malformed
+  or out-of-range hand edit is corrected, never fatal (unlike a bad id).
 - **Corrupt / empty node.json (§1):** parse failure, missing/blank `id`, or an
   id that fails `id.Parse` → `ErrCorruptNodeFile`, fatal. We never silently mint
   a new id over a corrupt file, because that would split the node's cluster
@@ -302,9 +358,11 @@ A is leaf code.
   `nil` (not empty-non-nil). Config does **not** parse or dial `host:port` — it
   carries the raw entries; `cluster.Join` (C) resolves them. mDNS remains the
   production discovery path.
-- **Atomic rename failure:** temp write or `os.Rename` error leaves the old
-  `node.json` intact and `cfg.NodeName` unchanged; the error propagates to the
-  API caller which returns 5xx. Best-effort `os.Remove` of the temp file.
+- **Atomic write failure:** temp write or `os.Rename` error leaves the old
+  `node.json` intact and the in-memory `cfg` field (NodeName / Volume /
+  OutputDelayMs) unchanged; the error propagates to the API caller which returns
+  5xx. Best-effort `os.Remove` of the temp file. (Applies equally to Rename,
+  SetVolume, SetOutputDelayMs — they share `writeAtomic`.)
 - **Relative paths in argv:** resolved against the process CWD at `Load` time
   (documented; main does not `chdir`). Tests pass absolute temp dirs.
 - **Path traversal:** out of scope here — `node.json` basename is fixed;
@@ -320,7 +378,15 @@ explicit `Args` slice — no real env, no real flags, no network, no hardware.
 
 `internal/config/node_test.go`
 - `TestLoadOrCreateMintsIDOnMissing` — empty dir → file created, id non-zero,
-  name == first 8 hex of id when initialName == "".
+  name == first 8 hex of id when initialName == "", volume == 1.0,
+  outputDelayMs == 0 (D35/D36 defaults).
+- `TestLoadOrCreateDefaultsVolumeAndDelayOnLegacyFile` — write
+  `{"id":…,"name":"x"}` (no volume/outputDelayMs) → loads with volume 1.0,
+  outputDelayMs 0 (back-compat).
+- `TestLoadOrCreateKeepsExplicitZeroVolume` — file with `"volume":0` →
+  loads 0.0, not defaulted to 1.0 (presence-aware decode).
+- `TestLoadOrCreateClampsDelayOnLoad` — file with `"outputDelayMs":9000` →
+  loaded as 500 (clamp on load).
 - `TestLoadOrCreateUsesInitialName` — missing file + initialName "kitchen" →
   name "kitchen", id minted.
 - `TestLoadOrCreateLoadsExisting` — write a NodeFile, reload → same id+name,
@@ -339,6 +405,16 @@ explicit `Args` slice — no real env, no real flags, no network, no hardware.
   ErrIDImmutable, file unchanged.
 - `TestRenameOverwritesNotAppends` — two renames → file contains exactly one
   JSON object (no concatenation / tearing).
+- `TestRenamePreservesVolumeAndDelay` — set volume 0.4 + delay 120, then Rename
+  → reload shows new name with volume 0.4, delay 120 intact.
+- `TestSetVolumePersistsAndPreservesOthers` — SetVolume(0.5) → reload shows
+  volume 0.5, id+name+outputDelayMs unchanged.
+- `TestSetVolumeClamps` — SetVolume(1.7) → persisted 1.0; SetVolume(-0.2) → 0.0.
+- `TestSetOutputDelayMsPersistsAndPreservesOthers` — SetOutputDelayMs(-80) →
+  reload shows -80, id+name+volume unchanged.
+- `TestSetOutputDelayMsClamps` — SetOutputDelayMs(800) → 500; (-800) → -500.
+- `TestSetVolumeRejectsIDMismatch` / `TestSetOutputDelayMsRejectsIDMismatch` —
+  wrong id arg → ErrIDImmutable, file unchanged.
 
 `internal/config/config_test.go`
 - `TestLoadDefaults` — empty Args, empty env → default ports (incl. SourcePort
@@ -371,6 +447,13 @@ explicit `Args` slice — no real env, no real flags, no network, no hardware.
   MkdirAll error (skip if running as root).
 - `TestConfigRenamePersistsAndUpdatesField` — Load, cfg.Rename("hall") →
   cfg.NodeName "hall" and reload from disk shows "hall".
+- `TestConfigLoadDefaultsVolumeAndDelay` — first Load → cfg.Volume == 1.0,
+  cfg.OutputDelayMs == 0.
+- `TestConfigSetVolumePersistsAndUpdatesField` — Load, cfg.SetVolume(0.6) →
+  cfg.Volume 0.6 and reload shows 0.6; out-of-range clamps.
+- `TestConfigSetOutputDelayMsPersistsAndUpdatesField` — Load,
+  cfg.SetOutputDelayMs(150) → cfg.OutputDelayMs 150 and reload shows 150;
+  out-of-range clamps.
 
 ---
 
@@ -382,10 +465,13 @@ explicit `Args` slice — no real env, no real flags, no network, no hardware.
 
 | Produced for downstream | Consumer |
 |---|---|
-| `Config{NodeID, NodeName, DataDir, MediaDir, HTTPPort, StreamPort, SourcePort, GossipPort, Output, Join}` | K (main) wiring |
+| `Config{NodeID, NodeName, Volume, OutputDelayMs, DataDir, MediaDir, HTTPPort, StreamPort, SourcePort, GossipPort, Output, Join}` | K (main) wiring |
 | `SourcePort` | K (netx bind-or-increment for the audio source, §8.7) |
 | `Join` | K → `cluster.Join` (dev seed list, §2/D20) |
 | `Config.Rename` | I (API `PATCH /api/node`), paired with `cluster.SetName` |
+| `Config.SetVolume` | I (API `PATCH /api/node {volume}`), paired with `cluster.SetVolume` + `Sink.SetGain` (D35) |
+| `Config.SetOutputDelayMs` | I (API `PATCH /api/node {outputDelayMs}`), paired with `cluster.SetOutputDelayMs` + `Sink.SetDelayOffset` (D36) |
+| `Volume` / `OutputDelayMs` | C (cluster seeds own node record, §4) and E (sink boot gain/delay) |
 | `MediaDir` | I (media listing, §6) |
 | `Output` | E (sink backend select, §8.5) |
 | `NodeID`/`NodeName` | C (cluster seeds own node record, §4) |

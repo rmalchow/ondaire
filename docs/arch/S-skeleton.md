@@ -379,6 +379,15 @@ type Sink interface {
 	Reset(gen uint32)
 	// Stats returns a snapshot of playout counters for /api/status (§9.1).
 	Stats() SinkStats
+	// SetGain sets the live software volume (0.0–1.0, D35). Applied with a
+	// one-frame linear ramp; safe from any goroutine, takes effect on the
+	// next frame, no restart.
+	SetGain(g float64)
+	// SetDelayOffset sets the node's output-delay calibration (D36) in
+	// nanoseconds (positive = device chain is late, write earlier). The sink
+	// re-anchors playout: it discards buffered frames and fires the restart
+	// hook (RESTART → re-prime), a sub-second interruption.
+	SetDelayOffset(nanos int64)
 	// Close stops the playout loop and the underlying Backend.
 	Close() error
 }
@@ -448,6 +457,8 @@ type Snapshot struct {
 type NodeView struct {
 	ID           id.ID             `json:"id"`
 	Name         string            `json:"name"`
+	Volume       float64           `json:"volume"`        // 0.0–1.0 software gain (D35)
+	OutputDelayMs int              `json:"outputDelayMs"` // hardware latency calibration (D36)
 	Addrs        []string          `json:"addrs"`        // self-reported CIDRs
 	HTTPPort     int               `json:"httpPort"`
 	StreamPort   int               `json:"streamPort"`

@@ -43,9 +43,9 @@ internal/cluster/doc.go          Document & record types (NodeRecord, GroupName,
                                  GroupSettingsRecord), the LWW merge rules, version/tie-break helpers.
 internal/cluster/store.go        StateStore impl: Self, Snapshot (resolve doc+liveness→DTOs),
                                  group derivation, DialCandidates, observed-IP read side.
-internal/cluster/setters.go      Own-record mutators: SetName, SetFollowing, SetPlayback,
-                                 SetGroupName, SetGroupSettings, Observe — each bumps version +
-                                 broadcasts + notifies.
+internal/cluster/setters.go      Own-record mutators: SetName, SetVolume, SetOutputDelayMs,
+                                 SetFollowing, SetPlayback, SetGroupName, SetGroupSettings,
+                                 Observe — each bumps version + broadcasts + notifies.
 internal/cluster/delegate.go     memberlist Delegate (NodeMeta, LocalState, MergeRemoteState,
                                  NotifyMsg) and EventDelegate (NotifyJoin/Leave/Update) +
                                  the TransmitLimitedQueue broadcast.
@@ -58,7 +58,7 @@ internal/cluster/liveness.go     alive/dead + lastSeen map fed by EventDelegate,
 internal/cluster/cluster_test.go     lifecycle, two-node convergence over loopback, Join from Peer chan.
 internal/cluster/doc_test.go         merge rules: version LWW, tie-break, monotonicity, purge.
 internal/cluster/store_test.go       snapshot resolution, derivation (XOR id, master/members), DialCandidates.
-internal/cluster/setters_test.go     each setter bumps version + broadcasts + notifies; Observe map.
+internal/cluster/setters_test.go     each setter (incl. SetVolume/SetOutputDelayMs) bumps version + broadcasts + notifies; round-trip in snapshot; Observe map.
 internal/cluster/delegate_test.go    LocalState/MergeRemoteState round-trip, NotifyMsg merge, event liveness.
 ```
 
@@ -120,6 +120,8 @@ type Cluster struct {
 type Config struct {
 	Self       id.ID                 // immutable node id (from config piece A)
 	Name       string                // initial display name (own record seed)
+	Volume     float64               // initial playback gain seed (config A; D35)
+	OutputDelayMs int                // initial output-delay calibration seed (config A; D36)
 	Caps       contracts.Capabilities
 	Addrs      []string              // self-reported interface CIDRs (netx.InterfaceCIDRs)
 	HTTPPort   int
@@ -157,6 +159,8 @@ func (c *Cluster) Self() id.ID
 // Snapshot returns a deep-copied, resolved, JSON-ready view: every node record
 // joined with liveness + staleness, plus derived groups (§5). Safe for
 // concurrent callers; holds the mutex only for the copy, derives outside it.
+// The NodeRecord→NodeView projection copies Volume and OutputDelayMs verbatim
+// (D35/D36) so the UI renders the slider/field from the snapshot.
 func (c *Cluster) Snapshot() contracts.Snapshot
 
 // Subscribe returns a coalesced change channel (buffer 1, non-blocking sends).
@@ -193,6 +197,19 @@ unchanged, to avoid gossip churn.
 // SetName renames this node (§1, PATCH /api/node). Persisted by piece A
 // separately; here it only updates+broadcasts the replicated copy.
 func (c *Cluster) SetName(name string)
+
+// SetVolume sets this node's playback gain (§1/§4, D35; PATCH /api/node
+// {volume}). Persisted by piece A and applied live in the sink (Sink.SetGain)
+// separately; here it only updates+broadcasts the replicated copy. Caller (I)
+// clamps to [0.0, 1.0]; C stores verbatim. No-op when unchanged.
+func (c *Cluster) SetVolume(v float64)
+
+// SetOutputDelayMs sets this node's output-delay calibration (§1/§4, D36;
+// PATCH /api/node {outputDelayMs}). Persisted by piece A and applied live in
+// the sink (Sink.SetDelayOffset) separately; here it only updates+broadcasts
+// the replicated copy. Caller (I) clamps to [-500, 500]; C stores verbatim.
+// No-op when unchanged.
+func (c *Cluster) SetOutputDelayMs(ms int)
 
 // SetFollowing sets this node's following target (§5). id.Zero == solo master.
 func (c *Cluster) SetFollowing(target id.ID)
@@ -248,8 +265,10 @@ type Document struct {
 
 // NodeRecord — owned and only ever written by the node it describes (§4).
 type NodeRecord struct {
-	ID         id.ID                  `json:"id"`
-	Name       string                 `json:"name"`
+	ID            id.ID               `json:"id"`
+	Name          string              `json:"name"`
+	Volume        float64             `json:"volume"`        // playback gain 0.0–1.0 (D35)
+	OutputDelayMs int                 `json:"outputDelayMs"` // hardware latency calibration, ±500 (D36)
 	Addrs      []string               `json:"addrs"` // self-reported CIDRs (§3.1)
 	HTTPPort   int                    `json:"httpPort"`
 	StreamPort int                    `json:"streamPort"`
@@ -434,8 +453,9 @@ func (l *liveness) snapshot() (alive map[id.ID]bool, seen map[id.ID]int64)
 1. `New(cfg)`:
    - validate cfg (self non-zero, ports > 0).
    - build `Document` with our own `NodeRecord` at `Version: 1`,
-     `UpdatedAt: now`, seeded from cfg (name, caps, addrs, ports, Following=Zero,
-     empty Observed).
+     `UpdatedAt: now`, seeded from cfg (name, volume, outputDelayMs, caps, addrs,
+     ports, Following=Zero, empty Observed). cfg.Volume/OutputDelayMs come from
+     config A's persisted node.json (defaults 1.0/0).
    - build `memberlist.Config` (`DefaultLANConfig()` tuned): `Name =
      self.String()`, `BindAddr = cfg.BindAddr`, `BindPort = cfg.GossipPort`,
      `AdvertisePort = cfg.GossipPort`, `Delegate = deleg`, `Events = deleg`,
@@ -677,6 +697,14 @@ Recorded as a contractConcern since it touches the C/H boundary.
 `internal/cluster/setters_test.go`
 - `TestSetNameBumpsVersionAndBroadcasts` — version++, delta enqueued, notify fires.
 - `TestSetNameNoOpWhenUnchanged` — same name → no version bump, no broadcast.
+- `TestSetVolumeBumpsVersionAndShowsInSnapshot` — SetVolume(0.5) → version++,
+  delta enqueued, snapshot NodeView.Volume == 0.5.
+- `TestSetVolumeNoOpWhenUnchanged` — same volume → no version bump, no broadcast.
+- `TestSetOutputDelayMsBumpsVersionAndShowsInSnapshot` — SetOutputDelayMs(120) →
+  version++, delta enqueued, snapshot NodeView.OutputDelayMs == 120.
+- `TestSetOutputDelayMsNoOpWhenUnchanged` — same value → no bump, no broadcast.
+- `TestVolumeAndDelayMergeFromRemote` — a remote NodeRecord delta carrying
+  volume/outputDelayMs merges and surfaces in the peer's NodeView.
 - `TestSetFollowingZeroIsSolo` — Following set to Zero; reflected in snapshot.
 - `TestSetPlaybackWritesGroupKey` — playback stored under group id with writer=self.
 - `TestSetGroupSettingsFillsDefaults` — partial settings get defaults.
@@ -709,7 +737,8 @@ Recorded as a contractConcern since it touches the C/H boundary.
 - `TestBroadcastInvalidates` — same key supersedes; different key does not.
 
 `internal/cluster/cluster_test.go`
-- `TestNewSeedsOwnRecord` — own NodeRecord present, version 1, fields from Config.
+- `TestNewSeedsOwnRecord` — own NodeRecord present, version 1, fields from
+  Config (incl. Volume/OutputDelayMs seeded from cfg, D35/D36).
 - `TestStartCloseNoLeak` — Start then Close; goroutines exit (`-race`, leak check).
 - `TestCloseIdempotent` — second Close is a no-op, no panic.
 - `TestTwoNodesConvergeOverLoopback` — two Clusters on 127.0.0.1, Join via Peer

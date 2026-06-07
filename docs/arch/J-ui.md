@@ -48,6 +48,7 @@ web/src/components/JoinDropdown.svelte a member's "Join group…" select → POS
 web/src/components/NodeRow.svelte     one node in the Nodes table: editable name, id, addrs, caps, liveness
 web/src/components/PlaybackBar.svelte playback state + position + stop button for a group
 web/src/components/EditableText.svelte click-to-rename inline text editor (used by group + node names)
+web/src/components/VolumeSlider.svelte 0–100% range input → debounced setVolume (used in MemberRow + NodeRow; D35)
 web/src/components/Toast.svelte       transient error/success banner (action failures surface here)
 ```
 
@@ -82,6 +83,8 @@ The shapes J codes against (verbatim from S, JSON field names are the contract):
 {
   "id": "ab12…(32 hex)",
   "name": "kitchen",
+  "volume": 1.0,                   // 0.0–1.0 software gain (D35); slider source
+  "outputDelayMs": 0,              // ±500 hardware-latency calibration (D36)
   "addrs": ["192.168.1.17/24", "fd00::5/64"],
   "httpPort": 8080, "streamPort": 9090, "gossipPort": 7946,
   "capabilities": { "playback": true, "codecs": ["pcm"], "backends": ["exec","null","file"],
@@ -188,6 +191,11 @@ export async function getCluster(): Promise<Snapshot>        // GET  /api/cluste
 // --- node actions ---
 export async function renameNode(nodeId, name): Promise<void>     // PATCH /api/<nodeId>/node {name}
 //   nodeId may be remote → proxied; spec §10 "works for remote nodes via proxy".
+export async function setVolume(nodeId, volume): Promise<void>    // PATCH /api/<nodeId>/node {volume}
+//   volume 0.0–1.0 (D35); live software gain, no restart. Proxied for remote nodes.
+//   Callers debounce while dragging (~150ms) — see MemberRow/NodeRow §4.
+export async function setOutputDelay(nodeId, outputDelayMs): Promise<void> // PATCH /api/<nodeId>/node {outputDelayMs}
+//   outputDelayMs int, ±500 (D36); re-anchors playout (brief local restart). Proxied for remote nodes.
 
 // --- group membership (issued ON the acting node) ---
 export async function follow(nodeId, targetId): Promise<void>     // POST /api/<nodeId>/follow {target}
@@ -215,9 +223,10 @@ export class ApiError extends Error { status; }
 ```
 
 Notes:
-- `Status` (from `GET /api/status`, §9.1) is `{id, name, ports, role, group,
-  sync, playout}`. J uses only `id` (self marker) and `name`/`role` for the
-  header. The exact stat fields are I's to define; J reads them defensively.
+- `Status` (from `GET /api/status`, §9.1/D19) is `{id, name, role, groupId,
+  ports, sink, clock, source?}`. J uses only `id` (self marker) and
+  `name`/`role` for the header. The exact stat fields are pinned in D19; J
+  reads them defensively.
 - `MediaFile` is `{path, name, sizeBytes, modTime}` (§6). `path` is relative to
   the node's `MEDIA_DIR`; the Media section turns it into a `"file:<path>"` URI
   for `play` (which now takes a media-source `uri`, §6).
@@ -305,6 +314,9 @@ ephemeral UI bits (which media node is picked, which name is being edited).
 - **Renders:**
   - member name as `<EditableText value={member.name}
     onsave={(n)=>renameNode(member.id,n)}>` (rename works remotely via proxy).
+  - `<VolumeSlider value={member.volume} onchange={(v)=>setVolume(member.id,v)} />`
+    — live per-member gain (D35); rendered from `member.volume` in the snapshot,
+    debounced while dragging (proxied for remote members, §9.1/§9.3).
   - master badge if `isThisMaster`.
   - on the master row, when playing: source stats from `src` —
     `{src.clients} listeners`, `{src.restarts} reconnects` (§8.2 / D28). Hidden
@@ -347,8 +359,16 @@ ephemeral UI bits (which media node is picked, which name is being edited).
 - **Renders:** editable name (`renameNode(node.id, …)` — proxied for remote),
   `shortId(node.id)` (full id in a `title=`), `cidrList(node.addrs)`,
   capability chips (playback yes/no, codecs, formats), alive dot + `relTime`,
-  `stale` indicator.
-- **State:** none.
+  `stale` indicator,
+  `<VolumeSlider value={node.volume} onchange={(v)=>setVolume(node.id,v)} />`
+  (D35; debounced, proxied for remote),
+  and an **output delay** number input (ms): `<input type="number" min={-500}
+  max={500} value={node.outputDelayMs}>` committed on blur/Enter →
+  `setOutputDelay(node.id, ms)` (D36). Hint text under it: *"compensates fixed
+  device latency; causes a brief local restart"* (the change re-anchors playout
+  via RESTART, §8.6 / I §4).
+- **State:** none beyond the in-flight number-input draft (committed on
+  blur/Enter, reverted to `node.outputDelayMs` on each new snapshot).
 
 ### `sections/Media.svelte`
 - **Props:** `snapshot`, `self`.
@@ -382,6 +402,21 @@ ephemeral UI bits (which media node is picked, which name is being edited).
 - **Behavior:** click text → `editing=true`, `draft=value`, focus an `<input>`.
   Enter/blur → if changed, `await onsave(draft)` (errors → toast, revert);
   Esc → cancel. Reused by group name and node name (§10 "click to rename").
+
+### `components/VolumeSlider.svelte`
+- **Props:** `value` (number 0.0–1.0 from `NodeView.volume`), `onchange`
+  (async fn(volume0to1)).
+- **State:** `dragging` (`$state` bool), `pct` (`$state` int 0–100) — the local
+  draft shown while the thumb is held, so the slider tracks the finger without
+  waiting for a server round-trip.
+- **Behavior:** an `<input type="range" min="0" max="100">` bound to `pct`
+  (rendered from `Math.round(value*100)` when not dragging). On `input` set
+  `dragging=true`, update `pct`, and **debounce ~150ms** before calling
+  `onchange(pct/100)` (D35: gain is live, so streaming intermediate values is
+  fine and feels responsive); a trailing call fires on `change`/pointerup so the
+  final position always commits. When a new snapshot arrives and `dragging` is
+  false, `pct` re-syncs to `value*100` (server is the truth, §4/§5). Errors →
+  toast; the next snapshot reverts the thumb. A small `pct%` label sits beside it.
 
 ### `components/Toast.svelte`
 - **Props:** none — reads a module-level `$state` error list from a tiny
@@ -473,6 +508,19 @@ the single-writer discipline (mirrors S's "one mutex per component" convention).
   seek/pause anyway).
 - **XSS / untrusted names:** all dynamic text rendered via Svelte's default
   text interpolation (auto-escaped); no `{@html}` anywhere.
+- **Volume slider while dragging (§4, D35):** the only place J holds a transient
+  local value ahead of the server — the slider tracks the thumb (`dragging`
+  state) and debounces `setVolume` ~150ms so a drag emits a handful of PATCHes,
+  not one per pixel. This is *display-only* optimism: the held `pct` is replaced
+  by `NodeView.volume` from the next snapshot once the thumb is released. A
+  failed PATCH toasts and the snapshot snaps the thumb back. Mirrors §5's
+  single-writer rule (server stays the truth) while keeping the control smooth.
+- **Output-delay input (§4, D36):** committed on blur/Enter only (not per
+  keystroke) since each change re-anchors playout (brief local restart, I §4) —
+  not something to fire mid-typing. The field clamps to ±500 in the input
+  (`min`/`max`) and the server re-clamps; on a rejected/out-of-range value the
+  toast shows the server error and the next snapshot reverts the field. The hint
+  text warns about the brief restart so the blip is expected, not alarming.
 - **Group settings editing:** read-only display in v1 to keep the UI minimal;
   `setGroupSettings` helper exists in `api.js` for K/future but the card shows
   settings as text. (Spec §9.1 exposes the POST; wiring a small editor is a
@@ -562,6 +610,8 @@ embed, but `npm test` is wired for CI.
 - `base("")` → "/api"; `base(selfId)` → "/api" (no self-proxy);
   `base(remoteId)` → "/api/<remoteId>".
 - `renameNode(remote,…)` issues `PATCH /api/<remote>/node` with `{name}`.
+- `setVolume(remote, 0.5)` issues `PATCH /api/<remote>/node` with `{volume:0.5}`
+  (D35); `setOutputDelay(remote, 120)` issues `{outputDelayMs:120}` (D36).
 - `follow/unfollow/makeMaster` hit the right path on the right node id.
 - `play(node,uri)` posts `{uri}` to `/api/<node>/play` (e.g. `"file:jazz.flac"`,
   an `http(s)://` URL, or `"input:"`).
@@ -581,6 +631,11 @@ Component rendering tests (smoke, optional via `@testing-library/svelte`):
   when `playback.state==="playing"`.
 - `JoinDropdown` hidden when `joinTargets` empty.
 - `MemberRow` hides "Make master" on the current master and "Leave" on a solo.
+- `VolumeSlider` renders `value*100` as the thumb position; an `input` event
+  debounces and eventually calls `onchange` with `pct/100`; a fresh snapshot
+  while not dragging re-syncs the thumb (D35).
+- `NodeRow` output-delay input commits `setOutputDelay` on blur/Enter only and
+  shows the restart hint text (D36).
 
 All tests run with `vitest` in `node`/`jsdom`, no live server, no websocket
 infrastructure, no audio — matching the project's "testable without hardware"

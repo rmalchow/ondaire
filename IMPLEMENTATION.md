@@ -33,8 +33,9 @@ agents before implementation).
 
 ### A — identity & config
 `internal/config/*`. Flags + env fallbacks per spec §2 (incl. SOURCE_PORT and
-the dev `--join` seed list), `node.json` load/create (id, name) with atomic
-rewrite on rename, `MEDIA_DIR`/`DATA_DIR` resolution. Pure, unit-tested.
+the dev `--join` seed list), `node.json` load/create (id, name, volume,
+outputDelayMs — D1/D35/D36) with atomic rewrite on change,
+`MEDIA_DIR`/`DATA_DIR` resolution. Pure, unit-tested.
 
 ### B — discovery (mDNS)
 `internal/discovery/*`. zeroconf register (TXT: id/gossip/http/stream/source)
@@ -69,13 +70,15 @@ tests that t.Skip when libopus isn't loadable.
 for exact servo measurement, registered only when the probe succeeds; first
 in `auto` order), `exec` (`pw-play`/`pw-cat -p`/`aplay`/`paplay` pipe,
 auto-pick), `null` (timed discard), `file` (debug). Jitter buffer
-keyed by seq, playout loop translating pts via the `Clock` contract, silence
-insertion, late-drop counters, generation gating, and the **continuous rate
-servo** (D25): skew estimator → PI controller (±500 ppm clamp, slewed) →
-4-tap Catmull-Rom fractional resampler between buffer and backend. 2 s
-starvation watchdog triggers the subscriber's RESTART hook (callback injected
-by G/H). Testable with the null backend, a fake clock, and a skewed fake
-DAC.
+keyed by seq, playout loop translating pts via the `Clock` contract
+(deadline includes the node's `−outputDelayMs` calibration, D36; live change
+→ re-anchor via the restart hook), silence insertion, late-drop counters,
+generation gating, the **continuous rate servo** (D25): skew estimator → PI
+controller (±500 ppm clamp, slewed) → 4-tap Catmull-Rom fractional resampler
+between buffer and backend, and the **live volume gain stage** (D35:
+`SetGain`, atomic, one-frame ramp) last before the backend. 2 s starvation
+watchdog triggers the subscriber's RESTART hook (callback injected by G/H).
+Testable with the null backend, a fake clock, and a skewed fake DAC.
 
 ### F — clock
 `internal/clock/*`. Server (registers type 0x10 on the UDP mux, answers with

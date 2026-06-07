@@ -18,6 +18,15 @@ no database, no PKI. State is replicated via gossip; everything heals itself.
   start, persisted to `DATA_DIR/node.json`, **immutable** forever after.
 - **Node name**: display name, initially the first 8 chars of the node ID.
   Changeable at runtime via API/UI; persisted in `node.json` and replicated.
+- **Volume**: per-node playback gain `0.0–1.0` (default `1.0`), applied
+  **continuously** as software gain in the sink (§8.5) — the UI changes it
+  live, no restart. Persisted in `node.json`, replicated in the node record.
+- **Output delay** (`outputDelayMs`): per-node hardware latency calibration
+  (default 0, clamped ±500 ms) for fixed downstream delay the system cannot
+  measure — the pipe player's internal buffer, DAC/amp/Bluetooth chains.
+  Subtracted from the playout deadline (§8.5). Changing it re-anchors playout
+  via the RESTART/re-prime path (§8.6) — a sub-second stream restart.
+  Persisted in `node.json`, replicated.
 - **Capabilities**: reported in the replicated node record. All of these are
   **probed at runtime on each start** — a `$PATH` scan for exec tools plus
   `dlopen` probes for optional shared libraries (`libopus.so.0`,
@@ -110,9 +119,9 @@ memberlist broadcasts + push/pull sync. No leader, no consensus; merging is
 Records:
 
 - **Node records** — owned and only ever written by the node itself:
-  `id, name, addrs (CIDR), httpPort, streamPort, sourcePort, gossipPort,
-  capabilities, following (nodeId or empty), observed (peerId → {ip,
-  lastSeenUnix}), version, updatedAt`
+  `id, name, volume, outputDelayMs, addrs (CIDR), httpPort, streamPort,
+  sourcePort, gossipPort, capabilities, following (nodeId or empty),
+  observed (peerId → {ip, lastSeenUnix}), version, updatedAt`
 - **Group names** — map `groupId → {name, version, updatedAt}`; written by
   whichever node renames the group (LWW).
 - **Playback status** — per group, written only by that group's master:
@@ -300,7 +309,7 @@ to the address each subscription came from:
 ### 8.5 Sink & playout (every member)
 
 Every member (incl. master) runs: subscriber → jitter buffer → **rate-adaptive
-resampler** → output backend.
+resampler** → **volume gain** → output backend.
 
 **Three clocks** are in play and the design keeps them separate:
 
@@ -313,10 +322,17 @@ resampler** → output backend.
 
 **Coarse scheduling is timestamp-driven** (clocks 1→2): the playout loop
 translates each frame's `pts` and writes it to the backend so audio for `pts`
-hits the device at `pts + bufferMs` (group setting, default **150 ms**).
-Missing frames after FEC/reorder → play silence (gap), never block. Frames
-arriving too late are dropped (counted). This anchors session start, mid-song
-joins, and recovery.
+hits the device at `pts + bufferMs − outputDelayMs` (`bufferMs`: group
+setting, default **150 ms**; `outputDelayMs`: the node's hardware calibration,
+§1). Missing frames after FEC/reorder → play silence (gap), never block.
+Frames arriving too late are dropped (counted). This anchors session start,
+mid-song joins, and recovery. A live `outputDelayMs` change re-anchors via
+RESTART (§8.6).
+
+**Volume** is applied last before the backend: per-sample software gain from
+the node's replicated volume, read atomically each frame and linearly ramped
+over one 20 ms frame on change (no zipper noise) — fully live, the UI drives
+it directly.
 
 **Fine cadence is servo-driven** (clock 3): once the device pipeline is full,
 writes are paced by the DAC, not by the scheduler — and crystal skew of
@@ -391,7 +407,7 @@ All under `/api`. JSON. No auth (trusted LAN, v1).
 | Method/path | Action |
 |---|---|
 | `GET  /api/status` | this node: id, name, ports, role, group, sink/clock stats, and — when this node runs a source — `source: {clients, connects, restarts, primes}` |
-| `PATCH /api/node` | `{name}` → rename this node |
+| `PATCH /api/node` | `{name?, volume?, outputDelayMs?}` → rename / set live volume (§8.5) / set output-delay calibration (re-anchors playout) on this node |
 | `GET  /api/cluster` | replicated state, resolved: nodes (alive/dead, addrs, observed), derived groups (id, name, master, members, playback, source stats) |
 | `GET  /api/media` | list this node's local media |
 | `POST /api/follow` | `{target}` → this node follows target (§5.1) |
@@ -429,12 +445,14 @@ CSS. Built to static files, embedded in the binary via `go:embed`, served at
 
 Screens (single page, sections):
 - **Groups** — cards per derived group: name (click to rename), members with
-  master badge, playback status + position, source stats (listeners /
-  reconnects) on the master, stop button, per-member **“make master”**
-  button, drag-free “join” via a member's *Join group…* dropdown (issues
-  follow), *Leave* button (unfollow).
+  master badge and a live **volume slider** each (PATCH via proxy, §9.1),
+  playback status + position, source stats (listeners / reconnects) on the
+  master, stop button, per-member **“make master”** button, drag-free “join”
+  via a member's *Join group…* dropdown (issues follow), *Leave* button
+  (unfollow).
 - **Nodes** — all known nodes: name (click to rename — works for remote nodes
-  via proxy), id, addresses, capabilities, alive/last-seen, stale indicator.
+  via proxy), id, addresses, capabilities, alive/last-seen, stale indicator,
+  volume slider, and an **output delay (ms)** calibration field.
 - **Media** — node picker (any node, via proxy) → file list → **Play here**:
   plays that file on the selected node's group (does takeover first if the
   target node isn't its group's master). A URL field allows playing an
@@ -442,8 +460,9 @@ Screens (single page, sections):
 
 ## 11. Out of scope (v1)
 
-Volume control, pause/seek, auth/TLS, internet-facing operation, playlists,
-album art/metadata, multiple simultaneous streams per group.
+Pause/seek, auth/TLS, internet-facing operation, playlists, album
+art/metadata, multiple simultaneous streams per group, hardware mixer volume
+(volume is software gain in v1).
 
 ## 12. Repository layout
 

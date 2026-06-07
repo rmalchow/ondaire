@@ -81,6 +81,15 @@ type Cluster interface {
 	// SetName renames THIS node (PATCH /api/node). Bumps version, broadcasts.
 	SetName(name string)
 
+	// SetVolume sets THIS node's playback gain (PATCH /api/node {volume}, D35).
+	// Bumps version, broadcasts. The handler clamps to [0.0, 1.0] first.
+	SetVolume(v float64)
+
+	// SetOutputDelayMs sets THIS node's output-delay calibration (PATCH
+	// /api/node {outputDelayMs}, D36). Bumps version, broadcasts. The handler
+	// clamps to [-500, 500] first.
+	SetOutputDelayMs(ms int)
+
 	// Observe records that we received traffic from peer at ip (§3.1). Fed by
 	// the observe middleware on every inbound HTTP request that carries a
 	// known node id (proxied calls) and, more cheaply, by the cluster's own
@@ -131,6 +140,31 @@ type Media interface {
 	List() ([]MediaFile, error)
 }
 
+// NodeConfig is the on-disk persistence side of PATCH /api/node (§9.1). Piece A
+// (config) owns it; *config.Config satisfies it. The handler persists FIRST
+// (so a crash never replicates a value not on disk, A §3), then replicates via
+// the Cluster setters and applies the live effect via Sink (below). Each method
+// rewrites node.json atomically and clamps as A documents (volume [0,1],
+// outputDelayMs ±500). Injected so the API need not import config concretely.
+type NodeConfig interface {
+	Rename(name string) error
+	SetVolume(v float64) error           // D35
+	SetOutputDelayMs(ms int) error       // D36
+}
+
+// SinkControl is the live-apply side of PATCH /api/node for volume/output-delay
+// (§8.5, D35/D36). Piece E (sink) owns it; the local *sink.Sink satisfies it.
+// Injected as the SAME kind of seam as the Stats closure (main K wires the
+// running sink in). SetGain ramps over one frame (no restart); SetDelayOffset
+// re-anchors playout and fires the RESTART/re-prime path (a sub-second blip on
+// THIS node). A nil SinkControl (e.g. before a session, or a playback-less
+// node) makes the live-apply step a no-op — persistence + replication still
+// happen, and the next session reads the gain/delay from config at start.
+type SinkControl interface {
+	SetGain(g float64)            // D35: g in [0.0, 1.0]
+	SetDelayOffset(nanos int64)   // D36: outputDelayMs converted to ns
+}
+
 // StatusStats is the per-node sink/clock/source snapshot for GET /api/status
 // (§9.1, DECISIONS.md D19). Provided by a closure main (K) wires from the sink
 // (E), the clock follower (F), and — only while this node runs an audio source
@@ -170,7 +204,9 @@ type Config struct {
 	Cluster  Cluster
 	Group    Group
 	Media    Media
+	NodeCfg  NodeConfig         // config A: persist PATCH /api/node fields (name/volume/outputDelayMs)
 	Stats    func() StatusStats // closure over sink (E), clock (F), source (G) stats
+	Sink     func() SinkControl // closure → the live sink (E) for SetGain/SetDelayOffset; nil-returning when no active sink
 	Listener net.Listener       // HTTP listener from netx.BindTCP (K owns binding)
 	DistFS   fs.FS              // SPA build FS = web.DistFS (D15; embed lives in package web)
 	Log      *slog.Logger
@@ -213,7 +249,7 @@ g.Use(s.observeMiddleware) // §3.1 — record client IP under any proxied node 
 g.Use(s.proxyMiddleware)   // §9.3 — short-circuit + reverse-proxy foreign-node calls
 
 g.GET("/status", s.handleStatus)
-g.PATCH("/node", s.handleRenameNode)
+g.PATCH("/node", s.handlePatchNode)
 g.GET("/cluster", s.handleCluster)
 g.GET("/media", s.handleMedia)
 g.POST("/follow", s.handleFollow)
@@ -267,8 +303,14 @@ type PortsResp struct {
 }
 
 // --- PATCH /api/node -------------------------------------------------------
-type RenameReq struct {
-	Name string `json:"name"`
+// All three fields are OPTIONAL; at least one must be present. Pointers
+// distinguish "absent" (leave unchanged) from a zero value the user actually
+// sent (name:"" → empty_name 400; volume:0 → mute; outputDelayMs:0 → no delay).
+// Validation: 0 ≤ *Volume ≤ 1, |*OutputDelayMs| ≤ 500, *Name non-empty.
+type NodePatchReq struct {
+	Name          *string  `json:"name,omitempty"`
+	Volume        *float64 `json:"volume,omitempty"`        // 0.0–1.0 software gain (D35)
+	OutputDelayMs *int     `json:"outputDelayMs,omitempty"` // ±500 ms calibration (D36)
 }
 
 // --- GET /api/media (§6) ---------------------------------------------------
@@ -525,7 +567,9 @@ embed from `internal/api`.
 ### 3.1 Startup (driven by main, K)
 
 1. K binds the HTTP listener (`netx.BindTCP`) and constructs C (cluster), H
-   (group), the media scanner, and the sync-stat closure.
+   (group), the media scanner, the sync-stat closure, the config store
+   (`NodeCfg`, A), and the live-sink closure (`Sink`, E) — the last two drive
+   `PATCH /api/node`'s persist + live-apply (D35/D36).
 2. K calls `api.New(Config{...})`. `New`:
    - creates the `echo.Echo`, sets `HideBanner`, a `slog`-backed error handler,
      and a recover middleware;
@@ -623,8 +667,25 @@ deps.
 - **Unknown route under /api (not a node id)**: falls through proxy → Echo 404
   with the JSON error shape (custom `HTTPErrorHandler` emits `ErrorResp`, never
   Echo's default HTML/text).
-- **Rename to empty string (PATCH /api/node)**: reject **400**
-  `{"error":"empty_name"}` (a node must keep a usable display name; §1).
+- **PATCH /api/node validation & apply order (§9.1, D35/D36)**: body is
+  `NodePatchReq` — `{name?, volume?, outputDelayMs?}`, all optional but **at
+  least one required** (none present → **400** `{"error":"empty_patch"}`).
+  Validate up front: `name` present-and-empty → **400** `{"error":"empty_name"}`
+  (a node must keep a usable display name, §1); `volume` outside `[0.0,1.0]` →
+  **400** `{"error":"bad_volume"}`; `outputDelayMs` outside `[-500,500]` →
+  **400** `{"error":"bad_delay"}`. For each present, valid field the handler:
+  (1) **persists** via `NodeCfg` (atomic node.json rewrite, A); (2) **replicates**
+  via the cluster setter (`SetName`/`SetVolume`/`SetOutputDelayMs`); (3) **applies
+  live** — volume → `Sink().SetGain(v)` (one-frame ramp, no restart),
+  outputDelayMs → `Sink().SetDelayOffset(ms·1e6)` (re-anchors playout, fires the
+  RESTART/re-prime path, a sub-second local blip). Persist-then-replicate-then-
+  apply; a persist error aborts that field with **5xx** before any replicate.
+  `Sink()` returning nil (no active sink / playback-less node) makes step (3) a
+  no-op — the next session picks up the new gain/delay from config at start.
+  **Remote nodes**: this handler runs unchanged on the target node behind the
+  existing proxy (`PATCH /api/<id>/node`, §9.3) — no new code for remote volume/
+  delay; the proxy strips the segment and the target's own handler persists/
+  applies locally.
 - **SPA placeholder (§10)**: only the committed placeholder is embedded → still
   serves it (build succeeds per S); a `/api/*` call still works, so a freshly
   built binary is fully API-usable before the UI is built.
@@ -649,7 +710,21 @@ deps.
   this node runs an active audio source; absent (omitted) otherwise (D19/D28).
 - `TestStatusRoleMaster` / `TestStatusRoleFollower` / `TestStatusRoleSolo` —
   role derives from snapshot ("solo" = master of a group of 1).
-- `TestRenameNode` — PATCH /api/node calls Cluster.SetName; empty name → 400.
+- `TestRenameNode` — PATCH /api/node {name} persists (NodeCfg.Rename), calls
+  Cluster.SetName; present-but-empty name → 400 empty_name.
+- `TestPatchNodeVolume` — PATCH /api/node {volume:0.5} → NodeCfg.SetVolume,
+  Cluster.SetVolume, Sink().SetGain(0.5) all called with 0.5 (D35).
+- `TestPatchNodeOutputDelay` — PATCH /api/node {outputDelayMs:120} →
+  NodeCfg.SetOutputDelayMs, Cluster.SetOutputDelayMs, Sink().SetDelayOffset
+  with 120e6 ns (D36).
+- `TestPatchNodeMultipleFields` — {name,volume,outputDelayMs} together → each
+  persisted, replicated, and applied.
+- `TestPatchNodeEmptyBody` — no fields present → 400 empty_patch.
+- `TestPatchNodeBadVolume` — volume 1.5 (or -0.1) → 400 bad_volume; nothing
+  persisted/applied.
+- `TestPatchNodeBadDelay` — outputDelayMs 9000 → 400 bad_delay; nothing applied.
+- `TestPatchNodeNilSinkNoOp` — Sink() returns nil → persistence + replication
+  still happen, no panic (live-apply skipped).
 - `TestClusterReturnsSnapshotVerbatim` — body == json(Snapshot), no wrapper.
 - `TestMediaList` — GET /api/media returns scanner output in MediaResp shape.
 - `TestFollowOK` / `TestFollowUnknownNode` / `TestFollowTargetNotMaster` — codes.
@@ -673,7 +748,10 @@ deps.
   staleGen,synced,ratePPM,buffered}, clock.{synced,offsetNs,rttNs}, and source
   omitted when nil.
 - `TestErrorRespOmitsEmptyHint` — `hint` omitted when empty.
-- `TestSnapshotJSONTagsStable` — re-assert the contracts JSON tags the SPA uses.
+- `TestNodePatchReqOptionalFields` — `{}` → all three pointers nil; `{"volume":0}`
+  → Volume non-nil pointing at 0.0 (absent vs explicit-zero distinction, D35/D36).
+- `TestSnapshotJSONTagsStable` — re-assert the contracts JSON tags the SPA uses
+  (incl. NodeView.volume / NodeView.outputDelayMs).
 
 `internal/api/ws_test.go` (httptest server + gorilla dialer)
 - `TestWSUpgradeAndFirstEvent` — connect → receive a `cluster` event.

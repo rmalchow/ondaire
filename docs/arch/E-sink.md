@@ -7,6 +7,7 @@ Source of truth: [docs/README.md](../README.md) (§8.5 sink/playout + rate servo
 `FrameBytes`, `FrameSamples`, `FrameNanos`, `Channels`). Integrator decisions:
 [DECISIONS.md](DECISIONS.md) — **D25** (rate servo), **D27** (backend registry,
 amended), **D32** (`internal/dl` runtime loading), **D34** (alsa backend),
+**D35** (live volume / software gain), **D36** (output-delay calibration),
 D21 (live settings / `Synced` live / `Write` may block), D3/D2
 (`ENSEMBLE_OUTPUT`, capabilities assembled by K).
 
@@ -19,7 +20,8 @@ This piece owns `internal/sink/*` only. It implements:
    `internal/dl` dlopen probe of `libasound.so.2` succeeds (D34);
 2. the **playout pipeline** on every member: jitter buffer → playout scheduler
    (timestamp-driven coarse anchor, silence gaps, late drops, gen gating,
-   unsynced gate) → **4-tap Catmull-Rom fractional resampler** → backend;
+   unsynced gate) → **4-tap Catmull-Rom fractional resampler** → **volume gain
+   stage** (D35) → backend;
 3. the **continuous DAC rate servo** (D25): skew estimator → PI controller
    (clamped ±500 ppm, slew-limited) driving the resampler's playback rate, so
    crystal drift never pulls rooms apart;
@@ -51,6 +53,10 @@ servo.go           rateServo: skew estimator + PI controller (±500 ppm clamp,
                    slew limit). Pure numeric struct; no goroutine.
 resampler.go       resampler: 4-tap Catmull-Rom fractional resampler with a
                    fractional cursor across frame boundaries. Pure; no goroutine.
+gain.go            gainStage: per-sample int16 software volume (D35). Target gain
+                   stored atomically (atomic.Uint64 of float bits); per-frame
+                   linear ramp from current to target across the 960 samples.
+                   Lock-free hot path; applies on every backend.
 registry.go        Backend registry (D27): Register(name, factory), Open(spec),
                    built-in registrations alsa/exec/null/file, ENSEMBLE_OUTPUT
                    parse, capability probe (BackendNames, HasPlayback).
@@ -64,6 +70,8 @@ backend_file.go    fileBackend: append raw PCM to a debug file.
 
 servo_test.go      rateServo convergence + clamp + slew (no goroutines).
 resampler_test.go  Catmull-Rom continuity across frame boundaries, rate==1 identity.
+gain_test.go       gainStage ramp continuity (bounded per-sample delta), settled
+                   gain halves samples at 0.5, unit gain identity.
 jitter_test.go     jitterBuffer unit tests.
 registry_test.go   Open(null/file/exec/auto), BackendNames, HasPlayback.
 backend_test.go    null/file backend writes; exec skipped if no tool on PATH;
@@ -110,6 +118,14 @@ type Config struct {
 	Restart  RestartFunc       // watchdog hook (§8.6); may be nil
 	Log      *slog.Logger      // component logger; defaulted if nil
 
+	// Per-node calibration; initial values come from node.json via K (D35/D36).
+	Volume        float64 // initial software gain 0.0–1.0 (D35). AUTHORITATIVE as
+	                       //   given: 0.0 is a genuinely muted node, no remapping.
+	                       //   Absent-field defaulting to 1.0 happens in A's
+	                       //   presence-aware node.json decode, never here. Tests
+	                       //   must set 1.0 explicitly.
+	OutputDelayMs int     // initial output-delay calibration, ms (D36); clamped ±500.
+
 	// Tunables; zero => default (overridable in tests).
 	Capacity int           // jitter-buffer slot cap (default 256 frames ≈ 5.1 s)
 	Watchdog time.Duration // starvation timeout (default 2 s, §8.6)
@@ -126,6 +142,13 @@ buffer target). `now` returns nanoseconds from a monotonic source
 fake clock in tests supplies a deterministic counter. `servoCfg` is unexported;
 production uses the tuned defaults, tests inject aggressive gains for fast
 convergence.
+
+`Volume` and `OutputDelayMs` carry the node's replicated calibration (D35/D36)
+into the sink at construction; K reads them from `node.json` and the live UI
+drives subsequent changes through `SetGain` / `SetDelayOffset` (§2.8). `New`
+seeds the gain stage with `Volume` verbatim (0.0 = muted; absent-field
+defaulting is A's job, D35) and the playout deadline's `delayOffsetNs` with
+`OutputDelayMs · 1e6` (clamped to ±500 ms).
 
 ### 2.2 `registry.go` — named backend registry (D27)
 
@@ -441,7 +464,46 @@ func (r *resampler) reset()
 The interpolation formula above is the **load-bearing contract** of this file;
 §3.4 specifies the cursor bookkeeping across frame boundaries precisely.
 
-### 2.7 `sink.go` — `Playout` (implements `contracts.Sink`)
+### 2.7 `gain.go` — software volume (D35)
+
+```go
+package sink
+
+// gainStage applies a per-node software volume (D35) as the LAST stage before
+// the backend, after the resampler. The target gain is stored atomically (the
+// float64 bit pattern in an atomic.Uint64) so SetGain can be called from any
+// goroutine with no lock on the hot path. Each output frame is scaled by a
+// linear ramp from the gain in force at the start of the frame to the current
+// target, spread across the 960 samples of that one frame — so a volume change
+// settles within 20 ms with no zipper/step discontinuity.
+type gainStage struct {
+	target  atomic.Uint64 // math.Float64bits(targetGain), set by SetGain (any goroutine)
+	current float64       // gain reached at the end of the last frame (scheduler goroutine only)
+}
+
+func newGainStage(initial float64) *gainStage // clamps to [0,1]; current=target=initial
+
+// setTarget stores a new target gain atomically (clamped to [0,1]). Lock-free;
+// safe from any goroutine. Takes effect on the next frame via the ramp.
+func (g *gainStage) setTarget(v float64)
+
+// apply scales frame in place (interleaved s16le, FrameSamples·Channels samples).
+// It reads target once, ramps `current → target` linearly across the frame's
+// FrameSamples sample-times (both channels of a sample-time share the same gain
+// factor), multiplies each int16 sample, rounds, and clamps to int16 range.
+// After the frame, current == target. Called only on the scheduler goroutine,
+// AFTER the resampler and the mutex release, so it never blocks Push/Stats.
+func (g *gainStage) apply(frame []byte)
+```
+
+When `target == current` and both are 1.0 the multiply is a no-op fast path
+(unity passthrough, bit-identical — no coloration when volume is full). The ramp
+spans exactly one frame on any change, so the maximum per-sample change in the
+applied gain factor is `|target − current| / FrameSamples` — bounded and
+sub-audible. The gain stage is pure (no clock, no I/O); only `current` is
+scheduler-owned and only `target` crosses goroutines, lock-free via the atomic.
+
+### 2.8 `sink.go` — `Playout` (implements `contracts.Sink`)
 
 ```go
 package sink
@@ -469,7 +531,9 @@ type Playout struct {
 	clock    contracts.Clock
 	out      contracts.Backend
 	delay    contracts.DelayReporter // out asserted to DelayReporter, or nil
+	gain     *gainStage              // last stage before the backend (D35); lock-free target
 	bufferNs int64
+	delayOffsetNs int64              // output-delay calibration (D36); subtracted from the deadline
 	cap      int
 	watchdog time.Duration
 	restart  RestartFunc
@@ -502,6 +566,21 @@ func (p *Playout) Reset(gen uint32)
 // scheduled slot. Optional helper H calls around a settings-driven Reset.
 func (p *Playout) SetBufferMs(ms int)
 
+// SetGain sets the live software volume (0.0–1.0, D35; contracts.Sink). Lock-free:
+// it stores the gain stage's atomic target (clamped to [0,1]); the scheduler ramps
+// current→target over the next frame. Safe from any goroutine, no restart, applies
+// on every backend (incl. null/file).
+func (p *Playout) SetGain(g float64)
+
+// SetDelayOffset sets the node's output-delay calibration in nanoseconds (D36;
+// contracts.Sink). Under the mutex it stores delayOffsetNs (clamped to ±500 ms),
+// discards the buffered frames (jb.reset(); origin re-armed on the next Push), and
+// fires the same RestartFunc the starvation watchdog uses so G's subscriber issues
+// a wire RESTART and the source burst re-primes under the new anchor. The cost is a
+// sub-second playout blip local to this node; subsequent deadlines shift by the
+// offset. Positive offset = device chain is late ⇒ write earlier.
+func (p *Playout) SetDelayOffset(nanos int64)
+
 // Stats snapshots playout counters (contracts.Sink). Synced is read live from the
 // clock; RatePPM is the servo's current correction; Buffered is jb.len().
 func (p *Playout) Stats() contracts.SinkStats
@@ -518,10 +597,11 @@ func (p *Playout) Close() error
 
 `New(cfg)` allocates the jitter buffer (`cfg.Capacity` or 256), the servo
 (`newRateServo(cfg.servoCfg|default)`), the resampler (`newResampler()`), the
-pre-zeroed `silence` frame (`make([]byte, stream.FrameBytes)`), the `wake`
-(buffered, cap 1) and `done` channels, type-asserts `cfg.Backend` to
-`contracts.DelayReporter` (storing `delay` or nil), and starts **one** scheduler
-goroutine. Until the first `Reset` the scheduler is *disarmed*: it blocks on
+gain stage (`newGainStage(cfg.Volume or 1.0)`, D35), the pre-zeroed `silence`
+frame (`make([]byte, stream.FrameBytes)`), the `wake` (buffered, cap 1) and
+`done` channels, type-asserts `cfg.Backend` to `contracts.DelayReporter`
+(storing `delay` or nil), seeds `delayOffsetNs = cfg.OutputDelayMs·1e6` (clamped
+±500 ms, D36), and starts **one** scheduler goroutine. Until the first `Reset` the scheduler is *disarmed*: it blocks on
 `wake`/`done` and does nothing (`armed=false`).
 
 ### 3.2 Arming (`Reset(gen)`)
@@ -567,7 +647,7 @@ for {
   }
   seq      := jb.nextSeq
   pts      := slotPTS(seq)                       // originPTS + (seq-originSeq)*FrameNanos
-  target   := pts + bufferNs                     // master-clock instant for the device
+  target   := pts + bufferNs - delayOffsetNs     // master-clock instant for the device (D36)
   local, ok := clock.MasterToLocal(target)
   if !ok {                                        // unsynced gate (§7)
      mu.Unlock; sleep ~5 ms or return on done; continue
@@ -596,6 +676,7 @@ for {
   default:                 mu:Silence++;  in = silence    // gap (§8.5)
   }
   out := rs.process(in)               // exactly FrameBytes (§3.4 invariant below)
+  gain.apply(out)                     // LAST stage before the backend: software volume (§2.7, D35)
   if err := out.Write(out); err != nil { log once }
   else if s != nil && !late { Played++ }
 
@@ -643,10 +724,12 @@ servo):
 - **One output frame per device write, in seq order.** A missing seq is played as
   resampled silence and the loop advances — never blocks for a hole (§8.5). FEC/
   reorder recovery is upstream in G.
-- **Coarse anchor via `MasterToLocal(pts+bufferNs)`** sets *when* a frame hits the
-  device (mid-stream joins land at the right wall-clock instant); the **servo**
-  sets the *rate* so cadence stays locked after the device buffer fills (§8.5's
-  three-clock split: scheduler = clocks 1→2, servo = clock 3).
+- **Coarse anchor via `MasterToLocal(pts+bufferNs−delayOffsetNs)`** sets *when* a
+  frame hits the device (mid-stream joins land at the right wall-clock instant);
+  the `delayOffsetNs` term (D36, §3.6.2) shifts the whole node's playout earlier
+  to compensate fixed downstream latency; the **servo** sets the *rate* so cadence
+  stays locked after the device buffer fills (§8.5's three-clock split:
+  scheduler = clocks 1→2, servo = clock 3).
 - **Unsynced gate (§7)**: `ok=false` from `MasterToLocal` ⇒ hold (~5 ms re-poll),
   no write, `Stats().Synced=false`. The servo also only updates when `MasterNow`
   is synced.
@@ -682,6 +765,43 @@ drift *prevention*, not an underrun reaction (§8.5).
 first frame *of the session* (not assumed to be seq 0); a gap still has a
 well-defined deadline so cadence and inter-room alignment survive losses. `seq`
 is uint64 and never wraps in a v1 session.
+
+### 3.6.1 Volume gain stage (D35)
+
+The gain stage is the **last** thing applied to each output frame, after the
+resampler and after the mutex release, on the scheduler goroutine
+(`gain.apply(out)` in §3.4). It reads its target gain once per frame from an
+`atomic.Uint64` (the float bits) and linearly ramps the applied factor from the
+gain reached at the end of the previous frame to that target across the frame's
+960 sample-times — a volume change therefore settles in one 20 ms frame with no
+step discontinuity (no zipper noise), and no restart. `SetGain(g)` (§2.8) only
+stores the atomic target, so it is lock-free and safe from any goroutine
+(the API handler calls it directly off the replicated `volume`). At unity (1.0,
+the default) the multiply short-circuits to a bit-identical passthrough. The
+stage runs unconditionally on **every** backend — alsa, exec, null, file — since
+it sits in the sink, above the backend interface.
+
+### 3.6.2 Output-delay calibration & re-anchor (D36)
+
+`delayOffsetNs` is the node's fixed downstream-latency compensation
+(`outputDelayMs · 1e6`, clamped to ±500 ms). It enters playout only in the
+deadline math — `target = pts + bufferNs − delayOffsetNs` (§3.4) — so a positive
+offset writes every frame *earlier* by that amount, pulling the node's audible
+output forward to cancel latency the servo and `DeviceDelay()` cannot see (pipe
+player internals, DAC/amp/Bluetooth chains).
+
+`SetDelayOffset(nanos)` (§2.8) cannot simply take effect on the next slot: the
+already-buffered frames were scheduled against the old anchor, and shifting the
+deadline under them would jump the cadence. So under the mutex it: (1) stores the
+new (clamped) `delayOffsetNs`; (2) `jb.reset()` — discards buffered frames and
+clears the seq origin, which the next Push re-arms; and (3) fires the **same**
+`RestartFunc` the starvation watchdog uses (§3.7) — outside the mutex, once — so
+G's subscriber issues a wire RESTART and the source burst re-primes the ring
+under the new anchor. The result is a sub-second playout blip **local to this
+node** (other rooms are untouched); once frames resume, every deadline is shifted
+by the new offset. If `restart` is nil (tests/loopback) the buffer is still
+dropped and the node re-primes on the next `Reset`/Push. `consumed` and the servo
+are left intact (the DAC's crystal error is unchanged by a deadline shift).
 
 ### 3.7 Starvation watchdog → RestartFunc (§8.6)
 
@@ -727,6 +847,16 @@ scheduler goroutine, which solely owns the resampler between lock releases — n
 other goroutine touches `rs`). The clock and backend own their own locking.
 This honors S's convention: one mutex per stateful component, no struct shared
 across two mutexes.
+
+The gain stage (§2.7, D35) is the one deliberate exception to "everything under
+`p.mu`": its target gain is an `atomic.Uint64` written by `SetGain` from the
+caller's goroutine and read once per frame by the scheduler, so `SetGain` is
+lock-free and never contends with `Push`/`Stats`/the backend write. `gain.apply`
+runs *unlocked* on the scheduler goroutine after the resampler (like `rs.process`)
+and the gain stage's `current` is scheduler-owned, so no `Playout` field is shared
+across two mutexes. `delayOffsetNs`, by contrast, **is** under `p.mu`
+(`SetDelayOffset` mutates it together with `jb.reset()`), because it changes
+buffered-frame scheduling and must be atomic with the buffer discard.
 
 ---
 
@@ -783,6 +913,15 @@ across two mutexes.
 - **Live settings change (D23)**: a codec/transport/bufferMs change bumps the gen;
   H calls `SetBufferMs` then `Reset(newGen)`. The new buffer lead applies from the
   next scheduled slot; servo/resampler reset so the new session starts clean.
+- **Live volume change (D35)**: `SetGain(g)` stores the gain stage's atomic target;
+  the next frame ramps to it over 960 samples (no step, no restart). Out-of-range
+  `g` is clamped to `[0,1]`. A change mid-frame is harmless (target read once at
+  frame start). Gain applies on every backend incl. null/file.
+- **Live output-delay change (D36)**: `SetDelayOffset(nanos)` stores the clamped
+  offset, drops the jitter buffer, and fires the restart hook (§3.6.2) — a
+  sub-second blip local to this node. An out-of-range value is clamped to ±500 ms.
+  The offset shifts every subsequent deadline; the servo/`consumed` are untouched.
+  With `Restart=nil` the buffer is still discarded and re-primes on the next Push.
 - **Close during active playout**: `done` unblocks any sleep/wait; an in-progress
   `out.Write` completes (backend mutex); then `out.Close()`. No goroutine leak
   (`-race`).
@@ -832,6 +971,21 @@ across two mutexes.
   is continuous.
 - `TestResamplerStereoIndependence` — L and R channels interpolated independently
   (distinct L/R ramps stay distinct, not cross-contaminated).
+
+`gain_test.go` (pure; D35)
+- **`TestGainRampNoStepDiscontinuity`** — a DC/ramp input frame with the target
+  changed from 1.0 to 0.5 (current=1.0): assert the applied gain rises/falls
+  monotonically across the frame and the per-sample change in the *applied gain
+  factor* is ≤ `|target−current|/FrameSamples` everywhere — no step. Required by
+  the prompt.
+- **`TestGainHalvesAfterSettle`** — set target 0.5, run one frame to settle
+  (`current→0.5`), then a second full-scale frame: every output sample == input/2
+  (within rounding). Volume 0.5 halves the samples once the ramp has settled.
+- `TestGainUnityIdentity` — target=current=1.0 → output bit-identical to input
+  (fast-path passthrough, no coloration).
+- `TestGainClampsRange` — `setTarget(2.0)`/`setTarget(-1)` clamp to 1.0 / 0.0.
+- `TestGainStereoSymmetric` — both channels of each sample-time get the same gain
+  factor (L and R scaled equally; the ramp indexes sample-times, not samples).
 
 `jitter_test.go`
 - `TestJitterInsertPopInOrder`, `TestJitterReorderRecovers`,
@@ -887,6 +1041,18 @@ across two mutexes.
 - `TestPlayoutBufferStat` — `Stats().Buffered` tracks `jb.len()` as frames flow.
 - `TestPlayoutBufferMsLead` — frame pts P with bufferMs=150 → device write
   scheduled at `MasterToLocal(P+150ms)` (assert via fake clock translation).
+- **`TestPlayoutSetGainHalves`** — full-scale frames in; `SetGain(0.5)`, let the
+  ramp settle, then assert the fake backend's written samples are halved (volume
+  applied as the last stage, on the null/recording fake backend). Required by the
+  prompt.
+- **`TestPlayoutSetDelayOffsetReanchors`** — push frames under a synced fake clock,
+  then `SetDelayOffset(50ms)` mid-session: assert (a) the jitter buffer is
+  discarded, (b) the injected `RestartFunc` is called once, and (c) after re-prime
+  the device write for pts P is scheduled at `MasterToLocal(P+bufferNs−50ms)` —
+  i.e. every subsequent deadline shifts earlier by the offset (fake clock).
+  Required by the prompt.
+- `TestPlayoutSetDelayOffsetNilRestart` — `Restart=nil`: `SetDelayOffset` still
+  drops the buffer and re-primes on the next Push, no panic.
 - `TestPlayoutResetZeroesCounters` — accumulate stats, Reset → per-session
   counters + RatePPM zero, gen updated, origin re-armed on next Push, servo/
   resampler reset.
@@ -911,8 +1077,11 @@ All tests use the null/file backends (or a fake `contracts.Backend`/
 
 ## 6. Notes on contract fit
 
-- `contracts.Sink` (Push/Reset/Stats/Close) maps 1:1 to `Playout`. `Push` is
-  fire-and-forget (no return), per the confirmed-as-designed rule.
+- `contracts.Sink` (Push/Reset/Stats/SetGain/SetDelayOffset/Close) maps 1:1 to
+  `Playout`. `Push` is fire-and-forget (no return), per the confirmed-as-designed
+  rule. `SetGain` (D35) is the lock-free volume target (§2.7); `SetDelayOffset`
+  (D36) re-anchors playout via the watchdog's `RestartFunc` (§3.6.2). I's
+  `PATCH /api/node {volume, outputDelayMs}` drives both from the replicated record.
 - `contracts.SinkStats` now carries `RatePPM` (the servo's current correction,
   0 until settled) and `Buffered` (jitter depth) in addition to
   Played/Silence/LateDrop/StaleGen/Synced — all produced exactly by the scheduler

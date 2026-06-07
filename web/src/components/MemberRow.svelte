@@ -17,14 +17,16 @@
 </script>
 
 <div class="member">
-  <span class="dot {member.alive ? 'alive' : 'dead'}"></span>
-  <EditableText
-    value={member.name}
-    onsave={(n) => renameNode(member.id, n)}
-    placeholder="(unnamed)"
-  />
-  {#if isThisMaster}<span class="badge">master</span>{/if}
-  {#if member.id === self.id}<span class="chip">this node</span>{/if}
+  <span class="member-id">
+    <span class="dot {member.alive ? 'alive' : 'dead'}"></span>
+    <EditableText
+      value={member.name}
+      onsave={(n) => renameNode(member.id, n)}
+      placeholder="(unnamed)"
+    />
+    {#if isThisMaster}<span class="badge">master</span>{/if}
+    {#if member.id === self.id}<span class="chip">this node</span>{/if}
+  </span>
 
   <VolumeSlider
     value={member.volume}
@@ -58,6 +60,17 @@
 </div>
 
 <style>
+  /* Fixed-width leading column so every row's volume slider starts at the
+     same x, regardless of name length or master/this-node badges. */
+  .member-id {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: 16rem;
+    min-width: 16rem;
+    overflow: hidden;
+  }
+
   /* Leave control: icon-only, compact, no text width (Fix 2). */
   .icon-btn {
     line-height: 1;

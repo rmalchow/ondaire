@@ -55,8 +55,9 @@ func init() {
 		return // capability off; "alsa" not registered (D3)
 	}
 	alsaBound = f
-	Register("alsa", func(_ string, log *slog.Logger) (contracts.Backend, error) {
-		return newAlsaBackend(log)
+	Register("alsa", func(arg string, log *slog.Logger) (contracts.Backend, error) {
+		// arg carries the configured device (D37, via OpenDevice); empty => default.
+		return newAlsaBackend(arg, log)
 	})
 }
 
@@ -86,20 +87,23 @@ type alsaBackend struct {
 	closed bool
 }
 
-// newAlsaBackend opens "default" and sets canonical params. Called only when the
-// probe at init() succeeded (alsaBound != nil).
-func newAlsaBackend(log *slog.Logger) (*alsaBackend, error) {
+// newAlsaBackend opens the named device (empty => "default") and sets canonical
+// params. Called only when the probe at init() succeeded (alsaBound != nil).
+func newAlsaBackend(device string, log *slog.Logger) (*alsaBackend, error) {
 	if alsaBound == nil {
 		return nil, fmt.Errorf("alsa: libasound not loaded")
 	}
 	if log == nil {
 		log = slog.Default()
 	}
-	log = log.With("comp", "sink", "backend", "alsa")
+	log = log.With("backend", "alsa") // comp=sink already attributed by the registry
 
+	if device == "" {
+		device = "default"
+	}
 	var pcm uintptr
-	if rc := alsaBound.open(&pcm, "default", sndPCMStreamPlayback, 0); rc < 0 {
-		return nil, fmt.Errorf("alsa: snd_pcm_open(default) failed: %d", rc)
+	if rc := alsaBound.open(&pcm, device, sndPCMStreamPlayback, 0); rc < 0 {
+		return nil, fmt.Errorf("alsa: snd_pcm_open(%s) failed: %d", device, rc)
 	}
 	latencyUs := int32(contracts.DefaultBufferMs * 1000)
 	if rc := alsaBound.setParams(pcm, sndPCMFormatS16LE, sndPCMAccessRWInterlvd,
@@ -107,7 +111,7 @@ func newAlsaBackend(log *slog.Logger) (*alsaBackend, error) {
 		alsaBound.close(pcm)
 		return nil, fmt.Errorf("alsa: snd_pcm_set_params failed: %d", rc)
 	}
-	log.Info("alsa backend opened", "device", "default")
+	log.Info("alsa backend opened", "device", device)
 	return &alsaBackend{f: alsaBound, pcm: pcm, log: log}, nil
 }
 

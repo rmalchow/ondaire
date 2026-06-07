@@ -21,6 +21,7 @@ type fakeCluster struct {
 	setName   []string
 	setVolume []float64
 	setDelay  []int
+	setDevice []string
 }
 
 type observeCall struct {
@@ -74,6 +75,12 @@ func (f *fakeCluster) SetVolume(v float64) {
 func (f *fakeCluster) SetOutputDelayMs(ms int) {
 	f.mu.Lock()
 	f.setDelay = append(f.setDelay, ms)
+	f.mu.Unlock()
+}
+
+func (f *fakeCluster) SetOutputDevice(d string) {
+	f.mu.Lock()
+	f.setDevice = append(f.setDevice, d)
 	f.mu.Unlock()
 }
 
@@ -180,9 +187,11 @@ type fakeNodeConfig struct {
 	renameErr error
 	volErr    error
 	delayErr  error
+	deviceErr error
 	names     []string
 	vols      []float64
 	delays    []int
+	devices   []string
 }
 
 func (n *fakeNodeConfig) Rename(name string) error {
@@ -204,6 +213,13 @@ func (n *fakeNodeConfig) SetOutputDelayMs(ms int) error {
 	n.delays = append(n.delays, ms)
 	n.mu.Unlock()
 	return n.delayErr
+}
+
+func (n *fakeNodeConfig) SetOutputDevice(d string) error {
+	n.mu.Lock()
+	n.devices = append(n.devices, d)
+	n.mu.Unlock()
+	return n.deviceErr
 }
 
 // fakeSink implements SinkControl.

@@ -107,14 +107,15 @@ func (s *Server) handleMedia(c echo.Context) error {
 	return c.JSON(http.StatusOK, files)
 }
 
-// handlePatchNode applies {name?, volume?, outputDelayMs?} to THIS node:
-// persist (A) → replicate (C) → apply live (E), per field (§9.1, D35/D36).
+// handlePatchNode applies {name?, volume?, outputDelayMs?, outputDevice?} to THIS
+// node: persist (A) → replicate (C) → apply live (E), per field (§9.1,
+// D35/D36/D37).
 func (s *Server) handlePatchNode(c echo.Context) error {
 	var req NodePatchReq
 	if err := c.Bind(&req); err != nil {
 		return failCode(c, http.StatusBadRequest, "bad_request", "")
 	}
-	if req.Name == nil && req.Volume == nil && req.OutputDelayMs == nil {
+	if req.Name == nil && req.Volume == nil && req.OutputDelayMs == nil && req.OutputDevice == nil {
 		return failCode(c, http.StatusBadRequest, "empty_patch", "")
 	}
 
@@ -127,6 +128,12 @@ func (s *Server) handlePatchNode(c echo.Context) error {
 	}
 	if req.OutputDelayMs != nil && (*req.OutputDelayMs < -500 || *req.OutputDelayMs > 500) {
 		return failCode(c, http.StatusBadRequest, "bad_delay", "")
+	}
+	if req.OutputDevice != nil {
+		dev := strings.TrimSpace(*req.OutputDevice)
+		if dev == "" || len(dev) > 64 || !s.knownOutputDevice(dev) {
+			return failCode(c, http.StatusBadRequest, "bad_device", "")
+		}
 	}
 
 	if req.Name != nil {
@@ -159,7 +166,40 @@ func (s *Server) handlePatchNode(c echo.Context) error {
 		}
 		s.log.Info("node mutation", append(auditAttrs(c, "outputDelayMs"), "outputDelayMs", *req.OutputDelayMs)...)
 	}
+	if req.OutputDevice != nil {
+		dev := strings.TrimSpace(*req.OutputDevice)
+		if err := s.cfg.NodeCfg.SetOutputDevice(dev); err != nil {
+			s.log.Warn("output device persist failed", "err", err)
+			return failCode(c, http.StatusInternalServerError, "internal_error", "")
+		}
+		s.cfg.Cluster.SetOutputDevice(dev)
+		if s.cfg.ApplyOutputDevice != nil {
+			s.cfg.ApplyOutputDevice(dev)
+		}
+		s.log.Info("node mutation", append(auditAttrs(c, "outputDevice"), "outputDevice", dev)...)
+	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// knownOutputDevice reports whether dev is "default" or appears in THIS node's
+// own enumerated output-device list (from the cluster snapshot, D37).
+func (s *Server) knownOutputDevice(dev string) bool {
+	if dev == "default" {
+		return true
+	}
+	self := s.cfg.Cluster.Self()
+	for _, n := range s.cfg.Cluster.Snapshot().Nodes {
+		if n.ID != self {
+			continue
+		}
+		for _, d := range n.OutputDevices {
+			if d.ID == dev {
+				return true
+			}
+		}
+		break
+	}
+	return false
 }
 
 // sink returns the live sink control or nil (playback-less / pre-session).

@@ -23,6 +23,15 @@ type Backend interface {
 	Close() error
 }
 
+// OutputDevice is one enumerated ALSA playback device (§8.5, D37). ID is an
+// ALSA device spec ("default" or "hw:C,D"); Desc is a human label. Enumerated
+// once at startup from /proc/asound/pcm and reported per node so the UI can
+// offer a selection.
+type OutputDevice struct {
+	ID   string `json:"id"`
+	Desc string `json:"desc"`
+}
+
 // DelayReporter is an OPTIONAL Backend extension (type-asserted by the rate
 // servo in E, §8.5): the exact amount of queued audio between a Write and the
 // speaker, in nanoseconds. alsa implements it (snd_pcm_delay); exec/null/file
@@ -122,6 +131,8 @@ type NodeView struct {
 	Name          string             `json:"name"`
 	Volume        float64            `json:"volume"`        // 0.0–1.0 software gain (D35)
 	OutputDelayMs int                `json:"outputDelayMs"` // hardware latency calibration (D36)
+	OutputDevice  string             `json:"outputDevice"`  // selected ALSA device id (D37); "default" by default
+	OutputDevices []OutputDevice     `json:"outputDevices"` // enumerated devices on this node (D37); empty when none
 	Addrs         []string           `json:"addrs"`         // self-reported CIDRs
 	HTTPPort      int                `json:"httpPort"`
 	StreamPort    int                `json:"streamPort"`

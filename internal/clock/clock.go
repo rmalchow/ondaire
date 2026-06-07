@@ -159,18 +159,33 @@ func (f *Follower) SetMaster(dst netip.AddrPort, gen uint32) {
 	}
 	prev := f.dst
 	hadPrev := f.have
+	sameEndpoint := hadPrev && prev == dst
 	f.dst = dst
 	f.gen = gen
 	f.have = true
-	f.est.reset()
-	f.synced = false
+	if !sameEndpoint {
+		// Only an ENDPOINT change invalidates the offset estimate — the master
+		// process (and so its clock) is the same across a mere generation bump
+		// (new session / settings change). Wiping samples on gen bumps held
+		// playout unsynced for up to a probe interval at every session start.
+		f.est.reset()
+		f.synced = false
+	}
 	clear(f.pending)
 	f.mu.Unlock()
 
-	if hadPrev && prev != dst {
+	if sameEndpoint {
+		f.log.Debug("master clock gen bumped (offset kept)", "endpoint", dst.String(), "gen", gen)
+	} else if hadPrev {
 		f.log.Info("master clock re-pointed", "from", prev.String(), "to", dst.String(), "gen", gen)
 	} else {
 		f.log.Info("master clock set", "endpoint", dst.String(), "gen", gen)
+	}
+
+	// Don't wait for the next 1 Hz tick: a freshly (re-)pointed follower should
+	// sync ASAP — playout is gated on it.
+	if !sameEndpoint {
+		go f.probe()
 	}
 }
 

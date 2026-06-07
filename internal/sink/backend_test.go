@@ -104,7 +104,7 @@ func TestAlsaBackendSkippedIfNoLib(t *testing.T) {
 	if !isRegistered("alsa") {
 		t.Skip("alsa not registered (probe failed)")
 	}
-	b, err := newAlsaBackend(slog.Default())
+	b, err := newAlsaBackend("default", slog.Default())
 	if err != nil {
 		t.Skipf("snd_pcm_open failed (no usable PCM device): %v", err)
 	}

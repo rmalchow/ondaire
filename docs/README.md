@@ -368,6 +368,19 @@ inter-room accuracy to roughly ±10–20 ms. Available backends are reported in
 capabilities (§1); `playback` is true when a real (non-null) backend is
 usable.
 
+**ALSA device selection** (D37). The alsa backend opens a *named* device, not
+always `default`. Each node enumerates its playback-capable PCMs once at startup
+by parsing `/proc/asound/pcm` (zero extra deps; empty when libasound is not
+loadable or the file is absent) and reports them as
+`outputDevices: [{id, desc}]` on its `/api/cluster` record, alongside the
+currently-selected `outputDevice` (default `"default"`, persisted in
+`node.json`). `PATCH /api/node {outputDevice}` validates the id against the
+node's own enumerated list (or `"default"`), persists it, replicates it, and —
+when the active backend is alsa — reopens that backend for the new device and
+hot-swaps it into the live sink (a brief audio blip; the session is *not*
+restarted). The exec backend ignores the device selection in v1 (it plays to its
+player tool's own default).
+
 ### 8.6 Stop / end / getting lost
 
 `stop` (or natural end of a pull-paced source) bumps the generation,
@@ -407,7 +420,7 @@ All under `/api`. JSON. No auth (trusted LAN, v1).
 | Method/path | Action |
 |---|---|
 | `GET  /api/status` | this node: id, name, ports, role, group, sink/clock stats, and — when this node runs a source — `source: {clients, connects, restarts, primes}` |
-| `PATCH /api/node` | `{name?, volume?, outputDelayMs?}` → rename / set live volume (§8.5) / set output-delay calibration (re-anchors playout) on this node |
+| `PATCH /api/node` | `{name?, volume?, outputDelayMs?, outputDevice?}` → rename / set live volume (§8.5) / set output-delay calibration (re-anchors playout) / select the ALSA output device (§8.5, live backend swap) on this node |
 | `GET  /api/cluster` | replicated state, resolved: nodes (alive/dead, addrs, observed), derived groups (id, name, master, members, playback, source stats) |
 | `GET  /api/media` | list this node's local media |
 | `POST /api/follow` | `{target}` → this node follows target (§5.1) |

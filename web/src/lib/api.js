@@ -88,6 +88,9 @@ export function setVolume(nodeId, volume) {
 export function setOutputDelay(nodeId, outputDelayMs) {
   return toasted(req("PATCH", base(nodeId) + "/node", { outputDelayMs }));
 }
+export function setOutputDevice(nodeId, outputDevice) {
+  return toasted(req("PATCH", base(nodeId) + "/node", { outputDevice }));
+}
 
 // --- group membership (issued ON the acting node) ---
 export function follow(nodeId, targetId) {

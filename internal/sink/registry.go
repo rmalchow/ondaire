@@ -87,6 +87,14 @@ func HasPlayback() bool {
 //
 // Returns the backend and the resolved name (for /api/status + logging).
 func Open(spec string, log *slog.Logger) (contracts.Backend, string, error) {
+	return OpenDevice(spec, "", log)
+}
+
+// OpenDevice is Open with an explicit ALSA output device (D37, §8.5). The device
+// is honored only on the alsa path (auto-selected alsa or an explicit "alsa"
+// spec); every other backend ignores it (the exec backend in particular plays
+// to its tool's own default — v1 limitation). An empty device means "default".
+func OpenDevice(spec, device string, log *slog.Logger) (contracts.Backend, string, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -96,7 +104,7 @@ func Open(spec string, log *slog.Logger) (contracts.Backend, string, error) {
 
 	switch name {
 	case "", "auto":
-		return openAuto(log)
+		return openAuto(device, log)
 	case "exec":
 		b, err := openFactory("exec", "", log)
 		if err != nil {
@@ -106,6 +114,14 @@ func Open(spec string, log *slog.Logger) (contracts.Backend, string, error) {
 		}
 		log.Info("backend selected", "backend", "exec", "reason", "explicit")
 		return b, "exec", nil
+	case "alsa":
+		// Route the configured device through the factory arg.
+		b, err := openFactory("alsa", device, log)
+		if err != nil {
+			return nil, "", err
+		}
+		log.Info("backend selected", "backend", "alsa", "reason", "explicit", "device", deviceLabel(device))
+		return b, "alsa", nil
 	}
 
 	b, err := openFactory(name, arg, log)
@@ -116,10 +132,10 @@ func Open(spec string, log *slog.Logger) (contracts.Backend, string, error) {
 	return b, name, nil
 }
 
-func openAuto(log *slog.Logger) (contracts.Backend, string, error) {
+func openAuto(device string, log *slog.Logger) (contracts.Backend, string, error) {
 	if isRegistered("alsa") {
-		if b, err := openFactory("alsa", "", log); err == nil {
-			log.Info("backend selected", "backend", "alsa", "reason", "auto")
+		if b, err := openFactory("alsa", device, log); err == nil {
+			log.Info("backend selected", "backend", "alsa", "reason", "auto", "device", deviceLabel(device))
 			return b, "alsa", nil
 		} else {
 			log.Warn("alsa registered but failed to open, trying exec", "err", err)
@@ -146,6 +162,14 @@ func openFactory(name, arg string, log *slog.Logger) (contracts.Backend, error) 
 		return nil, fmt.Errorf("sink: backend %q not registered", name)
 	}
 	return f(arg, log)
+}
+
+// deviceLabel renders the configured device for a log line ("default" when empty).
+func deviceLabel(device string) string {
+	if device == "" {
+		return "default"
+	}
+	return device
 }
 
 // splitSpec splits "name:arg" on the first colon. "name" alone => arg "".

@@ -34,8 +34,8 @@ const (
 	EnvGossipPort = "ENSEMBLE_GOSSIP_PORT"
 	EnvDataDir    = "ENSEMBLE_DATA_DIR"
 	EnvMediaDir   = "ENSEMBLE_MEDIA_DIR"
-	EnvOutput     = "ENSEMBLE_OUTPUT" // named sink backend: "", "auto", "exec", "null", "file:<path>", "alsa"
-	EnvJoin       = "ENSEMBLE_JOIN"   // dev seed list: comma-separated host:gossipPort (§2, D20)
+	EnvOutput     = "ENSEMBLE_OUTPUT"  // named sink backend: "", "auto", "exec", "null", "file:<path>", "alsa"
+	EnvJoin       = "ENSEMBLE_JOIN"    // dev seed list: comma-separated host:gossipPort (§2, D20)
 	EnvNoMDNS     = "ENSEMBLE_NO_MDNS" // "1"/"true": disable mDNS register+browse (tests; gossip via --join)
 )
 
@@ -51,6 +51,7 @@ type Config struct {
 	// back-compat load when absent (§1, D35/D36).
 	Volume        float64 // playback software gain 0.0–1.0; default 1.0 (D35)
 	OutputDelayMs int     // hardware latency calibration; default 0, clamped ±500 (D36)
+	OutputDevice  string  // selected ALSA output device id; default "default" (D37)
 
 	// Resolved, absolute directories (§2).
 	DataDir  string // e.g. /abs/data; contains node.json
@@ -168,6 +169,7 @@ func Load(opts Options) (*Config, error) {
 	cfg.NodeName = nf.Name
 	cfg.Volume = nf.Volume
 	cfg.OutputDelayMs = nf.OutputDelayMs
+	cfg.OutputDevice = nf.OutputDevice
 
 	return cfg, nil
 }
@@ -203,6 +205,18 @@ func (c *Config) SetOutputDelayMs(ms int) error {
 		return err
 	}
 	c.OutputDelayMs = nf.OutputDelayMs
+	return nil
+}
+
+// SetOutputDevice persists the selected ALSA output device (D37) and atomically
+// rewrites node.json, updating c.OutputDevice on success only. The value is
+// normalized (blank → "default", trimmed, capped) before write.
+func (c *Config) SetOutputDevice(device string) error {
+	nf, err := c.store.SetOutputDevice(c.NodeID, device)
+	if err != nil {
+		return err
+	}
+	c.OutputDevice = nf.OutputDevice
 	return nil
 }
 

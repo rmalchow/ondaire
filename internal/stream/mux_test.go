@@ -174,3 +174,46 @@ func TestMuxConcurrentWriteTo(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestMuxUnmapsV4MappedSender locks the dual-stack canonicalization: a sender
+// reported as v4-mapped IPv6 (as wildcard-bound sockets do for IPv4 peers)
+// must reach handlers as plain IPv4, or address-gated consumers (the
+// subscriber client) silently drop every packet. Regression: LAN playback was
+// silent on wildcard binds while loopback e2e (v4-only sockets) passed.
+func TestMuxUnmapsV4MappedSender(t *testing.T) {
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewMux(conn, nil)
+	got := make(chan netip.AddrPort, 1)
+	m.Register(0x7f, func(_ []byte, from netip.AddrPort) {
+		select {
+		case got <- from:
+		default:
+		}
+	})
+	m.Run()
+	defer m.Close()
+
+	// Hand the read loop a synthetic v4-mapped sender by writing from a second
+	// socket and asserting the delivered addr is unmapped regardless of how the
+	// kernel reports it.
+	src, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	pkt := []byte{Magic, 0x7f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	if _, err := src.WriteToUDPAddrPort(pkt, m.LocalAddr()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case from := <-got:
+		if from.Addr().Is4In6() {
+			t.Fatalf("handler saw v4-mapped sender %v; mux must unmap", from)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("packet not dispatched")
+	}
+}

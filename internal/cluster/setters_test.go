@@ -113,6 +113,28 @@ func TestSetOutputDelayMsNoOpWhenUnchanged(t *testing.T) {
 	}
 }
 
+func TestSetOutputDeviceBumpsVersionAndShowsInSnapshot(t *testing.T) {
+	c := newTestCluster(t, id.New(), nil)
+	v0 := ownVersion(c)
+	c.SetOutputDevice("hw:1,0")
+	if ownVersion(c) != v0+1 {
+		t.Fatal("version not bumped")
+	}
+	if got := c.Snapshot().Nodes[0].OutputDevice; got != "hw:1,0" {
+		t.Fatalf("outputDevice = %q want hw:1,0", got)
+	}
+}
+
+func TestSetOutputDeviceNoOpWhenUnchanged(t *testing.T) {
+	c := newTestCluster(t, id.New(), nil)
+	c.SetOutputDevice("hw:2,0")
+	v := ownVersion(c)
+	c.SetOutputDevice("hw:2,0")
+	if ownVersion(c) != v {
+		t.Fatal("version bumped on unchanged value")
+	}
+}
+
 func TestVolumeAndDelayMergeFromRemote(t *testing.T) {
 	self := id.New()
 	peer := id.New()

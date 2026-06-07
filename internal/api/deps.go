@@ -20,6 +20,8 @@ type Cluster interface {
 	SetVolume(v float64)
 	// SetOutputDelayMs sets THIS node's output-delay calibration (D36).
 	SetOutputDelayMs(ms int)
+	// SetOutputDevice sets THIS node's selected ALSA output device (D37).
+	SetOutputDevice(device string)
 	// Observe records that we received traffic from peer at ip (§3.1).
 	Observe(peer id.ID, ip netip.Addr)
 	// DialCandidates returns dial IPs for peer, ordered best-first per §3.1.
@@ -64,8 +66,9 @@ type Media interface {
 // then replicates via the Cluster setters and applies live via SinkControl.
 type NodeConfig interface {
 	Rename(name string) error
-	SetVolume(v float64) error     // D35
-	SetOutputDelayMs(ms int) error // D36
+	SetVolume(v float64) error      // D35
+	SetOutputDelayMs(ms int) error  // D36
+	SetOutputDevice(d string) error // D37
 }
 
 // SinkControl is the live-apply side of PATCH /api/node for volume/output-delay

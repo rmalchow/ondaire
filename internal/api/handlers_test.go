@@ -302,6 +302,90 @@ func TestPatchNodeBadDelay(t *testing.T) {
 	}
 }
 
+// snapWithDevices is snapWith with the self node carrying an enumerated device
+// list (D37), so the PATCH outputDevice validation can find it.
+func snapWithDevices(self id.ID, devices []contracts.OutputDevice) contracts.Snapshot {
+	return contracts.Snapshot{
+		Nodes: []contracts.NodeView{
+			{ID: self, Name: "n", Alive: true, HTTPPort: 8080, OutputDevices: devices},
+		},
+		Groups: []contracts.GroupView{{ID: self, Master: self, Members: []id.ID{self}}},
+	}
+}
+
+func TestPatchNodeOutputDevice(t *testing.T) {
+	self := id.New()
+	cfg, fc, _ := baseConfig(self)
+	fc.setSnapshot(snapWithDevices(self, []contracts.OutputDevice{{ID: "hw:1,0", Desc: "Card"}}))
+	nc := &fakeNodeConfig{}
+	cfg.NodeCfg = nc
+	var applied []string
+	cfg.ApplyOutputDevice = func(d string) { applied = append(applied, d) }
+	_, ts := testServer(t, cfg)
+
+	resp := doJSON(t, ts, http.MethodPatch, "/api/node", map[string]any{"outputDevice": "hw:1,0"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if len(nc.devices) != 1 || nc.devices[0] != "hw:1,0" {
+		t.Errorf("cfg devices = %v", nc.devices)
+	}
+	if len(fc.setDevice) != 1 || fc.setDevice[0] != "hw:1,0" {
+		t.Errorf("cluster devices = %v", fc.setDevice)
+	}
+	if len(applied) != 1 || applied[0] != "hw:1,0" {
+		t.Errorf("apply devices = %v", applied)
+	}
+}
+
+func TestPatchNodeOutputDeviceDefaultAlwaysValid(t *testing.T) {
+	self := id.New()
+	cfg, fc, _ := baseConfig(self)
+	fc.setSnapshot(snapWithDevices(self, nil)) // no enumerated devices
+	nc := &fakeNodeConfig{}
+	cfg.NodeCfg = nc
+	_, ts := testServer(t, cfg)
+
+	resp := doJSON(t, ts, http.MethodPatch, "/api/node", map[string]any{"outputDevice": "default"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if len(nc.devices) != 1 || nc.devices[0] != "default" {
+		t.Errorf("cfg devices = %v", nc.devices)
+	}
+}
+
+func TestPatchNodeOutputDeviceUnknownRejected(t *testing.T) {
+	self := id.New()
+	cfg, fc, _ := baseConfig(self)
+	fc.setSnapshot(snapWithDevices(self, []contracts.OutputDevice{{ID: "hw:1,0"}}))
+	nc := &fakeNodeConfig{}
+	cfg.NodeCfg = nc
+	_, ts := testServer(t, cfg)
+
+	resp := doJSON(t, ts, http.MethodPatch, "/api/node", map[string]any{"outputDevice": "hw:9,9"})
+	e := decodeErr(t, resp)
+	if resp.StatusCode != 400 || e.Error != "bad_device" {
+		t.Fatalf("status=%d err=%q", resp.StatusCode, e.Error)
+	}
+	if len(nc.devices) != 0 || len(fc.setDevice) != 0 {
+		t.Errorf("nothing should be applied")
+	}
+}
+
+func TestPatchNodeOutputDeviceEmptyRejected(t *testing.T) {
+	self := id.New()
+	cfg, _, _ := baseConfig(self)
+	_, ts := testServer(t, cfg)
+	resp := doJSON(t, ts, http.MethodPatch, "/api/node", map[string]any{"outputDevice": "  "})
+	e := decodeErr(t, resp)
+	if resp.StatusCode != 400 || e.Error != "bad_device" {
+		t.Fatalf("status=%d err=%q", resp.StatusCode, e.Error)
+	}
+}
+
 func TestPatchNodeNilSinkNoOp(t *testing.T) {
 	self := id.New()
 	cfg, fc, _ := baseConfig(self)

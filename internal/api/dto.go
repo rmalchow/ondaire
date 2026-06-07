@@ -58,6 +58,7 @@ type NodePatchReq struct {
 	Name          *string  `json:"name,omitempty"`
 	Volume        *float64 `json:"volume,omitempty"`        // 0.0–1.0 (D35)
 	OutputDelayMs *int     `json:"outputDelayMs,omitempty"` // ±500 ms (D36)
+	OutputDevice  *string  `json:"outputDevice,omitempty"`  // ALSA device id (D37)
 }
 
 // --- GET /api/media (§6) ---------------------------------------------------

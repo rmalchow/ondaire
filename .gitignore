@@ -1,6 +1,9 @@
 /bin/
+/ensemble
 /data/
 data*/
+*.test
+coverage.out
 
 # Svelte/Vite: deps and build output; keep the committed placeholder for go:embed.
 web/node_modules/
@@ -10,3 +13,6 @@ web/dist/*
 *.wav
 *.flac
 *.mp3
+
+# Audio test fixtures are real committed files despite the format ignores above.
+!internal/audio/testdata/*

@@ -216,6 +216,35 @@ func (p *Playout) SetDelayOffset(nanos int64) {
 	}
 }
 
+// SwapBackend replaces the live output backend (D37, §8.5): used when the node's
+// selected output device changes. Under the mutex it closes the old backend, sets
+// the new one (re-asserting DelayReporter), and logs. A brief audio blip is
+// acceptable; the session/scheduler is NOT restarted. No-op (closing nb) if the
+// sink is already closed.
+func (p *Playout) SwapBackend(nb contracts.Backend) {
+	if nb == nil {
+		return
+	}
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		_ = nb.Close()
+		return
+	}
+	old := p.out
+	p.out = nb
+	if dr, ok := nb.(contracts.DelayReporter); ok {
+		p.delay = dr
+	} else {
+		p.delay = nil
+	}
+	p.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	p.log.Info("output backend swapped")
+}
+
 // Disarm cleanly ends the local session (contracts.Sink): group went idle or
 // the session stopped. Discards buffered frames and stops the scheduler with
 // no starvation warnings. Idempotent; Reset re-arms.
@@ -367,17 +396,29 @@ func (p *Playout) loop() {
 			continue // session changed under us; drop this stale slot
 		}
 
-		var in []byte
 		late := p.now() > local+stream.FrameNanos
+		if late {
+			// A late slot must NOT consume device time: writing silence for it
+			// would delay every later frame by one frame duration, so a backlog
+			// (e.g. the unsynced hold at session start) could never drain and
+			// playout would be late FOREVER, dropping every live frame. Count
+			// and skip instantly; the loop re-evaluates the next slot at once.
+			if s != nil {
+				p.stats.LateDrop++
+			}
+			p.jb.advance()
+			p.stats.Buffered = p.jb.len()
+			p.mu.Unlock()
+			continue
+		}
+
+		var in []byte
 		played := false
-		switch {
-		case s != nil && !late:
+		if s != nil {
 			in = s.payload
 			played = true
-		case s != nil && late:
-			p.stats.LateDrop++
-			in = p.silence
-		default:
+		} else {
+			// Gap at its proper deadline: real silence keeps device cadence.
 			p.stats.Silence++
 			in = p.silence
 		}

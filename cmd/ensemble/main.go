@@ -243,6 +243,11 @@ func run(ctx context.Context, opt options) (rerr error) {
 	// 4. Capabilities (D3/D32): $PATH probe + dlopen probes + static lists.
 	caps := capabilities(opt)
 
+	// 4b. Output-device enumeration (D37, §8.5): parse /proc/asound/pcm when the
+	//     alsa backend is loadable. Empty on hosts without ALSA/libasound.
+	outputDevices := sink.ListOutputDevices()
+	log.Info("output devices", "devices", deviceIDs(outputDevices))
+
 	// 5. UDP mux over STREAM_PORT (not yet Run).
 	mux := stream.NewMux(streamUDP, base)
 
@@ -270,6 +275,8 @@ func run(ctx context.Context, opt options) (rerr error) {
 		Name:          cfg.NodeName,
 		Volume:        cfg.Volume,
 		OutputDelayMs: cfg.OutputDelayMs,
+		OutputDevice:  cfg.OutputDevice,
+		OutputDevices: outputDevices,
 		Caps:          caps,
 		Addrs:         addrs,
 		HTTPPort:      httpPort,
@@ -289,8 +296,9 @@ func run(ctx context.Context, opt options) (rerr error) {
 	clockSrv.Start() // registers 0x10 on the mux (idempotent, mux not yet running)
 	clockFol := clock.NewFollower(mux, base)
 
-	// 8. Sink backend + playout. ENSEMBLE_OUTPUT=null forces null (§8.5/D27).
-	backend, backendName, err := sink.Open(opt.Output, base)
+	// 8. Sink backend + playout. ENSEMBLE_OUTPUT=null forces null (§8.5/D27). The
+	//    configured ALSA device (D37) is honored on the alsa path (auto/explicit).
+	backend, backendName, err := sink.OpenDevice(opt.Output, cfg.OutputDevice, base)
 	if err != nil {
 		return fmt.Errorf("sink backend %q: %w", opt.Output, err)
 	}
@@ -352,12 +360,13 @@ func run(ctx context.Context, opt options) (rerr error) {
 		distFS = nil
 	}
 	apiSrv := api.New(api.Config{
-		Cluster: cl,
-		Group:   &groupAdapter{e: engine, cl: cl},
-		Media:   api.NewMediaLister(cfg.MediaDir),
-		NodeCfg: cfg,
-		Stats:   statusStats(theSink, clockFol, engine),
-		Sink:    func() api.SinkControl { return theSink },
+		Cluster:           cl,
+		Group:             &groupAdapter{e: engine, cl: cl},
+		Media:             api.NewMediaLister(cfg.MediaDir),
+		NodeCfg:           cfg,
+		Stats:             statusStats(theSink, clockFol, engine),
+		Sink:              func() api.SinkControl { return theSink },
+		ApplyOutputDevice: applyOutputDevice(backendName, opt.Output, theSink, base),
 		Ports: api.PortsResp{
 			HTTP:   httpPort,
 			Stream: streamPort,
@@ -513,6 +522,42 @@ func capabilities(opt options) contracts.Capabilities {
 		Backends: sink.BackendNames(),
 		Sources:  audio.Schemes(),
 		Formats:  []string{"wav", "mp3", "flac"},
+	}
+}
+
+// deviceIDs renders the enumerated output-device ids for the startup line (D37).
+func deviceIDs(devs []contracts.OutputDevice) []string {
+	ids := make([]string, 0, len(devs))
+	for _, d := range devs {
+		ids = append(ids, d.ID)
+	}
+	return ids
+}
+
+// applyOutputDevice returns the PATCH /api/node {outputDevice} live-apply closure
+// (D37, §8.5). It reopens the output backend for the new device and swaps it into
+// the live sink — but ONLY when the active backend kind is alsa (the only backend
+// honoring a device). For any other kind it is a no-op (persist+replicate already
+// happened upstream). A failed reopen is logged and the old backend kept.
+func applyOutputDevice(backendName, outputSpec string, sk *sink.Playout, log *slog.Logger) func(string) {
+	if backendName != "alsa" {
+		return func(string) {
+			log.Info("output device changed; backend is not alsa, persist+replicate only", "backend", backendName)
+		}
+	}
+	return func(device string) {
+		nb, name, err := sink.OpenDevice(outputSpec, device, log)
+		if err != nil {
+			log.Warn("output device reopen failed; keeping current backend", "device", device, "err", err)
+			return
+		}
+		if name != "alsa" {
+			// The reopen degraded (e.g. alsa now fails); don't swap to a different kind.
+			_ = nb.Close()
+			log.Warn("output device reopen did not yield alsa; keeping current backend", "got", name)
+			return
+		}
+		sk.SwapBackend(nb)
 	}
 }
 

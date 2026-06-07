@@ -215,22 +215,29 @@ func TestResyncOnGenerationChange(t *testing.T) {
 	f.SetMaster(mux.LocalAddr(), 1)
 	waitSync(t, f, 2*time.Second)
 
-	// Bump generation: immediately unsynced (samples cleared).
+	// Bump generation on the SAME endpoint: the master process (and clock)
+	// did not change, so the offset estimate is KEPT — still synced. (Wiping
+	// it held playout for up to a probe interval at every session start.)
 	f.SetMaster(mux.LocalAddr(), 2)
-	if _, ok := f.MasterNow(); ok {
-		t.Fatal("expected unsynced immediately after gen bump")
+	if _, ok := f.MasterNow(); !ok {
+		t.Fatal("same-endpoint gen bump must keep the offset (stay synced)")
 	}
 
-	// A reply with the OLD gen must be ignored.
+	// An ENDPOINT change resets: immediately unsynced (samples cleared).
+	other := netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 2}), mux.LocalAddr().Port())
+	f.SetMaster(other, 2)
+	if _, ok := f.MasterNow(); ok {
+		t.Fatal("expected unsynced immediately after endpoint change")
+	}
+	f.SetMaster(mux.LocalAddr(), 3) // back to the real server (resets again)
+
+	// A reply with an OLD gen must be ignored.
 	f.mu.Lock()
 	f.pending[9999] = clk.read()
 	f.mu.Unlock()
 	var old [packetSize]byte
 	encodeClock(old[:], stream.TypeClockRsp, 1 /*old gen*/, 9999, 0, 5, 6)
 	f.handleReply(old[:], mux.LocalAddr())
-	if _, ok := f.MasterNow(); ok {
-		t.Fatal("old-gen reply should not sync")
-	}
 
 	// New-gen probes re-sync.
 	waitSync(t, f, 2*time.Second)

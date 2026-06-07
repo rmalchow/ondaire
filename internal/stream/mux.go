@@ -70,6 +70,11 @@ func (m *Mux) loop() {
 	buf := make([]byte, 64*1024)
 	for {
 		n, from, err := m.conn.ReadFromUDPAddrPort(buf)
+		// Canonicalize: a dual-stack wildcard socket reports IPv4 senders as
+		// v4-mapped IPv6 ([::ffff:a.b.c.d]), which netip treats as UNEQUAL to
+		// the plain IPv4 the rest of the system dials/stores. Unmap once here
+		// so every handler compares apples to apples.
+		from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
 		if err != nil {
 			select {
 			case <-m.done:

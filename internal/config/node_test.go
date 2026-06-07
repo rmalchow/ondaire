@@ -352,3 +352,72 @@ func TestSetOutputDelayMsRejectsIDMismatch(t *testing.T) {
 		t.Error("delay changed despite id mismatch")
 	}
 }
+
+func TestLoadOrCreateDefaultsOutputDeviceOnLegacyFile(t *testing.T) {
+	dir := t.TempDir()
+	nodeID := id.New()
+	writeFile(t, dir, `{"id":"`+nodeID.String()+`","name":"x"}`)
+	nf, err := NewStore(dir).LoadOrCreate("")
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+	if nf.OutputDevice != "default" {
+		t.Errorf("outputDevice = %q, want default", nf.OutputDevice)
+	}
+}
+
+func TestLoadOrCreateKeepsExplicitOutputDevice(t *testing.T) {
+	dir := t.TempDir()
+	nodeID := id.New()
+	writeFile(t, dir, `{"id":"`+nodeID.String()+`","name":"x","outputDevice":"hw:1,0"}`)
+	nf, err := NewStore(dir).LoadOrCreate("")
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+	if nf.OutputDevice != "hw:1,0" {
+		t.Errorf("outputDevice = %q, want hw:1,0", nf.OutputDevice)
+	}
+}
+
+func TestSetOutputDeviceRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	nf, _ := s.LoadOrCreate("")
+	got, err := s.SetOutputDevice(nf.ID, "hw:2,0")
+	if err != nil {
+		t.Fatalf("SetOutputDevice: %v", err)
+	}
+	if got.OutputDevice != "hw:2,0" {
+		t.Errorf("outputDevice = %q, want hw:2,0", got.OutputDevice)
+	}
+	reread, _ := s.LoadOrCreate("")
+	if reread.OutputDevice != "hw:2,0" {
+		t.Errorf("persisted outputDevice = %q, want hw:2,0", reread.OutputDevice)
+	}
+}
+
+func TestSetOutputDeviceBlankNormalizesToDefault(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	nf, _ := s.LoadOrCreate("")
+	got, err := s.SetOutputDevice(nf.ID, "   ")
+	if err != nil {
+		t.Fatalf("SetOutputDevice: %v", err)
+	}
+	if got.OutputDevice != "default" {
+		t.Errorf("outputDevice = %q, want default", got.OutputDevice)
+	}
+}
+
+func TestSetOutputDeviceRejectsIDMismatch(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	orig, _ := s.LoadOrCreate("")
+	if _, err := s.SetOutputDevice(id.New(), "hw:1,0"); !errors.Is(err, ErrIDImmutable) {
+		t.Errorf("err = %v, want ErrIDImmutable", err)
+	}
+	nf, _ := s.LoadOrCreate("")
+	if nf.OutputDevice != orig.OutputDevice {
+		t.Error("device changed despite id mismatch")
+	}
+}

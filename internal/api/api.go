@@ -18,16 +18,21 @@ import (
 
 // Config bundles everything the API needs, wired by main (K).
 type Config struct {
-	Cluster  Cluster
-	Group    Group
-	Media    Media
-	NodeCfg  NodeConfig         // config A: persist PATCH /api/node fields
-	Stats    func() StatusStats // closure over sink (E), clock (F), source (G) stats
-	Sink     func() SinkControl // closure → the live sink (E); may return nil
-	Ports    PortsResp          // actually-bound ports (§2), surfaced by /api/status
-	Listener net.Listener       // HTTP listener from netx.BindTCP (K owns binding)
-	DistFS   fs.FS              // SPA build FS = web.DistFS (D15)
-	Log      *slog.Logger
+	Cluster Cluster
+	Group   Group
+	Media   Media
+	NodeCfg NodeConfig         // config A: persist PATCH /api/node fields
+	Stats   func() StatusStats // closure over sink (E), clock (F), source (G) stats
+	Sink    func() SinkControl // closure → the live sink (E); may return nil
+	// ApplyOutputDevice reopens the output backend for the new device and swaps it
+	// into the live sink (D37, §8.5). Wired by main (K); only effective when the
+	// active backend kind is alsa (otherwise a no-op — persist+replicate still
+	// happen). nil makes the live-apply step a no-op.
+	ApplyOutputDevice func(device string)
+	Ports             PortsResp    // actually-bound ports (§2), surfaced by /api/status
+	Listener          net.Listener // HTTP listener from netx.BindTCP (K owns binding)
+	DistFS            fs.FS        // SPA build FS = web.DistFS (D15)
+	Log               *slog.Logger
 }
 
 // Server is the Echo HTTP server: REST + WebSocket + proxy + SPA.

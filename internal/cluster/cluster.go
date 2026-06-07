@@ -71,6 +71,8 @@ type Config struct {
 	Name          string
 	Volume        float64
 	OutputDelayMs int
+	OutputDevice  string                   // selected ALSA device id (D37)
+	OutputDevices []contracts.OutputDevice // enumerated devices on this node (D37)
 	Caps          contracts.Capabilities
 	Addrs         []string
 	HTTPPort      int
@@ -127,6 +129,8 @@ func New(cfg Config) (*Cluster, error) {
 		Name:          cfg.Name,
 		Volume:        cfg.Volume,
 		OutputDelayMs: cfg.OutputDelayMs,
+		OutputDevice:  cfg.OutputDevice,
+		OutputDevices: append([]contracts.OutputDevice(nil), cfg.OutputDevices...),
 		Addrs:         append([]string(nil), cfg.Addrs...),
 		HTTPPort:      cfg.HTTPPort,
 		StreamPort:    cfg.StreamPort,

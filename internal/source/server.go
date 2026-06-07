@@ -313,6 +313,9 @@ func (s *Server) udpLoop() {
 		default:
 		}
 		n, from, err := s.udp.ReadFromUDPAddrPort(buf)
+		// Canonicalize v4-mapped senders (see stream.Mux): keeps registry keys
+		// and observed addrs in plain IPv4 form on dual-stack sockets.
+		from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
 		if err != nil {
 			select {
 			case <-s.done:

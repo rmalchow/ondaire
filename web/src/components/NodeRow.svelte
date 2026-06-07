@@ -2,7 +2,12 @@
   // One node in the Nodes table (J arch §4): editable name, id, addrs, caps,
   // liveness, volume, output-delay calibration.
   import { shortId, cidrList, relTime, ports } from "../lib/fmt.js";
-  import { renameNode, setVolume, setOutputDelay } from "../lib/api.js";
+  import {
+    renameNode,
+    setVolume,
+    setOutputDelay,
+    setOutputDevice,
+  } from "../lib/api.js";
   import EditableText from "./EditableText.svelte";
   import VolumeSlider from "./VolumeSlider.svelte";
 
@@ -36,6 +41,17 @@
       e.preventDefault();
       e.target.blur();
     }
+  }
+
+  // output-device selection (D37). List comes from the node's enumeration; the
+  // <select> is hidden when empty (no ALSA on that host).
+  let outputDevices = $derived(node.outputDevices ?? []);
+  let outputDevice = $derived(node.outputDevice ?? "default");
+
+  function onDeviceChange(e) {
+    const dev = e.target.value;
+    if (dev === outputDevice) return;
+    setOutputDevice(node.id, dev).catch(() => {});
   }
 </script>
 
@@ -95,6 +111,19 @@
       </div>
     </div>
   </div>
+
+  {#if outputDevices.length > 0}
+    <div class="row wrap">
+      <label class="row small muted device">
+        output device
+        <select value={outputDevice} onchange={onDeviceChange}>
+          {#each outputDevices as d (d.id)}
+            <option value={d.id}>{d.desc} ({d.id})</option>
+          {/each}
+        </select>
+      </label>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -112,5 +141,11 @@
   }
   .delay .hint {
     text-align: right;
+  }
+  .device {
+    gap: 6px;
+  }
+  .device select {
+    max-width: 16rem;
   }
 </style>

@@ -25,20 +25,22 @@ func newDocument() *Document {
 
 // NodeRecord — owned and only ever written by the node it describes (§4).
 type NodeRecord struct {
-	ID            id.ID                  `json:"id"`
-	Name          string                 `json:"name"`
-	Volume        float64                `json:"volume"`        // playback gain 0.0–1.0 (D35)
-	OutputDelayMs int                    `json:"outputDelayMs"` // hardware latency calibration, ±500 (D36)
-	Addrs         []string               `json:"addrs"`         // self-reported CIDRs (§3.1)
-	HTTPPort      int                    `json:"httpPort"`
-	StreamPort    int                    `json:"streamPort"`
-	SourcePort    int                    `json:"sourcePort"`
-	GossipPort    int                    `json:"gossipPort"`
-	Caps          contracts.Capabilities `json:"caps"`
-	Following     id.ID                  `json:"following"` // id.Zero == solo
-	Observed      map[id.ID]obsEntry     `json:"observed"`  // peerID -> {ip,lastSeen}
-	Version       uint64                 `json:"version"`
-	UpdatedAt     int64                  `json:"updatedAt"` // unix seconds, LWW timestamp
+	ID            id.ID                    `json:"id"`
+	Name          string                   `json:"name"`
+	Volume        float64                  `json:"volume"`        // playback gain 0.0–1.0 (D35)
+	OutputDelayMs int                      `json:"outputDelayMs"` // hardware latency calibration, ±500 (D36)
+	OutputDevice  string                   `json:"outputDevice"`  // selected ALSA device id (D37)
+	OutputDevices []contracts.OutputDevice `json:"outputDevices"` // enumerated devices on this node (D37)
+	Addrs         []string                 `json:"addrs"`         // self-reported CIDRs (§3.1)
+	HTTPPort      int                      `json:"httpPort"`
+	StreamPort    int                      `json:"streamPort"`
+	SourcePort    int                      `json:"sourcePort"`
+	GossipPort    int                      `json:"gossipPort"`
+	Caps          contracts.Capabilities   `json:"caps"`
+	Following     id.ID                    `json:"following"` // id.Zero == solo
+	Observed      map[id.ID]obsEntry       `json:"observed"`  // peerID -> {ip,lastSeen}
+	Version       uint64                   `json:"version"`
+	UpdatedAt     int64                    `json:"updatedAt"` // unix seconds, LWW timestamp
 }
 
 // obsEntry is one observed-IP record inside a NodeRecord (§3.1).
@@ -192,6 +194,9 @@ func cloneNode(r *NodeRecord) *NodeRecord {
 	cp := *r
 	if r.Addrs != nil {
 		cp.Addrs = append([]string(nil), r.Addrs...)
+	}
+	if r.OutputDevices != nil {
+		cp.OutputDevices = append([]contracts.OutputDevice(nil), r.OutputDevices...)
 	}
 	if r.Caps.Codecs != nil {
 		cp.Caps.Codecs = append([]string(nil), r.Caps.Codecs...)

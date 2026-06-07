@@ -9,8 +9,8 @@ to S-skeleton.md are marked ✎S.)
 
 ## Decisions
 
-**D1 — node.json holds exactly `{id, name, volume, outputDelayMs}`**
-*(amended by D35/D36)*. (A) Everything else (following, ports, observations)
+**D1 — node.json holds exactly `{id, name, volume, outputDelayMs, outputDevice}`**
+*(amended by D35/D36/D37)*. (A) Everything else (following, ports, observations)
 is runtime/replicated, in-memory only, rebuilt on start.
 
 **D2 — `ENSEMBLE_OUTPUT` is env-only** (`auto` default | `null` | `file:<path>`
@@ -298,6 +298,30 @@ subtracts it); `Sink.SetDelayOffset` takes nanoseconds (I converts
 `ms · 1e6`). A live change calls `Sink.SetDelayOffset` → the sink drops its
 buffer and fires the restart hook (RESTART → burst re-prime, §8.6) — the
 user-visible cost is a sub-second blip on that node only. (A/C/E/I/J)
+
+## Output-device selection (user addition)
+
+**D37 — output-device selection**: each node may select which ALSA device the
+alsa backend opens, instead of always `default`. *Enumeration source* is
+`/proc/asound/pcm`, parsed with zero external deps (`sink.ListOutputDevices` →
+`parseProcPCM`, pure/testable): playback-capable `CC-DD` lines become
+`{ID:"hw:C,D", Desc:<id>}`, prepended with `{ID:"default", Desc:"system
+default"}`. The list is empty when libasound is not loadable (the alsa backend
+never registered → selection is meaningless) OR `/proc/asound/pcm` is missing.
+It is enumerated **once at startup** and reported on the node record
+(`OutputDevices []contracts.OutputDevice`) plus the resolved `NodeView`.
+*Persistence*: `node.json` gains `outputDevice` (default `"default"`,
+presence-aware decode + clamp/normalize like `volume`); `config.SetOutputDevice`
+mirrors `SetVolume`. *Selection semantics*: `sink.OpenDevice(spec, device, log)`
+routes the configured device down the alsa path (auto-selected or explicit
+`alsa`); every other backend ignores it — the **exec backend ignores the device
+in v1** (plays to its tool's own default). *Live apply*: `PATCH /api/node
+{outputDevice}` validates against the node's own enumerated list or `"default"`
+(≤64 chars, non-empty), then persist (A) → replicate (C, `SetOutputDevice`) →
+apply: only when the active backend kind is alsa, K reopens the backend for the
+new device and calls `Playout.SwapBackend(b)` (under the sink mutex: close old,
+set new, re-assert `DelayReporter`, log `output backend swapped`). A brief audio
+blip is accepted; the session is **not** restarted. (A/C/E/I/J/K)
 
 ## Confirmed as designed (no change)
 

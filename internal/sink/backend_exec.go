@@ -19,8 +19,8 @@ type execTool struct {
 
 // execTools is the auto-pick order. First found on $PATH wins.
 var execTools = []execTool{
-	{"pw-play", []string{"--rate", "48000", "--channels", "2", "--format", "s16", "-"}},
-	{"pw-cat", []string{"-p", "--rate", "48000", "--channels", "2", "--format", "s16", "-"}},
+	{"pw-play", []string{"--raw", "--rate", "48000", "--channels", "2", "--format", "s16", "-"}},
+	{"pw-cat", []string{"-p", "--raw", "--rate", "48000", "--channels", "2", "--format", "s16", "-"}},
 	{"aplay", []string{"-q", "-f", "S16_LE", "-r", "48000", "-c", "2", "-t", "raw", "-"}},
 	{"paplay", []string{"--raw", "--rate=48000", "--channels=2", "--format=s16le"}},
 }

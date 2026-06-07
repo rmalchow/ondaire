@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"ensemble/internal/id"
 )
@@ -22,6 +23,12 @@ const (
 	maxDelayMs     = 500
 	defaultDelayMs = 0
 )
+
+// defaultOutputDevice is the ALSA device selected when node.json omits it (D37).
+const defaultOutputDevice = "default"
+
+// maxOutputDeviceLen bounds a hand-edited device id (matches the API cap).
+const maxOutputDeviceLen = 64
 
 var (
 	// ErrCorruptNodeFile is returned when node.json exists but cannot be parsed
@@ -43,6 +50,7 @@ type NodeFile struct {
 	Name          string  `json:"name"`          // renameable
 	Volume        float64 `json:"volume"`        // playback gain 0.0–1.0, default 1.0 (D35)
 	OutputDelayMs int     `json:"outputDelayMs"` // hardware latency calibration, default 0, clamp ±500 (D36)
+	OutputDevice  string  `json:"outputDevice"`  // selected ALSA device id, default "default" (D37)
 }
 
 // rawNodeFile is the presence-aware decode shape: pointer fields tell "absent"
@@ -53,6 +61,7 @@ type rawNodeFile struct {
 	Name          string   `json:"name"`
 	Volume        *float64 `json:"volume"`
 	OutputDelayMs *int     `json:"outputDelayMs"`
+	OutputDevice  *string  `json:"outputDevice"`
 }
 
 // Store owns a single node.json file. One Store per node. Methods are safe for
@@ -104,6 +113,7 @@ func (s *Store) LoadOrCreate(initialName string) (NodeFile, error) {
 		Name:          raw.Name,
 		Volume:        defaultVolume,
 		OutputDelayMs: defaultDelayMs,
+		OutputDevice:  defaultOutputDevice,
 	}
 	if raw.Volume != nil {
 		nf.Volume = *raw.Volume
@@ -111,8 +121,12 @@ func (s *Store) LoadOrCreate(initialName string) (NodeFile, error) {
 	if raw.OutputDelayMs != nil {
 		nf.OutputDelayMs = *raw.OutputDelayMs
 	}
+	if raw.OutputDevice != nil {
+		nf.OutputDevice = *raw.OutputDevice
+	}
 	nf.Volume = clampVolume(nf.Volume)
 	nf.OutputDelayMs = clampDelayMs(nf.OutputDelayMs)
+	nf.OutputDevice = normalizeDevice(nf.OutputDevice)
 	return nf, nil
 }
 
@@ -128,6 +142,7 @@ func (s *Store) create(initialName string) (NodeFile, error) {
 		Name:          name,
 		Volume:        defaultVolume,
 		OutputDelayMs: defaultDelayMs,
+		OutputDevice:  defaultOutputDevice,
 	}
 	if err := s.write(nf); err != nil {
 		return NodeFile{}, err
@@ -162,6 +177,16 @@ func (s *Store) SetOutputDelayMs(nodeID id.ID, ms int) (NodeFile, error) {
 	})
 }
 
+// SetOutputDevice writes a new outputDevice while preserving id/name/volume/
+// outputDelayMs, via the same atomic replace. The id argument MUST equal the
+// persisted id (ErrIDImmutable on mismatch). The device is normalized (blank →
+// "default", trimmed, capped) before write (D37).
+func (s *Store) SetOutputDevice(nodeID id.ID, device string) (NodeFile, error) {
+	return s.writeAtomic(nodeID, func(nf *NodeFile) {
+		nf.OutputDevice = normalizeDevice(device)
+	})
+}
+
 // writeAtomic re-reads the current NodeFile, asserts the id matches, applies the
 // single-field mutate, and atomically replaces node.json. On any error the old
 // file is untouched.
@@ -176,6 +201,7 @@ func (s *Store) writeAtomic(nodeID id.ID, mutate func(*NodeFile)) (NodeFile, err
 	mutate(&cur)
 	cur.Volume = clampVolume(cur.Volume)
 	cur.OutputDelayMs = clampDelayMs(cur.OutputDelayMs)
+	cur.OutputDevice = normalizeDevice(cur.OutputDevice)
 	if err := s.write(cur); err != nil {
 		return NodeFile{}, err
 	}
@@ -232,6 +258,20 @@ func clampVolume(v float64) float64 {
 		return maxVolume
 	}
 	return v
+}
+
+// normalizeDevice trims, defaults a blank value to "default", and caps the
+// length of an output-device id (D37). It does not validate against an
+// enumerated list — that is the API handler's job at PATCH time.
+func normalizeDevice(d string) string {
+	d = strings.TrimSpace(d)
+	if d == "" {
+		return defaultOutputDevice
+	}
+	if len(d) > maxOutputDeviceLen {
+		d = d[:maxOutputDeviceLen]
+	}
+	return d
 }
 
 func clampDelayMs(ms int) int {

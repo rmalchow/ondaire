@@ -72,6 +72,21 @@ func (c *Cluster) SetOutputDelayMs(ms int) {
 	c.broadcastOwn(snap)
 }
 
+// SetOutputDevice sets this node's selected ALSA output device (D37). Caller
+// validates against the enumerated list; C stores verbatim. No-op when unchanged.
+func (c *Cluster) SetOutputDevice(device string) {
+	c.mu.Lock()
+	if c.closed || c.own().OutputDevice == device {
+		c.mu.Unlock()
+		return
+	}
+	r := c.bumpOwn()
+	r.OutputDevice = device
+	snap := cloneNode(r)
+	c.mu.Unlock()
+	c.broadcastOwn(snap)
+}
+
 // SetFollowing sets this node's following target (§5). id.Zero == solo master.
 func (c *Cluster) SetFollowing(target id.ID) {
 	c.mu.Lock()

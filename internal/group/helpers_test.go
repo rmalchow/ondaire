@@ -24,6 +24,9 @@ type testRig struct {
 
 	nowMu sync.Mutex
 	now   time.Time
+
+	persistMu sync.Mutex
+	persisted []id.ID // every PersistFollowing(target) the engine drove (D45)
 }
 
 // newRig builds a rig whose self is `self`, with a pull source of n frames.
@@ -52,8 +55,23 @@ func newRig(self id.ID, srcFrames int, live bool) *testRig {
 		Follow:   r.fc,
 		Caps:     contracts.Capabilities{Codecs: []string{"pcm"}},
 		now:      r.nowFn(),
+		PersistFollowing: func(t id.ID) {
+			r.persistMu.Lock()
+			r.persisted = append(r.persisted, t)
+			r.persistMu.Unlock()
+		},
 	})
 	return r
+}
+
+// lastPersisted returns the most recent PersistFollowing target the engine drove.
+func (r *testRig) lastPersisted() (id.ID, bool) {
+	r.persistMu.Lock()
+	defer r.persistMu.Unlock()
+	if len(r.persisted) == 0 {
+		return id.Zero, false
+	}
+	return r.persisted[len(r.persisted)-1], true
 }
 
 func (r *testRig) nowFn() func() time.Time {

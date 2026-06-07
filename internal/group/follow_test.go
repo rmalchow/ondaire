@@ -25,6 +25,33 @@ func TestFollowAliveMaster(t *testing.T) {
 	}
 }
 
+func TestFollowPersistsFollowing(t *testing.T) {
+	self, target := idN(1), idN(2)
+	r := newRig(self, 0, false)
+	snap := soloSnap(self)
+	snap.Nodes = append(snap.Nodes, node(target, id.Zero, true))
+	r.cl.setSnap(snap)
+
+	if err := r.e.Follow(target); err != nil {
+		t.Fatalf("Follow: %v", err)
+	}
+	// D45: the engine writes BOTH the replicated cluster record AND persists it.
+	if got, ok := r.cl.lastFollowing(); !ok || got != target {
+		t.Fatalf("cluster SetFollowing = %v,%v want %v", got, ok, target)
+	}
+	if got, ok := r.lastPersisted(); !ok || got != target {
+		t.Fatalf("PersistFollowing = %v,%v want %v", got, ok, target)
+	}
+
+	// Unfollow persists the clear (Zero) too.
+	if err := r.e.Unfollow(); err != nil {
+		t.Fatalf("Unfollow: %v", err)
+	}
+	if got, ok := r.lastPersisted(); !ok || !got.IsZero() {
+		t.Fatalf("PersistFollowing after Unfollow = %v,%v want Zero", got, ok)
+	}
+}
+
 func TestFollowRejectsSelf(t *testing.T) {
 	self := idN(1)
 	r := newRig(self, 0, false)

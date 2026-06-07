@@ -10,6 +10,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # ---- launch two nodes (sourced; caller controls lifetime) -------------------
 DEV2_WAIT=0
 # shellcheck disable=SC1091
+export DEV2_STAGGER="${DEV2_STAGGER:-3}"   # real start gap: catches clock-epoch mixing
 source "$ROOT/scripts/dev2.sh"
 
 N1="http://127.0.0.1:18080"
@@ -132,7 +133,14 @@ post_retry "$N1/api/play" '{"uri":"file:tone.wav"}' || die "play on n1 kept fail
 wait_for "$N1/api/status" '.sink.played>0' true 8 || die "n1 sink not playing"
 wait_for "$N2/api/status" '.sink.played>0' true 8 || die "n2 sink not playing"
 wait_for "$N1/api/status" '.source.clients' 2 8 || die "n1 source.clients != 2"
-pass "5 play → both sinks playing; n1 source.clients=2"
+# Epoch-mixing regression: with a staggered start the member's clock offset is
+# seconds-large; playout must STILL hold only ~bufferMs of frames. A buffered
+# depth tracking |offset| (≈50/frames per stagger second) means local time
+# leaked into the pts/deadline translation (clock.MonoNow contract).
+sleep 2
+buf2=$(curl -s "$N2/api/status" | jq '.sink.buffered')
+[ "$buf2" -lt 25 ] || die "n2 buffered=$buf2 (epoch mixing: playout lags the clock offset)"
+pass "5 play → both sinks playing; n1 source.clients=2; buffered sane ($buf2)"
 
 # ---- 6. pause (D39): both sinks STOP advancing; state=="paused" --------------
 # Snapshot both played counters, pause, allow the in-flight tail to drain, then
@@ -262,10 +270,58 @@ wait_for "$N2/api/cluster" '.groups[]|select(.id=="'"$GID"'").name' persisted-ro
   || die "n2 lost the group name across restart (D41 persistence)"
 pass "15 group-name persistence: name survives n2 restart (D41)"
 
-# ---- 16. kill the master (n2) → n1 reverts to solo within ~15s --------------
+# ---- 15b. follow persistence: rejoin previous group on return (D45) ---------
+# Re-form a clean group with n2 FOLLOWING n1 (master), then kill n2 and relaunch
+# it against the SAME data dir. n2's node.json persisted following=ID1 at the
+# follow, and InitialFollowing seeds its own record at boot, so the EXISTING
+# group machinery re-forms n1's group within ~10s — no new rejoin logic.
+post_retry "$N1/api/unfollow" '' || die "n1 unfollow failed"
+wait_for "$N1/api/status" '.role' solo 15 || die "n1 not solo before rejoin setup"
+post_retry "$N2/api/follow" "{\"target\":\"$ID1\"}" || die "n2 follow n1 failed"
+wait_for "$N1/api/cluster" '.groups[]|select(.master=="'"$ID1"'")|.members|length' 2 20 || die "n2 did not join n1 group"
+# n2 persisted following=ID1 to its node.json (D45).
+sleep 1
+[ -f "$DATA2/node.json" ] || die "n2 node.json missing"
+F2=$(jq -r '.following' "$DATA2/node.json")
+[ "$F2" = "$ID1" ] || die "n2 node.json following=$F2 want $ID1 (D45 persist)"
+# Kill n2 and relaunch SAME data dir; previous following restores it to n1's group.
 kill "$PID2" 2>/dev/null || true
-wait_for "$N1/api/status" '.role' solo 20 || die "n1 did not revert to solo after master death"
-pass "16 master (n2) killed → n1 self-heals to solo"
+wait "$PID2" 2>/dev/null || true
+"$BIN" --data "$DATA2" --media "$ROOT/testdata/media" --name n2 --host 127.0.0.1 \
+       --http-port 28080 --stream-port 29090 --source-port 29200 --gossip-port 27946 \
+       --no-mdns --join 127.0.0.1:17946 >"$LOG2" 2>&1 &  PID2=$!
+wait_for "$N2/api/status" '.id|length' 32 30 || die "n2 did not restart (rejoin)"
+wait_for "$N2/api/cluster" '.nodes[]|select(.id=="'"$ID2"'").following' "$ID1" 15 || die "n2 following not restored at boot"
+wait_for "$N1/api/cluster" '.groups[]|select(.master=="'"$ID1"'")|.members|length' 2 15 || die "n2 did not rejoin n1 group on return"
+wait_for "$N2/api/status" '.role' follower 15 || die "n2 not follower after rejoin"
+pass "15b follow persistence: n2 rejoins n1's group on return (D45)"
+
+# ---- 15c. solo fallback: master absent on return → self-heal clears (D45) ----
+# Kill BOTH; relaunch ONLY n2 (master n1 absent). n2 boots seeded with
+# following=ID1, but n1 never appears, so the §5 self-heal grace fires and resets
+# n2 to solo — and clears its persisted following back to "".
+kill "$PID1" 2>/dev/null || true; wait "$PID1" 2>/dev/null || true
+kill "$PID2" 2>/dev/null || true; wait "$PID2" 2>/dev/null || true
+"$BIN" --data "$DATA2" --media "$ROOT/testdata/media" --name n2 --host 127.0.0.1 \
+       --http-port 28080 --stream-port 29090 --source-port 29200 --gossip-port 27946 \
+       --no-mdns >"$LOG2" 2>&1 &  PID2=$!
+wait_for "$N2/api/status" '.id|length' 32 30 || die "n2 did not restart (solo fallback)"
+# Master n1 is gone; within the ~15s grace n2 self-heals to solo.
+wait_for "$N2/api/status" '.role' solo 20 || die "n2 did not self-heal to solo (master absent)"
+# Self-heal cleared its replicated following back to Zero (renders as 32 hex
+# zeros in /api/cluster, id.ID marshaling) — i.e. no longer ID1.
+ZERO=$(printf '0%.0s' $(seq 32))
+wait_for "$N2/api/cluster" '.nodes[]|select(.id=="'"$ID2"'").following' "$ZERO" 20 || die "n2 following not cleared in cluster"
+# And cleared the persisted following back to "" in node.json (D45).
+sleep 1
+F2=$(jq -r '.following' "$DATA2/node.json")
+[ "$F2" = "" ] || die "n2 node.json following=$F2 want empty (self-heal clears, D45)"
+pass "15c solo fallback: master absent → n2 self-heals to solo, following cleared (D45)"
+
+# ---- 16. final: n2 (now solo) is the only node left ; n1 already gone --------
+# n1 was killed in 15c; n2 self-healed to solo. Confirm n2 stands alone.
+wait_for "$N2/api/status" '.role' solo 5 || die "n2 not solo at teardown"
+pass "16 teardown: n2 solo after master (n1) departure"
 
 echo
 echo "e2e OK ($PASS passed, $FAIL failed)"

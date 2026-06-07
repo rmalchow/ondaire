@@ -28,6 +28,15 @@ func monoNow() int64 {
 	return int64(time.Since(monoEpoch))
 }
 
+// MonoNow exposes the package's monotonic clock. EVERY local-time value that
+// flows through the offset translation (pts stamping in H, playout deadlines
+// in E) MUST come from this one clock: the follower measures offsets between
+// ITS now() and the master's — feeding wall-clock time into LocalToMaster /
+// comparing MasterToLocal output against wall time silently adds the
+// inter-process start-delta to the playout path (the "same-host offset"
+// lag-by-|offset| bug).
+func MonoNow() int64 { return monoNow() }
+
 // defaultProbeInterval is the production 1 Hz probe cadence (§7).
 const defaultProbeInterval = time.Second
 

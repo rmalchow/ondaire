@@ -22,6 +22,9 @@ export ENSEMBLE_LOG="${ENSEMBLE_LOG:-info}"
 "$BIN" --data "$DATA1" --media "$ROOT/testdata/media" --name n1 --host 127.0.0.1 \
        --http-port 18080 --stream-port 19090 --source-port 19200 --gossip-port 17946 --no-mdns \
        >"$LOG1" 2>&1 &  PID1=$!
+# Stagger n2's start: cross-process clock offsets equal the start delta, and
+# the epoch-mixing regression (lag-by-|offset|) only shows with a real gap.
+sleep "${DEV2_STAGGER:-0}"
 "$BIN" --data "$DATA2" --media "$ROOT/testdata/media" --name n2 --host 127.0.0.1 \
        --http-port 28080 --stream-port 29090 --source-port 29200 --gossip-port 27946 \
        --no-mdns --join 127.0.0.1:17946 >"$LOG2" 2>&1 &  PID2=$!

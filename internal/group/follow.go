@@ -18,7 +18,7 @@ func (e *Engine) follow(target id.ID) error {
 		e.log.Warn("follow rejected", "target", target.String(), "err", err)
 		return err
 	}
-	e.p.Cluster.SetFollowing(target)
+	e.setFollowing(target)
 	e.log.Info("following", "target", target.String(), "reason", "user")
 	return nil
 }

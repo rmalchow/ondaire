@@ -9,9 +9,11 @@ to S-skeleton.md are marked ✎S.)
 
 ## Decisions
 
-**D1 — node.json holds exactly `{id, name, volume, outputDelayMs, outputDevice}`**
-*(amended by D35/D36/D37)*. (A) Everything else (following, ports, observations)
-is runtime/replicated, in-memory only, rebuilt on start.
+**D1 — node.json holds `{id, name, volume, outputDelayMs, outputDevice, disabled,
+following}`** *(amended by D35/D36/D37/D40/D45)*. (A) The remaining node-record
+fields (ports, addrs, caps, observations) are runtime/replicated, in-memory only,
+rebuilt on start. `following` (D45) is persisted as the boot seed + last-known
+follow target (`""` == solo); its live value still lives in the replicated record.
 
 **D2 — `ENSEMBLE_OUTPUT` is env-only** (`auto` default | `null` | `file:<path>`
 | explicit backend name). No flag. Added to spec §2. (A/E/K)
@@ -465,6 +467,35 @@ patch from 2a8bab7 is removed). D41 is narrowed to names-only.
   ONLY (XOR-keyed, purge-exempt, kept forever). Group settings are NO LONGER
   persisted (master-keyed live state); node records + playback stay unpersisted.
   (spec §4/§5/§9.1 updated.)
+
+## Persisted following — rejoin on return (user round)
+
+**D45 — a node persists its `following` and rejoins its previous group on
+return; self-heal clears it; grace is the decision window**. A node that
+temporarily disappears (reboot, crash, brief drop) should come back into the
+group it was in, without operator action.
+
+- **Persist (amends D1)**. `node.json` gains `following` — a 32-hex node id, or
+  `""` for solo (default). Presence-aware decode like `volume`; an absent or
+  malformed value loads as `""` (warn + treat as empty, never fatal). The config
+  `Store` gains `SetFollowing(id.ID)` following the `SetVolume` pattern (`id.Zero`
+  persists as `""`); `Config` exposes the loaded value as `id.ID`.
+- **Boot restore**. `cluster.Config` gains `InitialFollowing id.ID`; `cluster.New`
+  seeds this node's own record's `Following` with it — gossiped from version 1,
+  exactly as if `SetFollowing` had been called. K passes `cfg.Following`. The
+  EXISTING machinery does the rest: if the old master is alive + a master,
+  `DeriveGroups` re-forms the group; if it is dead/unknown, the §5 self-heal grace
+  fires and resets the node to solo. There is **no new rejoin logic**.
+- **Persist on change**. `group.Params` gains `PersistFollowing func(id.ID)`
+  (nil-safe no-op; K wires it to the config store's `SetFollowing`). The engine
+  calls it at EVERY site it writes `cluster.SetFollowing`: `Follow`, `Unfollow`,
+  takeover-directed follow, and the self-heal reset — via one internal
+  `setFollowing` helper that does both. Logged at debug.
+- **Grace is the decision window**. The self-heal `healAt` arms when the engine
+  first OBSERVES the dangling follow (the first stale reconcile), not at process
+  start, so slow gossip convergence cannot insta-clear a follow that is merely
+  still propagating. Verified: `heal.go` already keys off `mv.stale` per reconcile
+  and arms `now + Grace` only on the first stale tick — no change needed.
 
 ## Confirmed as designed (no change)
 

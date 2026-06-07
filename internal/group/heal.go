@@ -24,7 +24,7 @@ func (e *Engine) reconcileHeal(mv myView, now time.Time) {
 		return
 	}
 	if !now.Before(e.healAt) {
-		e.p.Cluster.SetFollowing(id.Zero)
+		e.setFollowing(id.Zero)
 		e.healAt = time.Time{}
 		e.log.Info("unfollowing (now solo)", "reason", "self-heal", "target", mv.self.Following.String())
 	}

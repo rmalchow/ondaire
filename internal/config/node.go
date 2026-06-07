@@ -46,10 +46,13 @@ var (
 	ErrIDImmutable = errors.New("config: node id is immutable")
 )
 
-// NodeFile is the on-disk identity document (§1, D1). Exactly these four fields
+// NodeFile is the on-disk identity document (§1, D1, amended D45). These fields
 // are persisted; everything else in the node record (addrs, ports, caps,
-// following, observed) is runtime/replicated state owned by the cluster piece
-// (C), NOT stored here.
+// observed) is runtime/replicated state owned by the cluster piece (C), NOT
+// stored here. `following` is the exception (D45): it is persisted so a node
+// that temporarily disappears rejoins its previous group on return — its live
+// value still lives in the replicated node record (C), this is only the seed +
+// last-known.
 type NodeFile struct {
 	ID            id.ID    `json:"id"`            // immutable, 32-hex (id.ID TextMarshaler)
 	Name          string   `json:"name"`          // renameable
@@ -57,6 +60,7 @@ type NodeFile struct {
 	OutputDelayMs int      `json:"outputDelayMs"` // hardware latency calibration, default 0, clamp ±500 (D36)
 	OutputDevice  string   `json:"outputDevice"`  // selected ALSA device id, default "default" (D37)
 	Disabled      []string `json:"disabled"`      // operator-disabled features (D40): subset of {playback,opus,input}
+	Following     string   `json:"following"`     // last-known follow target as 32-hex (D45); "" == solo
 }
 
 // rawNodeFile is the presence-aware decode shape: pointer fields tell "absent"
@@ -69,6 +73,7 @@ type rawNodeFile struct {
 	OutputDelayMs *int      `json:"outputDelayMs"`
 	OutputDevice  *string   `json:"outputDevice"`
 	Disabled      *[]string `json:"disabled"`
+	Following     *string   `json:"following"`
 }
 
 // Store owns a single node.json file. One Store per node. Methods are safe for
@@ -134,10 +139,14 @@ func (s *Store) LoadOrCreate(initialName string) (NodeFile, error) {
 	if raw.Disabled != nil {
 		nf.Disabled = *raw.Disabled
 	}
+	if raw.Following != nil {
+		nf.Following = *raw.Following
+	}
 	nf.Volume = clampVolume(nf.Volume)
 	nf.OutputDelayMs = clampDelayMs(nf.OutputDelayMs)
 	nf.OutputDevice = normalizeDevice(nf.OutputDevice)
 	nf.Disabled = normalizeDisabled(nf.Disabled)
+	nf.Following = normalizeFollowing(nf.Following)
 	return nf, nil
 }
 
@@ -208,6 +217,19 @@ func (s *Store) SetDisabled(nodeID id.ID, disabled []string) (NodeFile, error) {
 	})
 }
 
+// SetFollowing writes the last-known follow target while preserving the other
+// fields, via the same atomic replace (D45). The id argument MUST equal the
+// persisted id (ErrIDImmutable on mismatch). target id.Zero persists as "" (solo).
+func (s *Store) SetFollowing(nodeID, target id.ID) (NodeFile, error) {
+	return s.writeAtomic(nodeID, func(nf *NodeFile) {
+		if target.IsZero() {
+			nf.Following = ""
+		} else {
+			nf.Following = target.String()
+		}
+	})
+}
+
 // writeAtomic re-reads the current NodeFile, asserts the id matches, applies the
 // single-field mutate, and atomically replaces node.json. On any error the old
 // file is untouched.
@@ -224,6 +246,7 @@ func (s *Store) writeAtomic(nodeID id.ID, mutate func(*NodeFile)) (NodeFile, err
 	cur.OutputDelayMs = clampDelayMs(cur.OutputDelayMs)
 	cur.OutputDevice = normalizeDevice(cur.OutputDevice)
 	cur.Disabled = normalizeDisabled(cur.Disabled)
+	cur.Following = normalizeFollowing(cur.Following)
 	if err := s.write(cur); err != nil {
 		return NodeFile{}, err
 	}
@@ -315,6 +338,20 @@ func normalizeDisabled(in []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// normalizeFollowing trims and validates the persisted follow target (D45).
+// A blank value, or anything that is not 32 hex chars, normalizes to "" (solo)
+// — a hand-edited or stale-format value is treated as no-follow, never fatal.
+func normalizeFollowing(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if _, err := id.Parse(s); err != nil {
+		return ""
+	}
+	return s
 }
 
 func clampDelayMs(ms int) int {

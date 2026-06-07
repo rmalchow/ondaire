@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"ensemble/internal/id"
 )
 
 // envMap returns a Getenv func backed by m.
@@ -380,6 +382,51 @@ func TestConfigSetOutputDelayMsPersistsAndUpdatesField(t *testing.T) {
 	}
 	if cfg.OutputDelayMs != 500 {
 		t.Errorf("OutputDelayMs = %v, want 500 (clamped)", cfg.OutputDelayMs)
+	}
+}
+
+func TestConfigLoadDefaultsFollowingEmpty(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(Options{Getenv: envMap(map[string]string{EnvDataDir: dir})})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Following.IsZero() {
+		t.Errorf("Following = %v, want zero", cfg.Following)
+	}
+}
+
+func TestConfigSetFollowingPersistsAndUpdatesField(t *testing.T) {
+	dir := t.TempDir()
+	getenv := envMap(map[string]string{EnvDataDir: dir})
+	cfg, err := Load(Options{Getenv: getenv})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	target := id.New()
+	if err := cfg.SetFollowing(target); err != nil {
+		t.Fatalf("SetFollowing: %v", err)
+	}
+	if cfg.Following != target {
+		t.Errorf("Following = %v, want %v", cfg.Following, target)
+	}
+	reloaded, err := Load(Options{Getenv: getenv})
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Following != target {
+		t.Errorf("persisted following = %v, want %v", reloaded.Following, target)
+	}
+	// Zero clears it back to solo (persists as "").
+	if err := cfg.SetFollowing(id.Zero); err != nil {
+		t.Fatalf("SetFollowing(Zero): %v", err)
+	}
+	if !cfg.Following.IsZero() {
+		t.Errorf("Following = %v, want zero after clear", cfg.Following)
+	}
+	reloaded2, _ := Load(Options{Getenv: getenv})
+	if !reloaded2.Following.IsZero() {
+		t.Errorf("persisted following = %v, want zero after clear", reloaded2.Following)
 	}
 }
 

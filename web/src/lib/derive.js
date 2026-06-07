@@ -65,6 +65,26 @@ export function selfNode(snapshot, selfId) {
   return nodeById(snapshot, selfId);
 }
 
+// deriveRole computes self's LIVE role from the cluster snapshot (not the
+// one-shot boot status, which goes stale). Find the group self belongs to:
+//   - self is the group's master & the group has >1 member → "master"
+//   - self is the group's master & alone                   → "solo"
+//   - self is a member but not the master                  → "follower"
+// Falls back to the boot-status role (or "solo") when self isn't yet resolvable
+// in the snapshot (convergence skew / unknown self id).
+export function deriveRole(snapshot, selfId, fallback) {
+  const fb = fallback || "solo";
+  if (!snapshot || !snapshot.groups || !selfId) return fb;
+  const group = snapshot.groups.find(
+    (g) => g.members && g.members.includes(selfId),
+  );
+  if (!group) return fb;
+  if (group.master === selfId) {
+    return (group.members.length > 1) ? "master" : "solo";
+  }
+  return "follower";
+}
+
 // addTargets returns alive nodes that are NOT members of the given group —
 // candidates for the group card's "Add node…" control. Following one onto the
 // group's master folds it into this group (§5.1).

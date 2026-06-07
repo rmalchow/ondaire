@@ -2,7 +2,7 @@
   // One member inside a group card (J arch §4): name, volume, master badge,
   // source stats (master row only when playing), make-master, leave, join.
   import { relTime } from "../lib/fmt.js";
-  import { renameNode, setVolume, makeMaster, unfollow } from "../lib/api.js";
+  import { renameNode, setVolume, unfollow } from "../lib/api.js";
   import EditableText from "./EditableText.svelte";
   import VolumeSlider from "./VolumeSlider.svelte";
   import JoinDropdown from "./JoinDropdown.svelte";
@@ -39,19 +39,28 @@
   <span class="spacer"></span>
 
   <span class="muted small">
-    {member.alive ? relTime(member.lastSeen) : "offline"}
-    {#if member.stale}<span class="offline"> stale</span>{/if}
+    {#if member.alive}
+      {relTime(member.lastSeen)}
+    {:else}
+      offline{#if member.stale}<span class="offline"> · stale</span>{/if}
+    {/if}
   </span>
 
-  {#if !isThisMaster}
-    <button
-      class="btn btn-accent"
-      onclick={() => makeMaster(member.id, member.id)}
-      title="take mastership to this node">Make master</button
-    >
-  {/if}
   {#if !solo}
-    <button class="btn" onclick={() => unfollow(member.id)}>Leave</button>
+    <button
+      class="btn icon-btn"
+      onclick={() => unfollow(member.id)}
+      title="leave group"
+      aria-label="leave group">🚪</button
+    >
   {/if}
   <JoinDropdown {member} {snapshot} />
 </div>
+
+<style>
+  /* Leave control: icon-only, compact, no text width (Fix 2). */
+  .icon-btn {
+    line-height: 1;
+    padding: 4px 7px;
+  }
+</style>

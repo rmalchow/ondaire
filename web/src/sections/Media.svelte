@@ -3,7 +3,8 @@
   // and Input play paths gated on the picked node's reported sources (§6.1).
   import { bytes, relTime } from "../lib/fmt.js";
   import { nodeById } from "../lib/derive.js";
-  import { getMedia, play } from "../lib/api.js";
+  import { getMedia, playOnNode } from "../lib/api.js";
+  import { cluster } from "../lib/ws.svelte.js";
   import { entriesFor, crumbs, parentDir, joinDir } from "../lib/tree.js";
 
   let { snapshot, self } = $props();
@@ -59,14 +60,23 @@
       });
   });
 
+  // playHere takes over the picked node when it's a follower, then plays. The
+  // live snapshot comes from the ws store (playOnNode polls it to confirm the
+  // takeover landed before issuing /play). §5.2 / J §4.
+  function playHere(uri) {
+    const name = picked?.name;
+    playOnNode(pickedNodeId, uri, () => cluster.snapshot, { name }).catch(
+      () => {},
+    );
+  }
   function playFile(f) {
-    play(pickedNodeId, "file:" + f.path).catch(() => {});
+    playHere("file:" + f.path);
   }
   function playUrl() {
-    if (urlValid) play(pickedNodeId, url.trim()).catch(() => {});
+    if (urlValid) playHere(url.trim());
   }
   function playInput() {
-    play(pickedNodeId, "input:").catch(() => {});
+    playHere("input:");
   }
 
   function enter(folder) {

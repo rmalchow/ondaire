@@ -10,6 +10,7 @@ import {
   groupNameIsDerived,
   selfNode,
   addTargets,
+  deriveRole,
 } from "./derive.js";
 
 const A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -108,6 +109,31 @@ describe("groupNameIsDerived", () => {
 describe("selfNode", () => {
   it("resolves self", () => {
     expect(selfNode(snap(), A).name).toBe("alice");
+  });
+});
+
+describe("deriveRole", () => {
+  it("solo: self masters a one-member group", () => {
+    const s = { nodes: [], groups: [{ master: A, members: [A] }] };
+    expect(deriveRole(s, A)).toBe("solo");
+  });
+  it("master: self masters a multi-member group", () => {
+    const s = { nodes: [], groups: [{ master: A, members: [A, B] }] };
+    expect(deriveRole(s, A)).toBe("master");
+  });
+  it("follower: self is a member but not the master", () => {
+    const s = { nodes: [], groups: [{ master: A, members: [A, B] }] };
+    expect(deriveRole(s, B)).toBe("follower");
+  });
+  it("falls back when self isn't in any group", () => {
+    const s = { nodes: [], groups: [{ master: A, members: [A, B] }] };
+    expect(deriveRole(s, C, "solo")).toBe("solo");
+    expect(deriveRole(s, C, "master")).toBe("master"); // honours given fallback
+  });
+  it("falls back to 'solo' on empty/unknown inputs", () => {
+    expect(deriveRole(undefined, A)).toBe("solo");
+    expect(deriveRole({ groups: [] }, "")).toBe("solo");
+    expect(deriveRole({ groups: [] }, A)).toBe("solo");
   });
 });
 

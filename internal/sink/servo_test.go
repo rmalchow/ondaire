@@ -7,164 +7,135 @@ import (
 	"ensemble/internal/stream"
 )
 
-// fastServoCfg converges quickly for tests.
+// fastServoCfg converges quickly for tests (short warmup/tau, brisk slew).
 func fastServoCfg() servoConfig {
 	return servoConfig{
-		Window:   3_000_000_000,
-		WarmUp:   100_000_000,
-		Kp:       0.5,
-		Ki:       0.2,
-		ClampPPM: 500,
-		SlewPPM:  50,
+		WarmUp:   200_000_000, // 200 ms
+		QueueTau: 100_000_000, // 100 ms
+		Kq:       2.0,
+		ClampPPM: 300,
+		SlewPPM:  4000, // ppm/s — fast so tests converge in a few hundred frames
 	}
 }
 
-// driveServo runs a CLOSED-LOOP simulation: a DAC consumes output samples at
-// dacPPM ppm off nominal, while the servo's correction sets the rate at which
-// the resampler PRODUCES output from the master-paced input. The quantity the
-// servo measures (cumulative output samples vs master-clock elapsed) therefore
-// reflects production, which the correction drives — so in steady state the
-// correction settles at the value that makes production track master time
-// against the DAC's crystal error. Returns the final correction after `steps`.
-//
-// Model: each frame, master advances FrameNanos. The producer emits
-// FrameSamples·(1+corr/1e6) output samples (the resampler stretches/compresses).
-// `consumed` is what the servo observes — cumulative produced output, which is
-// what the backend has written. The DAC crystal error enters via the device
-// delay (queued = production minus DAC consumption) when delay reporting is on;
-// with delay off, the producer rate IS the consumed rate (backpressure: a full
-// pipe paces Write at the DAC rate), so consumed grows at the DAC rate adjusted
-// by the correction.
-func driveServo(s *rateServo, dacPPM float64, steps int, delay bool) float64 {
+// driveServoQueue is a CLOSED-LOOP device-queue simulation. The backend's DAC
+// drains the device queue at dacPPM off nominal; the servo's correction sets
+// the rate at which the resampler PRODUCES into that queue. deviceDelay is the
+// live queue depth. noise adds ±noise samples of measurement jitter (the Pi's
+// snd_pcm_delay). In steady state the servo settles where production == drain,
+// i.e. outPPM ≈ dacPPM, holding the queue near its calibrated setpoint.
+func driveServoQueue(s *rateServo, dacPPM float64, steps int, noise float64) float64 {
 	var master int64
-	var producedAcc float64 // cumulative output samples written (servo observes this)
+	var consumed float64
+	queue := float64(stream.SampleRate) / 5 // start ~200 ms filled
 	var out float64
+	seed := int64(12345)
+	rnd := func() float64 {
+		seed = seed*6364136223846793005 + 1442695040888963407
+		return float64(uint64(seed)>>40) / float64(uint64(1)<<24) // ~[0,1)
+	}
 	for i := 0; i < steps; i++ {
 		master += stream.FrameNanos
-		// The backend writes at the DAC rate (backpressure), nudged by the servo's
-		// correction applied to the resampler: effective consumed-rate per frame.
-		rate := (1 + dacPPM/1e6) * (1 + out/1e6)
-		producedAcc += float64(stream.FrameSamples) * rate
-		out = s.observe(int64(producedAcc), master, 0, delay)
+		produced := float64(stream.FrameSamples) * (1 + out/1e6)
+		drained := float64(stream.FrameSamples) * (1 + dacPPM/1e6)
+		queue += produced - drained
+		consumed += produced
+		measured := queue
+		if noise > 0 {
+			measured += (2*rnd() - 1) * noise
+		}
+		ddNs := int64(measured / float64(stream.SampleRate) * 1e9)
+		out = s.observe(int64(consumed), master, ddNs, true)
 	}
 	return out
 }
 
 func TestServoConvergesOnFastDAC(t *testing.T) {
 	s := newRateServo(fastServoCfg())
-	out := driveServo(s, 200, 2000, false)
-	if math.Abs(out-(-200)) > 30 {
-		t.Fatalf("expected correction ≈ -200 ppm, got %.1f", out)
+	out := driveServoQueue(s, 200, 8000, 0) // DAC 200ppm fast → produce 200ppm faster
+	if math.Abs(out-200) > 30 {
+		t.Fatalf("expected correction ≈ +200 ppm, got %.1f", out)
 	}
 }
 
 func TestServoConvergesNegative(t *testing.T) {
 	s := newRateServo(fastServoCfg())
-	out := driveServo(s, -150, 2000, false)
-	if math.Abs(out-150) > 30 {
-		t.Fatalf("expected correction ≈ +150 ppm, got %.1f", out)
+	out := driveServoQueue(s, -150, 8000, 0)
+	if math.Abs(out-(-150)) > 30 {
+		t.Fatalf("expected correction ≈ -150 ppm, got %.1f", out)
+	}
+}
+
+func TestServoConvergesUnderNoise(t *testing.T) {
+	// The Pi's snd_pcm_delay swings ±10ms (~480 samples) per read; the servo
+	// must still converge to the true drift, not chase the noise. Noise
+	// rejection is the job of the queue EMA (2s) AND the slew limit, so use
+	// the production-like slew here, not fastServoCfg's quick-converge slew.
+	cfg := servoConfig{
+		WarmUp:   500_000_000,
+		QueueTau: 2_000_000_000,
+		Kq:       1.5,
+		ClampPPM: 300,
+		SlewPPM:  60, // production-class; slew IS the final noise filter
+	}
+	s := newRateServo(cfg)
+	out := driveServoQueue(s, 120, 60000, 480) // ~20 min sim (pure math, instant)
+	if math.Abs(out-120) > 40 {
+		t.Fatalf("under ±480-sample noise expected ≈ +120 ppm, got %.1f", out)
 	}
 }
 
 func TestServoClampsPPM(t *testing.T) {
-	// 700ppm: above the ±500 test clamp but below the 800ppm outlier
-	// rejection (skew beyond that is treated as a scheduler artifact, not a
-	// crystal — see TestServoRejectsOutlierWindows).
 	s := newRateServo(fastServoCfg())
-	out := driveServo(s, 700, 2000, false)
-	if out < -500.0001 || out > 500.0001 {
-		t.Fatalf("output %.1f outside ±500 clamp", out)
+	out := driveServoQueue(s, 5000, 8000, 0) // absurd drift → clamp
+	if out < -300.0001 || out > 300.0001 {
+		t.Fatalf("output %.1f outside ±300 clamp", out)
 	}
-	// extreme positive skew → negative correction near clamp
-	if out > -400 {
-		t.Fatalf("expected correction near -500, got %.1f", out)
+	if out < 250 {
+		t.Fatalf("expected correction near +300 clamp, got %.1f", out)
+	}
+}
+
+func TestServoNoSignalWithoutDelayReporter(t *testing.T) {
+	// ok=false (exec/pw-play: no snd_pcm_delay) ⇒ no drift signal ⇒ stay at 0.
+	s := newRateServo(fastServoCfg())
+	var master, consumed int64
+	for i := 0; i < 500; i++ {
+		master += stream.FrameNanos
+		consumed += stream.FrameSamples
+		if out := s.observe(consumed, master, 0, false); out != 0 {
+			t.Fatalf("ok=false must return 0, got %.3f", out)
+		}
 	}
 }
 
 func TestServoSlewLimited(t *testing.T) {
 	cfg := fastServoCfg()
-	cfg.SlewPPM = 3
+	cfg.SlewPPM = 50 // ppm/s; per 20ms frame ⇒ ≤1 ppm/step
 	s := newRateServo(cfg)
-	// warm up baseline
-	var consumed int64
 	var master int64
-	consPerFrame := float64(stream.FrameSamples) * (1 + 5000/1e6)
-	var consAcc float64
+	var consumed float64
+	queue := float64(stream.SampleRate) / 5
 	prev := 0.0
-	for i := 0; i < 50; i++ {
+	maxStep := cfg.SlewPPM * float64(stream.FrameNanos) / 1e9
+	for i := 0; i < 1500; i++ {
 		master += stream.FrameNanos
-		consAcc += consPerFrame
-		consumed = int64(consAcc)
-		out := s.observe(consumed, master, 0, false)
-		if math.Abs(out-prev) > 3.0001 {
-			t.Fatalf("step %d: |Δout|=%.3f exceeds slew 3", i, math.Abs(out-prev))
+		produced := float64(stream.FrameSamples) * (1 + prev/1e6)
+		queue += produced - float64(stream.FrameSamples)*(1+9000/1e6) // huge drift
+		consumed += produced
+		out := s.observe(int64(consumed), master, int64(queue/float64(stream.SampleRate)*1e9), true)
+		if math.Abs(out-prev) > maxStep+1e-6 {
+			t.Fatalf("step %d: |Δout|=%.4f exceeds slew %.4f", i, math.Abs(out-prev), maxStep)
 		}
 		prev = out
 	}
 }
 
-func TestServoZeroBeforeWarmup(t *testing.T) {
+func TestServoResetClears(t *testing.T) {
 	s := newRateServo(fastServoCfg())
-	// First observe sets baseline → 0.
-	if out := s.observe(0, 0, 0, false); out != 0 {
-		t.Fatalf("first observe should be 0, got %.3f", out)
-	}
-	// Before WarmUp elapsed → still 0.
-	if out := s.observe(stream.FrameSamples, stream.FrameNanos, 0, false); out != 0 {
-		t.Fatalf("pre-warmup observe should be 0, got %.3f", out)
-	}
-}
-
-func TestServoResetClearsIntegral(t *testing.T) {
-	s := newRateServo(fastServoCfg())
-	driveServo(s, 200, 1000, false)
-	if s.ratePPM() == 0 {
-		t.Fatal("expected non-zero correction before reset")
-	}
+	driveServoQueue(s, 200, 2000, 0)
 	s.reset()
-	if s.ratePPM() != 0 {
-		t.Fatalf("reset should zero ratePPM, got %.3f", s.ratePPM())
-	}
-	// After reset, first observe re-baselines to 0.
-	if out := s.observe(0, 0, 0, false); out != 0 {
-		t.Fatalf("post-reset first observe should be 0, got %.3f", out)
-	}
-}
-
-func TestServoUsesDeviceDelay(t *testing.T) {
-	// With a constant device queue, the write-only inference would over-count
-	// consumed samples; subtracting the queued delay yields the true emitted
-	// skew. Feed a perfectly-paced DAC (0 ppm) plus a constant 30 ms queue:
-	// with delay subtracted the skew is ~0; without it the constant queue looks
-	// like extra consumption.
-	s := newRateServo(fastServoCfg())
-	const queueNs = 30_000_000
-	queueSamples := float64(queueNs) * float64(stream.SampleRate) / 1e9
-	var master int64
-	var out float64
-	for i := 0; i < 1000; i++ {
-		master += stream.FrameNanos
-		// consumed = perfectly paced + a fixed queue offset
-		consumed := int64(float64(stream.FrameSamples)*float64(i+1) + queueSamples)
-		out = s.observe(consumed, master, queueNs, true)
-	}
-	if math.Abs(out) > 20 {
-		t.Fatalf("with device delay subtracted, expected ≈0 ppm, got %.1f", out)
-	}
-}
-
-// TestServoRejectsOutlierWindows pins the artifact guard: a window whose raw
-// skew exceeds ±800ppm (late-skipped slots removing whole frames from the
-// consumed count) must be measured-and-discarded — controller output
-// unchanged — instead of whipsawing the rate.
-func TestServoRejectsOutlierWindows(t *testing.T) {
-	s := newRateServo(fastServoCfg())
-	out := driveServo(s, 100, 600, false) // settle near -100
-	before := out
-	// One poisoned window: a burst of "late skips" — consumed freezes while
-	// master time advances a full window.
-	s.observe(int64(600*960), int64(600)*stream.FrameNanos+3_000_000_000, 0, false)
-	if got := s.ratePPM(); got != before {
-		t.Fatalf("outlier window changed output: %v -> %v", before, got)
+	if s.outPPM != 0 || s.calibrated || s.have {
+		t.Fatalf("reset incomplete: %+v", *s)
 	}
 }

@@ -27,21 +27,37 @@ func sampleLR(frame []byte, i int) (int16, int16) {
 	return l, r
 }
 
-func TestResamplerIdentityAtUnitRate(t *testing.T) {
+func TestResamplerUnitRateDelayedIdentity(t *testing.T) {
+	// At rate 1 the resampler is a pure 1-frame delay: output frame f equals
+	// input frame f-1 (frame 0 is silence). The one-frame lookahead is what
+	// gives every seam a real 4-tap window.
 	r := newResampler()
-	r.setRate(0) // ppm=0 → rate 1
-	for f := 0; f < 4; f++ {
+	r.setRate(0)
+	var frames [][]byte
+	for f := 0; f < 5; f++ {
 		base := f * stream.FrameSamples
-		in := makeFrame(func(i int) (int16, int16) {
+		frames = append(frames, makeFrame(func(i int) (int16, int16) {
 			v := int16((base + i) % 1000)
 			return v, -v
-		})
-		out := r.process(in)
+		}))
+	}
+	var outs [][]byte
+	for _, in := range frames {
+		o := make([]byte, stream.FrameBytes)
+		copy(o, r.process(in))
+		outs = append(outs, o)
+	}
+	for i := 0; i < stream.FrameBytes; i++ {
+		if outs[0][i] != 0 {
+			t.Fatalf("frame 0 must be silence; byte %d = %d", i, outs[0][i])
+		}
+	}
+	for f := 1; f < 5; f++ {
 		for i := 0; i < stream.FrameSamples; i++ {
-			il, ir := sampleLR(in, i)
-			ol, or := sampleLR(out, i)
+			il, ir := sampleLR(frames[f-1], i)
+			ol, or := sampleLR(outs[f], i)
 			if il != ol || ir != or {
-				t.Fatalf("frame %d sample %d: in (%d,%d) out (%d,%d)", f, i, il, ir, ol, or)
+				t.Fatalf("frame %d sample %d: want prev-frame (%d,%d) got (%d,%d)", f, i, il, ir, ol, or)
 			}
 		}
 	}
@@ -57,36 +73,44 @@ func TestResamplerOutputFrameSize(t *testing.T) {
 	}
 }
 
-func TestResamplerContinuityAcrossFrames(t *testing.T) {
+func TestResamplerNoSeamGlitch(t *testing.T) {
+	// THE regression test for the 50 Hz seam buzz: with the servo active
+	// (rate ≠ 1), the OLD resampler clamped p2/p3 at every frame end (no
+	// lookahead), kinking the waveform once per 20 ms frame. Reconstruct the
+	// full output of a continuous 1 kHz sine and assert the curvature (second
+	// difference) has NO spike at the frame boundaries — a clean resample has
+	// smooth curvature everywhere.
 	r := newResampler()
-	r.setRate(300) // small stretch
-	// A continuous low-frequency sine spanning multiple frames.
-	freq := 220.0
-	amp := 10000.0
-	sineAt := func(n int) int16 {
-		return int16(amp * math.Sin(2*math.Pi*freq*float64(n)/float64(stream.SampleRate)))
-	}
-	var prevLast int16
-	var prevSlope float64
-	for f := 0; f < 6; f++ {
+	r.setRate(250) // servo-class correction → non-trivial fractional cursor
+	freq, amp := 1000.0, 9000.0
+	const frames = 12
+	var out []int16
+	for f := 0; f < frames; f++ {
 		base := f * stream.FrameSamples
 		in := makeFrame(func(i int) (int16, int16) {
-			v := sineAt(base + i)
+			v := int16(amp * math.Sin(2*math.Pi*freq*float64(base+i)/float64(stream.SampleRate)))
 			return v, v
 		})
-		out := r.process(in)
-		firstL, _ := sampleLR(out, 0)
-		if f > 0 {
-			// The seam jump must be comparable to the local slope, not a click.
-			seamJump := math.Abs(float64(firstL - prevLast))
-			if seamJump > math.Abs(prevSlope)+200 {
-				t.Fatalf("frame %d seam discontinuity: jump=%.0f localSlope=%.0f", f, seamJump, prevSlope)
-			}
+		o := r.process(in)
+		for i := 0; i < stream.FrameSamples; i++ {
+			l, _ := sampleLR(o, i)
+			out = append(out, l)
 		}
-		last, _ := sampleLR(out, stream.FrameSamples-1)
-		secondLast, _ := sampleLR(out, stream.FrameSamples-2)
-		prevLast = last
-		prevSlope = float64(last - secondLast)
+	}
+	// Skip the first 2 frames (silence + warmup seam). Curvature = x[k+1]-2x[k]+x[k-1].
+	// For a 1 kHz sine at 48 k the per-sample curvature peaks at amp*(2πf/Fs)^2 ≈ 154.
+	start := 2 * stream.FrameSamples
+	var maxCurv float64
+	for k := start + 1; k < len(out)-1; k++ {
+		c := math.Abs(float64(out[k+1]) - 2*float64(out[k]) + float64(out[k-1]))
+		if c > maxCurv {
+			maxCurv = c
+		}
+	}
+	// A clean sine's curvature is ~154; a seam clamp spikes it into the
+	// thousands. Allow generous headroom for interpolation/quantization.
+	if maxCurv > 400 {
+		t.Fatalf("curvature spike %.0f (clean sine ~154) — seam glitch present", maxCurv)
 	}
 }
 
@@ -106,11 +130,12 @@ func TestResamplerSilenceStaysSilence(t *testing.T) {
 
 func TestResamplerStereoIndependence(t *testing.T) {
 	r := newResampler()
-	r.setRate(0) // unity for an exact check
+	r.setRate(0) // unity → 1-frame-delayed identity
 	in := makeFrame(func(i int) (int16, int16) {
 		return int16(i % 500), int16(-(i % 500))
 	})
-	out := r.process(in)
+	r.process(in)            // frame 0 → silence
+	out := r.process(in)     // frame 1 → frame 0 (this same input) delayed
 	for i := 0; i < stream.FrameSamples; i++ {
 		ol, or := sampleLR(out, i)
 		if ol != int16(i%500) || or != int16(-(i%500)) {
@@ -132,7 +157,7 @@ func TestResamplerCursorBounded(t *testing.T) {
 			t.Fatalf("frame %d: cursor %.4f left bounded range", f, r.cursor)
 		}
 		for ch := 0; ch < stream.Channels; ch++ {
-			if len(r.carry[ch]) > stream.FrameSamples+leadPad+8 {
+			if len(r.carry[ch]) > 2*stream.FrameSamples+leadPad+8 {
 				t.Fatalf("frame %d ch %d: carry grew to %d", f, ch, len(r.carry[ch]))
 			}
 		}

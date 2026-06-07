@@ -39,6 +39,12 @@ type Params struct {
 	Caps     contracts.Capabilities // this node's own caps (codec gating, §8.3)
 	Log      *slog.Logger
 
+	// PersistFollowing persists this node's follow target to node.json (D45),
+	// called at EVERY site the engine writes cluster.SetFollowing (follow,
+	// unfollow, self-heal reset, takeover-directed follow). nil-safe no-op
+	// (tests). K wires it to the config store's SetFollowing.
+	PersistFollowing func(id.ID)
+
 	// Knobs (defaults applied in New when zero):
 	Grace     time.Duration // self-heal grace, default 10 s (§5)
 	LeadMs    int           // source release lead, default contracts.DefaultLeadMs (§8.2)
@@ -129,6 +135,17 @@ func (e *Engine) Close() error {
 	return nil
 }
 
+// setFollowing writes the replicated follow target (C) AND persists it to
+// node.json (D45), so the engine's two concerns stay in lockstep at every
+// follow/unfollow/self-heal/takeover site. The persist hook is nil-safe.
+func (e *Engine) setFollowing(target id.ID) {
+	e.p.Cluster.SetFollowing(target)
+	if e.p.PersistFollowing != nil {
+		e.log.Debug("persisting following", "target", target.String())
+		e.p.PersistFollowing(target)
+	}
+}
+
 // Follow makes THIS node follow target (§5.1): validates target is alive and a
 // master, then SetFollowing(target). Typed error on rejection.
 func (e *Engine) Follow(target id.ID) error { return e.follow(target) }
@@ -140,7 +157,7 @@ func (e *Engine) Unfollow() error {
 	if e.closed {
 		return ErrClosed
 	}
-	e.p.Cluster.SetFollowing(id.Zero)
+	e.setFollowing(id.Zero)
 	e.log.Info("unfollowing (now solo)", "reason", "user")
 	return nil
 }

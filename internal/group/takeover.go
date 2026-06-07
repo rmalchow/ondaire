@@ -64,7 +64,7 @@ func (e *Engine) MakeMaster(ctx context.Context, node id.ID) error {
 		}
 		if m == e.self {
 			// We are a member but not the new master: follow newMaster locally.
-			e.p.Cluster.SetFollowing(node)
+			e.setFollowing(node)
 			e.log.Info("takeover: following new master", "target", node.String())
 			continue
 		}
@@ -77,7 +77,7 @@ func (e *Engine) MakeMaster(ctx context.Context, node id.ID) error {
 
 	// Tell the new master to become solo (§5.2 step 3).
 	if node == e.self {
-		e.p.Cluster.SetFollowing(id.Zero)
+		e.setFollowing(id.Zero)
 	} else {
 		if err := e.p.Follow.Unfollow(ctx, node); err != nil {
 			e.log.Warn("takeover: unfollow new master failed", "target", node, "err", err)

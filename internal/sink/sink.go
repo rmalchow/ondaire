@@ -4,6 +4,7 @@
 package sink
 
 import (
+	"ensemble/internal/clock"
 	"log/slog"
 	"sync"
 	"time"
@@ -12,8 +13,11 @@ import (
 	"ensemble/internal/stream"
 )
 
-// monotoNow returns the local monotonic clock in nanoseconds.
-func monotoNow() int64 { return time.Now().UnixNano() }
+// monotoNow returns the local monotonic clock in nanoseconds — clock.MonoNow,
+// the SAME clock the follower measures offsets against. MasterToLocal output
+// is only comparable to this clock; wall time (UnixNano) is off by the
+// inter-process start-delta and is additionally non-monotonic under NTP steps.
+func monotoNow() int64 { return clock.MonoNow() }
 
 // Playout is the per-node sink: jitter buffer → scheduler → resampler → gain →
 // backend, with the continuous rate servo and the starvation watchdog.

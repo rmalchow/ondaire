@@ -298,12 +298,16 @@ func (e *Engine) onSessionEnd(s *session, reason endReason) {
 	e.log.Info("playback ended (EOF)", "uri", s.uri)
 }
 
-// waitForClock returns LocalToMaster(now) once the clock is synced, retrying up
-// to clockWaitTimeout. ok=false if it never syncs (transient ErrNotSynced).
+// waitForClock returns the master-clock "now" once the clock is synced,
+// retrying up to clockWaitTimeout. ok=false if it never syncs (transient
+// ErrNotSynced). Uses Clock.MasterNow() — NEVER LocalToMaster(wall-clock):
+// the offset is measured against the follower's own monotonic clock, so
+// injecting any other timebase shifts every pts by the inter-process
+// start-delta (the same-host lag-by-|offset| bug).
 func (e *Engine) waitForClock() (masterNanos int64, ok bool) {
 	deadline := e.now().Add(clockWaitTimeout)
 	for {
-		if m, k := e.p.Clock.LocalToMaster(time.Now().UnixNano()); k {
+		if m, k := e.p.Clock.MasterNow(); k {
 			return m, true
 		}
 		if !e.now().Before(deadline) {

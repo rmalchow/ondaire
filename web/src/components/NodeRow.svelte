@@ -109,12 +109,12 @@
     </span>
   </div>
 
-  <div class="row wrap small muted">
+  <div class="row wrap small muted netinfo">
     {cidrList(node.addrs)}
   </div>
 
   {#if portList}
-    <div class="row wrap small muted">
+    <div class="row wrap small muted netinfo">
       {portList}
     </div>
   {/if}
@@ -187,7 +187,12 @@
   .noderow {
     flex-direction: column;
     align-items: stretch;
-    gap: 6px;
+    gap: 8px;
+  }
+  /* address + port lines: breathing room and comfortable wrap spacing */
+  .netinfo {
+    padding: 2px 0;
+    line-height: 1.6;
   }
   .delay {
     display: flex;

@@ -274,23 +274,24 @@ func run(ctx context.Context, opt options) (rerr error) {
 		peers = disc.Peers()
 	}
 	cl, err := cluster.New(cluster.Config{
-		Self:          cfg.NodeID,
-		Name:          cfg.NodeName,
-		Volume:        cfg.Volume,
-		OutputDelayMs: cfg.OutputDelayMs,
-		OutputDevice:  cfg.OutputDevice,
-		OutputDevices: outputDevices,
-		Caps:          caps,
-		Disabled:      cfg.Disabled,
-		Addrs:         addrs,
-		HTTPPort:      httpPort,
-		StreamPort:    streamPort,
-		SourcePort:    sourcePort,
-		GossipPort:    gossipPort,
-		BindAddr:      opt.Host,
-		Peers:         peers,
-		StatePath:     filepath.Join(cfg.DataDir, "cluster.json"),
-		Logger:        base,
+		Self:             cfg.NodeID,
+		Name:             cfg.NodeName,
+		Volume:           cfg.Volume,
+		OutputDelayMs:    cfg.OutputDelayMs,
+		OutputDevice:     cfg.OutputDevice,
+		OutputDevices:    outputDevices,
+		Caps:             caps,
+		Disabled:         cfg.Disabled,
+		InitialFollowing: cfg.Following, // D45: rejoin previous group on return
+		Addrs:            addrs,
+		HTTPPort:         httpPort,
+		StreamPort:       streamPort,
+		SourcePort:       sourcePort,
+		GossipPort:       gossipPort,
+		BindAddr:         opt.Host,
+		Peers:            peers,
+		StatePath:        filepath.Join(cfg.DataDir, "cluster.json"),
+		Logger:           base,
 	})
 	if err != nil {
 		return fmt.Errorf("cluster: %w", err)
@@ -361,6 +362,13 @@ func run(ctx context.Context, opt options) (rerr error) {
 		Follow:   follow,
 		Caps:     caps,
 		Log:      base,
+		// D45: persist every engine-driven follow change to node.json so this
+		// node rejoins its previous group after a temporary disappearance.
+		PersistFollowing: func(target id.ID) {
+			if err := cfg.SetFollowing(target); err != nil {
+				log.Warn("persist following failed", "target", target.String(), "err", err)
+			}
+		},
 	})
 
 	// 13. API server (I) on the bound HTTP listener. Group is wired via an adapter

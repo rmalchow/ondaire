@@ -81,14 +81,21 @@ type Config struct {
 	OutputDevices []contracts.OutputDevice // enumerated devices on this node (D37)
 	Caps          contracts.Capabilities   // PROBED caps (D40: effective = caps − disabled)
 	Disabled      []string                 // operator-disabled features (D40)
-	Addrs         []string
-	HTTPPort      int
-	StreamPort    int
-	SourcePort    int
-	GossipPort    int
-	BindAddr      string
-	Peers         <-chan discovery.Peer
-	Logger        *slog.Logger
+
+	// InitialFollowing seeds this node's own record's Following at boot (D45):
+	// the last-known follow target persisted in node.json. Gossiped from the
+	// start, exactly as if SetFollowing had been called — the existing group
+	// derivation + self-heal then re-form the old group or settle to solo.
+	InitialFollowing id.ID
+
+	Addrs      []string
+	HTTPPort   int
+	StreamPort int
+	SourcePort int
+	GossipPort int
+	BindAddr   string
+	Peers      <-chan discovery.Peer
+	Logger     *slog.Logger
 
 	// StatePath persists the long-lived lookup tables — group NAMES + SETTINGS —
 	// to this file (D41), loaded at New (before any join/merge) and saved debounced
@@ -156,7 +163,7 @@ func New(cfg Config) (*Cluster, error) {
 		GossipPort:    cfg.GossipPort,
 		Caps:          cfg.Caps,
 		Disabled:      append([]string(nil), cfg.Disabled...),
-		Following:     id.Zero,
+		Following:     cfg.InitialFollowing,
 		Observed:      map[id.ID]obsEntry{},
 		Version:       1,
 		UpdatedAt:     nowUnix,

@@ -53,6 +53,7 @@ type Config struct {
 	OutputDelayMs int      // hardware latency calibration; default 0, clamped ±500 (D36)
 	OutputDevice  string   // selected ALSA output device id; default "default" (D37)
 	Disabled      []string // operator-disabled features; subset of {playback,opus,input} (D40)
+	Following     id.ID    // last-known follow target; id.Zero == solo (D45)
 
 	// Resolved, absolute directories (§2).
 	DataDir  string // e.g. /abs/data; contains node.json
@@ -172,6 +173,13 @@ func Load(opts Options) (*Config, error) {
 	cfg.OutputDelayMs = nf.OutputDelayMs
 	cfg.OutputDevice = nf.OutputDevice
 	cfg.Disabled = nf.Disabled
+	// nf.Following is already normalized to "" or valid 32-hex by the store, so
+	// this Parse only fails on the empty (solo) case → id.Zero (D45).
+	if nf.Following != "" {
+		if fid, perr := id.Parse(nf.Following); perr == nil {
+			cfg.Following = fid
+		}
+	}
 
 	return cfg, nil
 }
@@ -219,6 +227,23 @@ func (c *Config) SetOutputDevice(device string) error {
 		return err
 	}
 	c.OutputDevice = nf.OutputDevice
+	return nil
+}
+
+// SetFollowing persists this node's last-known follow target (D45) and
+// atomically rewrites node.json, updating c.Following on success only. id.Zero
+// persists as "" (solo). Called by the group engine at every site it writes the
+// replicated cluster.SetFollowing, so a node rejoins its previous group on return.
+func (c *Config) SetFollowing(target id.ID) error {
+	nf, err := c.store.SetFollowing(c.NodeID, target)
+	if err != nil {
+		return err
+	}
+	if nf.Following == "" {
+		c.Following = id.Zero
+	} else if fid, perr := id.Parse(nf.Following); perr == nil {
+		c.Following = fid
+	}
 	return nil
 }
 

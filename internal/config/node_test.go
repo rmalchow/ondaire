@@ -57,6 +57,73 @@ func TestLoadOrCreateDefaultsVolumeAndDelayOnLegacyFile(t *testing.T) {
 	}
 }
 
+func TestLoadOrCreateFollowingDefaultsEmptyAndDecodes(t *testing.T) {
+	dir := t.TempDir()
+	nodeID := id.New()
+	// Absent following → "" (back-compat / solo).
+	writeFile(t, dir, `{"id":"`+nodeID.String()+`","name":"x"}`)
+	nf, err := NewStore(dir).LoadOrCreate("")
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+	if nf.Following != "" {
+		t.Errorf("following = %q, want empty", nf.Following)
+	}
+	// Valid 32-hex following decodes through.
+	target := id.New()
+	writeFile(t, dir, `{"id":"`+nodeID.String()+`","name":"x","following":"`+target.String()+`"}`)
+	nf, err = NewStore(dir).LoadOrCreate("")
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+	if nf.Following != target.String() {
+		t.Errorf("following = %q, want %q", nf.Following, target.String())
+	}
+}
+
+func TestLoadOrCreateInvalidFollowingTreatedAsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	nodeID := id.New()
+	// Malformed (non-hex / wrong length) following → "" (never fatal).
+	writeFile(t, dir, `{"id":"`+nodeID.String()+`","name":"x","following":"not-a-valid-id"}`)
+	nf, err := NewStore(dir).LoadOrCreate("")
+	if err != nil {
+		t.Fatalf("LoadOrCreate must not fail on bad following: %v", err)
+	}
+	if nf.Following != "" {
+		t.Errorf("following = %q, want empty (invalid hex)", nf.Following)
+	}
+}
+
+func TestSetFollowingPersistsZeroAsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	st := NewStore(dir)
+	created, err := st.LoadOrCreate("")
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+	target := id.New()
+	if _, err := st.SetFollowing(created.ID, target); err != nil {
+		t.Fatalf("SetFollowing: %v", err)
+	}
+	nf, _ := st.LoadOrCreate("")
+	if nf.Following != target.String() {
+		t.Errorf("following = %q, want %q", nf.Following, target.String())
+	}
+	// id.Zero persists as the empty string on disk.
+	if _, err := st.SetFollowing(created.ID, id.Zero); err != nil {
+		t.Fatalf("SetFollowing(Zero): %v", err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, nodeFileName))
+	if strings.Contains(string(raw), `"following": "0000`) {
+		t.Errorf("zero following persisted as hex zeros, want empty: %s", raw)
+	}
+	nf, _ = st.LoadOrCreate("")
+	if nf.Following != "" {
+		t.Errorf("following = %q, want empty after Zero", nf.Following)
+	}
+}
+
 func TestLoadOrCreateKeepsExplicitZeroVolume(t *testing.T) {
 	dir := t.TempDir()
 	nodeID := id.New()

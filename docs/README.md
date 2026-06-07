@@ -27,6 +27,12 @@ no database, no PKI. State is replicated via gossip; everything heals itself.
   Subtracted from the playout deadline (§8.5). Changing it re-anchors playout
   via the RESTART/re-prime path (§8.6) — a sub-second stream restart.
   Persisted in `node.json`, replicated.
+- **Following** (`following`): the node's last-known follow target as a 32-hex
+  node id, or `""` for a solo master (default). Persisted in `node.json` so a
+  node that temporarily disappears **rejoins its previous group on return**
+  (§5; D45) — its live value is the replicated node-record field, this is only
+  the boot seed + last-known. An absent or malformed value loads as `""` (never
+  fatal). Written on every follow/unfollow/takeover/self-heal change.
 - **Capabilities**: reported in the replicated node record. All of these are
   **probed at runtime on each start** — a `$PATH` scan for exec tools plus
   `dlopen` probes for optional shared libraries (`libopus.so.0`,
@@ -172,6 +178,18 @@ Derivation, recomputed by every node from the replicated state + liveness:
 - A node whose `following` points at a dead node, an unknown node, or a node
   that is itself following someone, behaves as solo — and additionally
   **resets its own `following` to ""** after a 10s grace period (self-heal).
+
+**Rejoin on return** (D45). Each node persists its `following` to `node.json` and
+re-seeds its own record with it at boot, gossiping it from the start exactly as if
+it had been set live. So a node that temporarily disappears (reboot, crash, brief
+network drop) **rejoins its previous group automatically** when it comes back: if
+its old master is still alive and a master, the same derivation re-forms the group;
+if the old master is absent on return, the dangling follow is just a stale `following`,
+so the 10s self-heal grace fires and the node settles as its own solo group (and
+clears the persisted `following` back to `""`). No special rejoin path — the existing
+derivation + self-heal do all of it. The grace is measured from when the node first
+*observes* the dangling follow, not from process start, so slow gossip convergence
+never insta-clears a follow that is merely still propagating.
 
 **Group ID = the master's node id** (D44). A solo node's group ID equals its
 node ID. Keying the group — and its master-written playback + settings records

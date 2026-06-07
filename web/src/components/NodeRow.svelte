@@ -277,14 +277,16 @@
   .chip.feat {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 3px;
     font: inherit;
+    font-size: 0.68rem;
+    line-height: 1.3;
     border: 1px solid transparent;
     border-radius: 999px;
-    padding: 2px 10px;
+    padding: 0 7px;
   }
   .chip.feat .glyph {
-    font-size: 0.8em;
+    font-size: 0.75em;
     line-height: 1;
   }
 

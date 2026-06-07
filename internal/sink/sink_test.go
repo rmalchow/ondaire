@@ -443,10 +443,7 @@ func feedFor(p *Playout, clk *fakeClock, gen uint32, stop <-chan struct{}) {
 func TestPlayoutServoDrivesRate(t *testing.T) {
 	clk := newFakeClock(true)
 	dac := newSkewDAC(200) // DAC runs +200 ppm fast (implements DelayReporter)
-	cfg := fastServoCfg()
-	cfg.Window = 600_000_000 // one PI step per window; short window so the
-	// live test sees engagement within its few-second budget (the first
-	// window is measure-and-discard by design).
+	cfg := fastServoCfg() // 200ms warmup: engages within the test's budget
 	p := New(Config{
 		Backend:  dac,
 		Clock:    clk,

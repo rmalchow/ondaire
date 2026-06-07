@@ -76,9 +76,13 @@ func (r *resampler) process(in []byte) []byte {
 	}
 
 	if !r.primed {
-		// Seed carry with leadPad copies of the first sample so the very first
-		// output interpolates from a flat edge (no click). cursor starts at the
-		// first real sample (index leadPad).
+		// First frame: there is no lookahead yet, so we cannot interpolate its
+		// tail (p2/p3 would need the *next* frame and clamping them clicks every
+		// seam — the 50 Hz buzz). Seed [leadPad history][this frame] as the
+		// HELD lookahead and pass this frame through unchanged (rate ≈ 1 during
+		// the servo's warmup anyway). From the next call on, each emitted frame
+		// has a full real 4-tap window — one frame (20 ms) of resampler latency,
+		// well within bufferMs.
 		for ch := 0; ch < stream.Channels; ch++ {
 			r.carry[ch] = r.carry[ch][:0]
 			s0 := r.work[ch][0]
@@ -89,10 +93,22 @@ func (r *resampler) process(in []byte) []byte {
 		}
 		r.cursor = float64(leadPad)
 		r.primed = true
-	} else {
-		for ch := 0; ch < stream.Channels; ch++ {
-			r.carry[ch] = append(r.carry[ch], r.work[ch]...)
+		// No lookahead frame yet → emit one frame of silence (a one-time 20 ms
+		// startup latency, masked by the playout buffer). From the next call on
+		// each output frame is the PREVIOUS input frame, fully resampled with a
+		// real 4-tap window at every seam.
+		for i := range r.out {
+			r.out[i] = 0
 		}
+		return r.out
+	}
+
+	// Steady state: carry holds [leadPad][previous frame]. Append the new frame
+	// so the previous frame's tail now has real p2/p3 from this frame, then emit
+	// the previous frame's worth of output. The new frame becomes next call's
+	// held lookahead.
+	for ch := 0; ch < stream.Channels; ch++ {
+		r.carry[ch] = append(r.carry[ch], r.work[ch]...)
 	}
 
 	step := 1.0 / r.rate
@@ -133,6 +149,23 @@ func (r *resampler) process(in []byte) []byte {
 		r.carry[ch] = buf[:len(buf)-consumed]
 	}
 	r.cursor -= float64(consumed)
+
+	// Carry bound. With a sustained rate ≠ 1 and a strict one-frame-in /
+	// one-frame-out contract, input accumulates (rate>1) — the integral of the
+	// rate error. Cap it: when the held lookahead exceeds two frames, skip one
+	// whole frame forward (drop the oldest held frame, keep leadPad history +
+	// the newest frame). At a real crystal's tens of ppm this fires every
+	// several minutes — a single sub-frame resync, vastly preferable to the
+	// per-frame seam clamp it replaces. (The fully glitch-free answer is a
+	// variable-input-consumption resampler driven by the jitter-buffer level;
+	// tracked as a follow-up.)
+	if len(r.carry[0]) > leadPad+2*stream.FrameSamples {
+		for ch := 0; ch < stream.Channels; ch++ {
+			buf := r.carry[ch]
+			copy(buf[leadPad:], buf[leadPad+stream.FrameSamples:])
+			r.carry[ch] = buf[:len(buf)-stream.FrameSamples]
+		}
+	}
 
 	return r.out
 }

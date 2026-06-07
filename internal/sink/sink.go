@@ -86,7 +86,7 @@ func New(cfg Config) *Playout {
 		nowFn = monotoNow
 	}
 	sc := cfg.servoCfg
-	if sc.Window <= 0 {
+	if sc.QueueTau <= 0 {
 		sc = defaultServoConfig()
 	}
 
@@ -408,10 +408,12 @@ func (p *Playout) loop() {
 			if now := p.now(); now-p.lastServoLog > 1_000_000_000 {
 				p.lastServoLog = now
 				p.log.Debug("servo",
-					"skewPPM", int64(p.servo.lastSkew), "integ", int64(p.servo.integ),
-					"outPPM", int64(ppm), "got", int64(p.servo.lastGot),
-					"want", int64(p.servo.lastWant), "consumed", p.consumed,
-					"deviceDelayNs", dDelay, "delayOK", dok, "buffered", p.stats.Buffered)
+					"outPPM", int64(ppm),
+					"queueErrSamples", int64(p.servo.queueErr),
+					"queueEMASamples", int64(p.servo.ddEMA),
+					"setpointSamples", int64(p.servo.setpoint),
+					"deviceDelayMs", dDelay/1_000_000, "delayOK", dok,
+					"buffered", p.stats.Buffered)
 			}
 		}
 

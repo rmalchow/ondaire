@@ -58,10 +58,13 @@
 
   // Tri-state feature chips (D40): playback/opus/input are operator-toggleable.
   // `capabilities` is EFFECTIVE (probed minus disabled); `disabled` lists what
-  // the operator turned off. For feature F:
-  //   - disabled    → F in node.disabled (amber, clickable to re-enable)
-  //   - available   → effective caps has F (normal, clickable to disable)
-  //   - unavailable → neither (probed off on this host; dimmed, NOT clickable)
+  // the operator turned off. Three UNMISTAKABLE states per feature:
+  //   - "on"          → available + enabled (effective caps has F, not disabled):
+  //                     green "●", clickable, tooltip "click to disable".
+  //   - "off"         → available but disabled (F in node.disabled): amber outline
+  //                     "○", clickable, tooltip "click to enable".
+  //   - "unavailable" → not probed on this host (neither): dimmed "✕" strike,
+  //                     NOT clickable, tooltip "not available on this host".
   let disabledSet = $derived(new Set(node.disabled ?? []));
 
   function effHas(feature) {
@@ -71,10 +74,22 @@
     return false;
   }
 
-  // state(feature) → "disabled" | "available" | "unavailable"
+  // state(feature) → "on" | "off" | "unavailable"
   function featState(feature) {
-    if (disabledSet.has(feature)) return "disabled";
-    return effHas(feature) ? "available" : "unavailable";
+    if (disabledSet.has(feature)) return "off";
+    return effHas(feature) ? "on" : "unavailable";
+  }
+
+  // The state's glyph + accessible tooltip.
+  function featGlyph(st) {
+    if (st === "on") return "●";
+    if (st === "off") return "○";
+    return "✕";
+  }
+  function featTitle(feature, st) {
+    if (st === "unavailable") return `${feature}: not available on this host`;
+    if (st === "off") return `${feature}: disabled — click to enable`;
+    return `${feature}: enabled — click to disable`;
   }
 
   // Toggle a feature's disabled membership and PATCH the new list. Unavailable
@@ -83,7 +98,7 @@
     const st = featState(feature);
     if (st === "unavailable") return;
     const next = new Set(disabledSet);
-    if (st === "disabled") next.delete(feature);
+    if (st === "off") next.delete(feature);
     else next.add(feature);
     setDisabled(node.id, [...next]).catch(() => {});
   }
@@ -119,29 +134,32 @@
     </div>
   {/if}
 
-  <div class="row wrap">
+  <div class="row wrap feature-row">
+    <span class="muted small feat-label">features</span>
     {#each features as f (f)}
       {@const st = featState(f)}
       <button
         type="button"
         class="chip feat {st}"
         disabled={st === "unavailable"}
-        title={st === "unavailable"
-          ? `${f} not available on this host`
-          : st === "disabled"
-            ? `${f} disabled — click to enable`
-            : `${f} enabled — click to disable`}
+        aria-pressed={st === "on"}
+        title={featTitle(f, st)}
         onclick={() => toggleFeature(f)}
       >
-        {f}{#if st === "disabled"} (off){/if}
+        <span class="glyph" aria-hidden="true">{featGlyph(st)}</span>{f}
       </button>
     {/each}
-    <span class="sep"></span>
-    {#each (caps.codecs ?? []).filter((c) => c !== "opus") as c}
-      <span class="chip">{c}</span>
-    {/each}
-    {#each caps.formats ?? [] as f}<span class="chip">{f}</span>{/each}
   </div>
+
+  {#if (caps.codecs ?? []).filter((c) => c !== "opus").length || (caps.formats ?? []).length}
+    <div class="row wrap format-row">
+      <span class="muted small feat-label">formats</span>
+      {#each (caps.codecs ?? []).filter((c) => c !== "opus") as c}
+        <span class="chip plain">{c}</span>
+      {/each}
+      {#each caps.formats ?? [] as f}<span class="chip plain">{f}</span>{/each}
+    </div>
+  {/if}
 
   <div class="row wrap">
     <span class="muted small">vol</span>
@@ -209,31 +227,69 @@
   .device select {
     max-width: 16rem;
   }
-  /* tri-state feature chips (D40) */
+  /* the two chip rows: a small leading label, then the chips */
+  .feature-row,
+  .format-row {
+    align-items: center;
+    gap: 6px;
+  }
+  .feat-label {
+    min-width: 3.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+    opacity: 0.7;
+  }
+
+  /* tri-state feature chips (D40): three UNMISTAKABLE states. */
   .chip.feat {
-    cursor: pointer;
-    border: 1px solid transparent;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     font: inherit;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 2px 10px;
   }
-  .chip.feat.available {
-    /* normal look; subtle affordance via hover */
+  .chip.feat .glyph {
+    font-size: 0.8em;
+    line-height: 1;
   }
-  .chip.feat.available:hover {
-    border-color: currentColor;
-  }
-  .chip.feat.disabled {
-    background: #b45309;
+
+  /* ON: available + enabled — solid green accent, ● , clickable. */
+  .chip.feat.on {
+    cursor: pointer;
+    background: #15803d;
+    border-color: #15803d;
     color: #fff;
   }
+  .chip.feat.on:hover {
+    background: #166534;
+  }
+
+  /* OFF: available but disabled — outlined amber, ○ , clickable. */
+  .chip.feat.off {
+    cursor: pointer;
+    background: transparent;
+    border-color: #b45309;
+    color: #b45309;
+  }
+  .chip.feat.off:hover {
+    background: rgba(180, 83, 9, 0.12);
+  }
+
+  /* UNAVAILABLE: not probed on this host — dimmed + strike, ✕ , NOT clickable. */
   .chip.feat.unavailable {
-    cursor: default;
-    opacity: 0.45;
+    cursor: not-allowed;
+    background: transparent;
+    border-color: var(--border, #ccc);
+    color: var(--muted, #888);
+    opacity: 0.5;
     text-decoration: line-through;
   }
-  .sep {
-    width: 1px;
-    align-self: stretch;
-    background: var(--border, #ccc);
-    margin: 0 2px;
+
+  /* passive format chips: plain, never togglable, default cursor. */
+  .chip.plain {
+    cursor: default;
   }
 </style>

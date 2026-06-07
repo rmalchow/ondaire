@@ -346,12 +346,23 @@ On `play`, the master starts an **audio source server** on its `SOURCE_PORT`:
   **IP-fragments into ~3 packets** — on lossy Wi-Fi, losing any fragment drops
   the whole frame and the per-frame XOR FEC cannot recover it. Use pcm only on
   reliable links.
-- **Opus-default downgrade (D42)**: because opus is the default, a group whose
-  members don't *all* report the opus capability (or whose master has no opus
-  encoder) is **transparently downgraded to pcm at `play`** — opus is the
-  default, pcm is the universal fallback, so `play` never fails for lack of
-  opus. An *explicit* `codec: opus` group setting is still validated against the
-  master's own capability at `POST /api/group/settings`.
+- **Codec negotiation (D33/D42)**: the master picks the **effective codec** —
+  the wanted `settings.codec` iff every CURRENT member's effective capabilities
+  (probed minus operator-disabled, §1) include it AND the master can encode it,
+  else **pcm** (always universal). This is computed at every session start (play,
+  resume, settings change), so `play` **never fails** for lack of opus — opus is
+  the default, pcm is the universal fallback. A downgrade is logged
+  (`codec negotiated wanted=opus got=pcm lacking=[names]`); the replicated
+  playback record carries the EFFECTIVE codec.
+- **Mid-session renegotiation (D33)**: if a member disables opus, or a non-opus
+  node joins, while an opus session is playing, the master's reconcile detects
+  the running codec is no longer supported by all members and **downgrades the
+  live session to pcm in place** — bump gen, drop the encoder, re-arm the source,
+  broadcast RECONFIG (members reconnect), resume from the current position. Only
+  downgrades happen automatically mid-session; an upgrade (opus became newly
+  possible) applies on the next play/settings change. An *explicit* `codec: opus`
+  group setting is still validated against the master's own capability at
+  `POST /api/group/settings`.
 
 ### 8.4 Transport — group setting `transport: udp | tcp` (default `udp`)
 
@@ -410,7 +421,7 @@ writes are paced by the DAC, not by the scheduler — and crystal skew of
 pull rooms audibly apart. So every sink runs a **continuous rate servo**: a
 skew estimator (cumulative samples consumed vs master-clock elapsed time,
 averaged over ~3 s) feeds a small PI controller whose output — clamped to
-±500 ppm and slewed gently — drives a **4-tap (Catmull-Rom) fractional
+±2000 ppm (still inaudible) and slewed — drives a **4-tap (Catmull-Rom) fractional
 resampler** between jitter buffer and backend. The correction magnitudes are
 far below audibility. This is *not* an underrun reaction; it runs at all
 times to prevent drift. Real underruns are handled by silence insertion and,

@@ -268,6 +268,19 @@ func (p *Playout) Disarm() {
 	p.signal()
 }
 
+// ArmedGen reports the generation the sink is currently armed for and whether it
+// is armed at all. The member-side deliver path uses it to decide when to re-arm:
+// a frame whose gen differs from the armed gen (or arriving while disarmed) means
+// a new/replaced session, so the next frame must Reset the sink to its gen — the
+// deliver closure cannot rely on its own cached gen because repointLocked (group
+// engine) may have Reset the sink to a guessed gen out from under it on a
+// (re)subscribe (the late-join stale-gen drop bug).
+func (p *Playout) ArmedGen() (gen uint32, armed bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.gen, p.armed
+}
+
 // Stats snapshots playout counters (contracts.Sink). Synced is read live from
 // the clock; RatePPM is the servo's current correction; Buffered is jb.len().
 func (p *Playout) Stats() contracts.SinkStats {

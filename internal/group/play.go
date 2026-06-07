@@ -2,7 +2,6 @@ package group
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -39,23 +38,13 @@ func (e *Engine) Play(uri string) error {
 	groupID := mv.group.ID
 	settings := fillDefaults(mv.group.Settings)
 
-	// Codec selection (§8.3/D33, opus-default): opus keeps every frame under one
-	// MTU (raw PCM is 3864 B and IP-fragments, which collapses on lossy Wi-Fi).
-	// An opus session needs every member to support opus. If any member lacks it
-	// (or this node has no opus encoder), we DOWNGRADE this session to pcm rather
-	// than rejecting play — opus is the default, pcm is the universal fallback.
-	if settings.Codec == "opus" {
-		downgrade := ""
-		if e.p.Opus == nil {
-			downgrade = "no opus encoder on this node"
-		} else if err := e.validateOpusGroup(snap, mv); err != nil {
-			downgrade = err.Error()
-		}
-		if downgrade != "" {
-			e.log.Warn("opus unavailable for this group; falling back to pcm", "reason", downgrade)
-			settings.Codec = "pcm"
-		}
-	}
+	// Codec negotiation (§8.3/D33): the master picks the EFFECTIVE codec — the
+	// wanted codec (settings.Codec) iff EVERY current member's effective caps
+	// support it AND this master can encode it, else pcm (always universal). opus
+	// keeps every frame under one MTU (raw PCM is 3864 B and IP-fragments, which
+	// collapses on lossy Wi-Fi); pcm is the universal fallback rather than a hard
+	// reject. The negotiated codec is what gets recorded + streamed.
+	settings.Codec = e.negotiateCodecLocked(snap, mv, settings.Codec)
 	e.mu.Unlock()
 
 	// Open the media source (no lock — may block on http/file). On error: no gen,
@@ -125,7 +114,6 @@ func (e *Engine) Play(uri string) error {
 		live:        live,
 		src:         src,
 		srv:         e.p.Source,
-		enc:         enc,
 		startedUnix: e.now().Unix(),
 		transport:   settings.Transport,
 		bufferMs:    settings.BufferMs,
@@ -137,6 +125,7 @@ func (e *Engine) Play(uri string) error {
 	}
 	sess.startMaster.Store(startMaster + int64(e.p.LeadMs)*1_000_000)
 	sess.gen.Store(gen)
+	sess.setEnc(enc) // nil for pcm
 	e.sess = sess
 
 	e.p.Source.StartSession(gen, stream.ParseTransport(settings.Transport), settings.BufferMs)
@@ -317,10 +306,34 @@ func (e *Engine) waitForClock() (masterNanos int64, ok bool) {
 	}
 }
 
-// validateOpusGroup checks every current group member reports the opus codec
-// capability (§8.3/D33), rejecting with ErrNoOpus naming the lacking nodes.
-// Caller holds e.mu.
-func (e *Engine) validateOpusGroup(snap contracts.Snapshot, mv myView) error {
+// negotiateCodecLocked computes the EFFECTIVE codec for a session over the group
+// (§8.3/D33 negotiation, supersedes reject-behavior): returns wanted iff every
+// CURRENT member's effective caps include it AND (for opus) this master can
+// encode it, else "pcm" — always universal. Logs an INFO downgrade line naming
+// the lacking members. Caller holds e.mu.
+func (e *Engine) negotiateCodecLocked(snap contracts.Snapshot, mv myView, wanted string) string {
+	if wanted == "" {
+		wanted = contracts.DefaultCodec
+	}
+	if wanted == "pcm" {
+		return "pcm" // universal; nothing to negotiate
+	}
+	// opus: this master must have an encoder.
+	if wanted == "opus" && e.p.Opus == nil {
+		e.log.Info("codec negotiated", "wanted", wanted, "got", "pcm", "lacking", "[no opus encoder on master]")
+		return "pcm"
+	}
+	lacking := membersLackingCodec(snap, mv, wanted)
+	if len(lacking) == 0 {
+		return wanted
+	}
+	e.log.Info("codec negotiated", "wanted", wanted, "got", "pcm", "lacking", "["+strings.Join(lacking, " ")+"]")
+	return "pcm"
+}
+
+// membersLackingCodec returns the display names of the current group members
+// whose effective caps do NOT include codec (§8.3). Caller holds e.mu.
+func membersLackingCodec(snap contracts.Snapshot, mv myView, codec string) []string {
 	byID := make(map[id.ID]contracts.NodeView, len(snap.Nodes))
 	for _, n := range snap.Nodes {
 		byID[n.ID] = n
@@ -328,7 +341,7 @@ func (e *Engine) validateOpusGroup(snap contracts.Snapshot, mv myView) error {
 	var lacking []string
 	for _, m := range mv.group.Members {
 		n, ok := byID[m]
-		if !ok || !hasCodec(n.Capabilities.Codecs, "opus") {
+		if !ok || !hasCodec(n.Capabilities.Codecs, codec) {
 			name := m.String()
 			if ok && n.Name != "" {
 				name = n.Name
@@ -336,10 +349,44 @@ func (e *Engine) validateOpusGroup(snap contracts.Snapshot, mv myView) error {
 			lacking = append(lacking, name)
 		}
 	}
-	if len(lacking) > 0 {
-		return fmt.Errorf("%w: %s", ErrNoOpus, strings.Join(lacking, ", "))
+	return lacking
+}
+
+// renegotiateLocked checks the running session's effective codec against the
+// CURRENT membership and downgrades it to pcm in place when a member no longer
+// supports it (D33 mid-session renegotiation). Only opus→pcm downgrades happen
+// automatically; upgrades wait for the next play/settings change. The restart
+// mirrors a live settings change: bump gen, drop the encoder, re-arm the source
+// session, broadcast RECONFIG (members reconnect), re-point local plumbing, and
+// rewrite the playback record — all resuming from the current position (the media
+// source keeps reading where it was; only pts restart under the new gen). Caller
+// holds e.mu; e.sess is non-nil and not paused.
+func (e *Engine) renegotiateLocked(snap contracts.Snapshot, mv myView) {
+	s := e.sess
+	if s.codec != "opus" {
+		return // only opus can lose support mid-session; pcm is universal
 	}
-	return nil
+	lacking := membersLackingCodec(snap, mv, "opus")
+	if len(lacking) == 0 {
+		return // still supported by all members
+	}
+	e.log.Info("codec negotiated", "wanted", "opus", "got", "pcm",
+		"lacking", "["+strings.Join(lacking, " ")+"]", "midSession", true)
+
+	// Downgrade in place: drop the encoder (run() publishes raw PCM next tick),
+	// bump gen, re-arm the source + local plumbing, broadcast RECONFIG.
+	if prev := s.setEnc(nil); prev != nil {
+		_ = prev.Close()
+	}
+	s.codec = "pcm"
+	e.gen++
+	gen := e.gen
+	s.gen.Store(gen)
+	e.p.Source.StartSession(gen, stream.ParseTransport(s.transport), s.bufferMs)
+	e.repointLocked(mv.master, gen, s.transport, true)
+	e.p.Cluster.SetPlayback(s.groupID, s.playbackRecord(e.now(), e.p.Source.Stats()))
+	e.lastBeat = e.now()
+	e.log.Info("session renegotiated to pcm", "uri", s.uri, "gen", gen)
 }
 
 // uriScheme returns the lowercased scheme prefix of a media URI ("file" when

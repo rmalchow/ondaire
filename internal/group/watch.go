@@ -90,6 +90,16 @@ func (e *Engine) reconcile() {
 	playing := mv.group.Playback.State == "playing" || (isMaster && activeSess)
 	e.repointLocked(mv.master, gen, mv.group.Settings.Transport, playing)
 
+	// Mid-session codec renegotiation (D33): a master with a running session whose
+	// effective codec is no longer supported by ALL current members (a member
+	// disabled opus, or a non-opus node joined) downgrades the live session to pcm
+	// in place. Only DOWNGRADES auto-apply mid-session; an upgrade waits for the
+	// next play/settings change. May bump gen + restart the source session, so it
+	// runs after repoint (which re-points the master's own loopback for `playing`).
+	if e.sess != nil && isMaster && !e.sess.paused.Load() {
+		e.renegotiateLocked(snap, mv)
+	}
+
 	// Heartbeat (D28): master, while playing, every Heartbeat interval.
 	if e.sess != nil && isMaster && !now.Before(e.lastBeat.Add(e.p.Heartbeat)) {
 		e.p.Cluster.SetPlayback(e.sess.groupID, e.sess.playbackRecord(now, e.p.Source.Stats()))

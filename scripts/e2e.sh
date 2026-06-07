@@ -142,6 +142,29 @@ buf2=$(curl -s "$N2/api/status" | jq '.sink.buffered')
 [ "$buf2" -lt 25 ] || die "n2 buffered=$buf2 (epoch mixing: playout lags the clock offset)"
 pass "5 play → both sinks playing; n1 source.clients=2; buffered sane ($buf2)"
 
+# ---- 5b. late join: a node following into a PLAYING group receives the stream -
+# While n1's group is still playing the long tone, start n3 (own port block) and
+# follow it into the running group. It must join the live stream: prime burst +
+# member-side re-arm to the master's gen (the late-join stale-gen fix). Assert
+# n3's sink advances and rises, and n1 now fans out to 3 clients. Then n3 leaves
+# + shuts down so the remaining legs keep their 2-node assumptions.
+"$BIN" --data "$DATA3" --media "$ROOT/testdata/media" --name n3 --host 127.0.0.1 \
+       --http-port 38080 --stream-port 39090 --source-port 39200 --gossip-port 37946 \
+       --no-mdns --join 127.0.0.1:17946 >"$LOG3" 2>&1 &  PID3=$!
+wait_for "$N3/api/status" '.id|length' 32 30 || die "n3 did not start (late join)"
+ID3=$(api "$N3/api/status" | jq -r .id)
+wait_for "$N3/api/cluster" '[.nodes[]|select(.alive)]|length' 3 30 || die "n3 did not join cluster"
+post_retry "$N3/api/follow" "{\"target\":\"$ID1\"}" || die "n3 follow into playing group failed"
+wait_for "$N1/api/cluster" '.groups[]|select(.master=="'"$ID1"'")|.members|length' 3 || die "n3 not in group"
+wait_for "$N3/api/status" '.sink.played>0' true 5 || die "n3 (late join) sink not playing"
+rising "$N3/api/status" '.sink.played' 1 || die "n3 (late join) sink not rising"
+wait_for "$N1/api/status" '.source.clients' 3 8 || die "n1 source.clients != 3 with late joiner"
+pass "5b late join: n3 follows a PLAYING group → its sink plays + rises; n1 clients=3"
+# Remove n3: unfollow, then stop it so the rest of the suite stays 2-node.
+post_retry "$N3/api/unfollow" '' || die "n3 unfollow failed"
+kill "$PID3" 2>/dev/null || true; wait "$PID3" 2>/dev/null || true; PID3=
+wait_for "$N1/api/cluster" '.groups[]|select(.master=="'"$ID1"'")|.members|length' 2 15 || die "group did not return to 2 after n3 left"
+
 # ---- 6. pause (D39): both sinks STOP advancing; state=="paused" --------------
 # Snapshot both played counters, pause, allow the in-flight tail to drain, then
 # assert neither counter advances any further and the cluster shows "paused".
@@ -223,6 +246,22 @@ if [ "$o1" = true ] && [ "$o2" = true ]; then
   sleep 1
   api "$N1/api/status" | jq -e '.sink.played > '"$P1" >/dev/null || die "n1 opus playback stalled"
   api "$N2/api/status" | jq -e '.sink.played > '"$P2" >/dev/null || die "n2 opus playback stalled"
+
+  # ---- 13b. mid-session renegotiation: a member disables opus → live downgrade -
+  # With the opus session PLAYING, disable opus on the member (n1). The master
+  # (n2) detects the running codec is no longer supported by all members and
+  # renegotiates the live session to pcm in place (bump gen, drop encoder,
+  # RECONFIG). Both sinks must keep advancing and the playback record flips to
+  # codec=pcm — no stop, no operator action. (D33 mid-session renegotiation.)
+  patchj "$N1/api/node" '{"disabled":["opus"]}'
+  wait_for "$N2/api/cluster" '.groups[]|select(.id=="'"$GID"'").playback.codec' pcm 8 \
+    || die "session did not renegotiate to pcm after member disabled opus"
+  rising "$N1/api/status" '.sink.played' 1 || die "n1 stalled after renegotiation"
+  rising "$N2/api/status" '.sink.played' 1 || die "n2 stalled after renegotiation"
+  pass "13b renegotiation: member disabled opus → live session downgraded to pcm, both rising"
+  # Re-enable opus on n1 (no auto-upgrade mid-session; restores caps for teardown).
+  patchj "$N1/api/node" '{"disabled":[]}'
+
   post "$N2/api/group/settings" '{"codec":"pcm","transport":"udp","bufferMs":200}'
   wait_for "$N1/api/cluster" '.groups[]|select(.master=="'"$ID2"'").settings.codec' pcm || die "codec not reset to pcm"
   pass "13 opus leg: both sinks play through opus; reset to pcm"

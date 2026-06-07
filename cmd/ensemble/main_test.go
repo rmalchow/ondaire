@@ -271,6 +271,61 @@ func TestNewDeliverPCMResetsOnGenChange(t *testing.T) {
 	}
 }
 
+// genSink is a fakeSink that also tracks its armed gen (implements ArmedGen),
+// modelling the real *sink.Playout. It lets the deliver test reproduce the
+// late-join stale-gen bug: when something Resets the sink behind deliver's back
+// to a gen that does NOT match the incoming frames, deliver must re-arm.
+type genSink struct {
+	resets []uint32
+	pushes []uint32
+	gen    uint32
+	armed  bool
+}
+
+func (g *genSink) Push(gen uint32, seq uint64, pts int64, payload []byte) {
+	g.pushes = append(g.pushes, gen)
+}
+func (g *genSink) Reset(gen uint32)           { g.resets = append(g.resets, gen); g.gen = gen; g.armed = true }
+func (g *genSink) Disarm()                    { g.armed = false }
+func (g *genSink) Stats() contracts.SinkStats { return contracts.SinkStats{} }
+func (g *genSink) SetGain(float64)            {}
+func (g *genSink) SetDelayOffset(int64)       {}
+func (g *genSink) Close() error               { return nil }
+func (g *genSink) ArmedGen() (uint32, bool)   { return g.gen, g.armed }
+
+// TestNewDeliverReArmsOnSinkGenMismatch reproduces the late-join bug: the group
+// engine (repointLocked) Resets the sink to a GUESSED gen (0) on a (re)subscribe
+// while deliver's cached curGen still equals the incoming frame gen. Deliver must
+// notice the sink is armed at the wrong gen and re-arm to the frame's gen — else
+// every frame drops as stale-gen and the joiner starves.
+func TestNewDeliverReArmsOnSinkGenMismatch(t *testing.T) {
+	gs := &genSink{}
+	d := newDeliver(gs, newDisableState(nil), newLogger("error"))
+	pcm := make([]byte, stream.FrameBytes)
+
+	// First subscription: frames at gen 1 arm the sink to 1.
+	d(stream.Header{Gen: 1, Seq: 0, PTS: 0}, pcm)
+	if !gs.armed || gs.gen != 1 {
+		t.Fatalf("after first frame: gen=%d armed=%v want 1 true", gs.gen, gs.armed)
+	}
+
+	// repointLocked re-subscribes and Resets the sink to the guessed gen 0
+	// (member floor). Deliver's cache still says curGen=1.
+	gs.Reset(0)
+
+	// New frames still arrive at gen 1 (the master's real, unchanged gen).
+	d(stream.Header{Gen: 1, Seq: 1, PTS: 0}, pcm)
+
+	// Deliver must have re-armed the sink to gen 1 (not left it at 0).
+	if gs.gen != 1 {
+		t.Errorf("sink gen = %d, want 1 (deliver did not re-arm after external Reset to 0)", gs.gen)
+	}
+	// resets: [1 (first frame), 0 (repoint), 1 (deliver re-arm)].
+	if len(gs.resets) != 3 || gs.resets[2] != 1 {
+		t.Errorf("resets = %v, want last reset to 1", gs.resets)
+	}
+}
+
 func contains(ss []string, s string) bool {
 	for _, x := range ss {
 		if x == s {

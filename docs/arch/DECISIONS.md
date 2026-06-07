@@ -180,7 +180,7 @@ terminates. (G)
 **D25 — rate servo (E)**: skew estimator — cumulative samples consumed vs
 master-clock elapsed, ~3 s averaging window; backend `DelayReporter`
 (`DeviceDelay()`) used when implemented, backpressure inference otherwise —
-feeding a PI controller, output clamped ±500 ppm and slew-limited, driving a
+feeding a PI controller, output clamped ±2000 ppm and slew-limited (tuned aggressive per user testing), driving a
 4-tap Catmull-Rom fractional resampler between jitter buffer and backend.
 Runs continuously (drift *prevention*); underruns stay silence + watchdog →
 RESTART (§8.6: starved > 2 s → RESTART to the source; still starved →
@@ -259,11 +259,41 @@ libopus isn't loadable. The ~7 functions bound: `opus_encoder_create`,
 `opus_decoder_create`, `opus_decode`, `opus_decoder_destroy`. **Master
 encodes once** (H wires it between source `ReadFrame` and `source.Server`
 fan-out); **each member decodes** (wired between the subscriber's deliver
-callback and `Sink.Push` — the sink always consumes canonical PCM). Before
-starting an opus session the master checks that every current member reports
-the `opus` capability and rejects `play` naming the nodes that lack it.
+callback and `Sink.Push` — the sink always consumes canonical PCM).
 No packet-loss concealment on the decoder — a lost opus frame is silence,
 same as pcm (§8.5); keep simple. (D/E/G/H)
+
+**D33 amendment — session codec NEGOTIATION (supersedes the reject-behavior)**:
+the master no longer rejects `play` when a member lacks the wanted codec — it
+**negotiates** the EFFECTIVE codec at every session start (play, resume, settings
+change) AND on membership change mid-session. The effective codec is the wanted
+`settings.codec` iff every CURRENT member's effective caps
+(`NodeView.Capabilities`, already probed-minus-disabled D40) include it AND this
+master can encode it, else `"pcm"` (always universal). A downgrade is logged
+(`INFO codec negotiated wanted=opus got=pcm lacking=[names]`); the replicated
+playback record shows the EFFECTIVE codec. **Mid-session renegotiation**: the
+master's reconcile (`group/watch.go renegotiateLocked`) detects that a running
+opus session is no longer supported by all members (a member disabled opus, or a
+non-opus node joined) and **downgrades in place** exactly like a live settings
+change — bump gen, swap the session encoder to nil (atomic, the run goroutine
+loads it per tick), `Source.StartSession`, `Reconfig` (members reconnect via the
+RECONFIG machinery), re-point, rewrite the record — resuming from the current
+position. Only DOWNGRADES auto-apply mid-session; an upgrade (codec became newly
+possible) waits for the next play/settings change (keep it simple). The opus
+factory returning `dl.ErrUnavailable` at encoder build still fails the play with
+`ErrNoOpus` (a genuine runtime failure, distinct from negotiation). (D/E/G/H,
+spec §8.3)
+
+**D33 amendment — late-join stale-gen fix (member-side deliver)**: a node that
+follows into an ALREADY-PLAYING group (or leaves + rejoins mid-stream) primes
+correctly from the source ring, but the member-side `newDeliver` closure cached
+its `curGen` across subscriptions while `repointLocked` independently `Sink.Reset`s
+the sink to a guessed gen on (re)subscribe. When the master's real gen happened to
+equal the closure's cached gen, deliver skipped re-arming and the sink stayed armed
+at the guessed gen — every frame dropped as stale-gen and the joiner starved. Fix:
+deliver consults the sink's ACTUAL armed gen (`*sink.Playout.ArmedGen()`) and
+re-arms whenever the sink is not armed at the incoming frame's gen, regardless of
+its own cache. (E/H)
 
 **D34 — alsa backend (E, v1)**: simple-API binding via `internal/dl`:
 `snd_pcm_open(&pcm, "default", PLAYBACK, 0)`,
@@ -378,12 +408,16 @@ off three features locally: `playback` (output), `opus` (codec), `input`
   K's media factory rejects an `input:` URI and its opus factory returns
   `dl.ErrUnavailable` (→ `ErrNoOpus`) while disabled, and the member deliver path
   drops opus frames — but the primary gate is the effective-caps subtraction
-  (master-side D33 validation rejects an opus session including a node that lacks
-  the `opus` cap).
-- **UI**: capability chips for playback/opus/input are tri-state — available
-  (normal, click to disable), unavailable (dimmed + struck, from probing, NOT
-  clickable), disabled (amber/off, click to re-enable). pcm/wav/mp3/flac stay
-  plain non-toggleable. (spec §1, §9.1 PATCH row updated.)
+  (master-side D33 NEGOTIATION downgrades an opus session to pcm when a member
+  lacks the `opus` cap, rather than rejecting — see the D33 negotiation amendment).
+- **UI**: capability chips for playback/opus/input are tri-state with three
+  UNMISTAKABLE states, grouped under a small "features" label distinct from the
+  passive "formats" chips: **ON** (available + enabled) solid green `●`, click to
+  disable; **OFF** (available but disabled) amber outline `○`, click to enable;
+  **UNAVAILABLE** (not probed on this host) dimmed + struck `✕`, NOT clickable
+  (cursor not-allowed), tooltip "not available on this host". Cursor pointer only
+  on the togglable (on/off) chips; pcm/wav/mp3/flac stay plain non-toggleable.
+  (spec §1, §9.1 PATCH row updated.)
 
 ## Persisted cluster config (user addition)
 

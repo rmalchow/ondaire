@@ -608,10 +608,31 @@ func newDeliver(sk contracts.Sink, disabled *disableState, log *slog.Logger) str
 	haveGen := false
 	dl := log.With("comp", "deliver")
 
+	// armedSink lets deliver consult the sink's ACTUAL armed gen (the real
+	// *sink.Playout implements it; the fakeSink in tests does not). This closes
+	// the late-join stale-gen bug: when the group engine (repointLocked) Resets
+	// the sink to a guessed gen on a (re)subscribe, deliver's own curGen cache may
+	// still equal the incoming frame gen and skip re-arming — leaving the sink
+	// armed at the wrong (guessed) gen, so every frame drops as stale-gen and the
+	// joiner starves. Re-arming whenever the sink is not armed at the frame's gen
+	// makes deliver authoritative regardless of its cache.
+	armed, _ := sk.(interface {
+		ArmedGen() (uint32, bool)
+	})
+
 	return func(h stream.Header, payload []byte) {
 		// A generation change means a new session / settings RECONFIG: re-arm the
-		// sink under the new gen, else every frame is dropped as stale-gen.
-		if !haveGen || h.Gen != curGen {
+		// sink under the new gen, else every frame is dropped as stale-gen. Also
+		// re-arm when the sink reports it is armed at a DIFFERENT gen (or disarmed)
+		// than this frame — i.e. repointLocked re-armed it out from under us on a
+		// (re)subscribe (the late-join case).
+		needArm := !haveGen || h.Gen != curGen
+		if !needArm && armed != nil {
+			if g, ok := armed.ArmedGen(); !ok || g != h.Gen {
+				needArm = true
+			}
+		}
+		if needArm {
 			sk.Reset(h.Gen)
 			curGen = h.Gen
 			haveGen = true

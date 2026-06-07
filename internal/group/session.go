@@ -35,7 +35,11 @@ type session struct {
 
 	src MediaSource
 	srv SourceServer
-	enc OpusEncoder // nil for pcm
+	// enc holds the opus encoder (nil-typed pointer = pcm). Stored atomically so
+	// the master can swap it mid-session on a codec renegotiation (D33): the run
+	// goroutine loads it each tick. A non-nil *OpusEncoder wraps a live encoder;
+	// load returns the interface (possibly nil) to encode with.
+	enc atomic.Pointer[encBox]
 
 	startMaster atomic.Int64  // sessionStart in master-clock ns; re-anchored on resume (read each tick)
 	anchorSeq   atomic.Uint64 // D39: bumped on resume so run() resets its frame index
@@ -51,6 +55,30 @@ type session struct {
 
 	onEnd func(s *session, reason endReason) // engine callback (clears status on EOF)
 	now   func() time.Time
+}
+
+// encBox wraps an OpusEncoder so it can be stored in an atomic.Pointer (the
+// interface itself is not atomically swappable). A nil box (never stored) or a
+// box whose enc is nil both mean "pcm, no encode".
+type encBox struct{ enc OpusEncoder }
+
+// loadEnc returns the live opus encoder (or nil for pcm).
+func (s *session) loadEnc() OpusEncoder {
+	if b := s.enc.Load(); b != nil {
+		return b.enc
+	}
+	return nil
+}
+
+// setEnc atomically installs (or clears, with enc==nil) the opus encoder and
+// returns the previously-installed encoder for the caller to Close (off the run
+// goroutine). Called under e.mu (Play install / renegotiation).
+func (s *session) setEnc(enc OpusEncoder) (prev OpusEncoder) {
+	old := s.enc.Swap(&encBox{enc: enc})
+	if old != nil {
+		return old.enc
+	}
+	return nil
 }
 
 // run is the release loop (§8.2). One frame per 20 ms tick:
@@ -118,8 +146,8 @@ func (s *session) run() {
 		}
 
 		payload := buf
-		if s.enc != nil {
-			pkt, eerr := s.enc.Encode(buf)
+		if enc := s.loadEnc(); enc != nil {
+			pkt, eerr := enc.Encode(buf)
 			if eerr != nil {
 				s.onEnd(s, endStop)
 				return
@@ -146,8 +174,8 @@ func (s *session) closeSrc() {
 	if s.src != nil {
 		_ = s.src.Close()
 	}
-	if s.enc != nil {
-		_ = s.enc.Close()
+	if enc := s.loadEnc(); enc != nil {
+		_ = enc.Close()
 	}
 }
 

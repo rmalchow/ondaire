@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/netip"
 	"sync"
+	"time"
 
 	"ensemble/internal/contracts"
 	"ensemble/internal/id"
@@ -227,6 +228,14 @@ type fakeSink struct {
 	mu     sync.Mutex
 	gains  []float64
 	delays []int64
+	tones  int
+}
+
+func (s *fakeSink) TestTone(time.Duration) error {
+	s.mu.Lock()
+	s.tones++
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *fakeSink) SetGain(g float64) {

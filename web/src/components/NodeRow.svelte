@@ -7,6 +7,7 @@
     setVolume,
     setOutputDelay,
     setOutputDevice,
+    testTone,
   } from "../lib/api.js";
   import EditableText from "./EditableText.svelte";
   import VolumeSlider from "./VolumeSlider.svelte";
@@ -112,8 +113,8 @@
     </div>
   </div>
 
-  {#if outputDevices.length > 0}
-    <div class="row wrap">
+  <div class="row wrap">
+    {#if outputDevices.length > 0}
       <label class="row small muted device">
         output device
         <select value={outputDevice} onchange={onDeviceChange}>
@@ -122,8 +123,10 @@
           {/each}
         </select>
       </label>
-    </div>
-  {/if}
+    {/if}
+    <button class="small" title="play a 1s test tone on this node's output"
+      onclick={() => testTone(node.id)}>♪ test tone</button>
+  </div>
 </div>
 
 <style>

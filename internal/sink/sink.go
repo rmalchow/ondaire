@@ -19,15 +19,16 @@ func monotoNow() int64 { return time.Now().UnixNano() }
 // backend, with the continuous rate servo and the starvation watchdog.
 // Implements contracts.Sink. One scheduler goroutine, one mutex.
 type Playout struct {
-	mu      sync.Mutex
-	jb      *jitterBuffer
-	servo   *rateServo
-	rs      *resampler
-	gen     uint32
-	armed   bool
-	closed  bool
-	stats   contracts.SinkStats
-	lastPkt int64 // local-ns of most recent accepted Push (watchdog)
+	mu       sync.Mutex
+	jb       *jitterBuffer
+	servo    *rateServo
+	rs       *resampler
+	gen      uint32
+	armed    bool
+	closed   bool
+	toneBusy bool // a TestTone writer goroutine is active
+	stats    contracts.SinkStats
+	lastPkt  int64 // local-ns of most recent accepted Push (watchdog)
 
 	// session servo accounting
 	originSeq  uint64

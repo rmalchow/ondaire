@@ -12,6 +12,13 @@ import (
 // keepaliveInterval is how often a subscription re-HELLOs (§8.7).
 const keepaliveInterval = 5 * time.Second
 
+// helloRetries/helloRetryInterval: fast re-HELLO cadence while the FIRST frame
+// has not arrived — the initial UDP HELLO may be lost (user-reported on WLAN).
+const (
+	helloRetries       = 3
+	helloRetryInterval = 500 * time.Millisecond
+)
+
 // watchdogTimeout is the starvation threshold: no frame for this long trips the
 // watchdog (§8.6).
 const watchdogTimeout = 2 * time.Second
@@ -306,9 +313,32 @@ func (s *subscription) sendBye() {
 	s.helloUDP(TypeBye, false)
 }
 
-// keepaliveLoop re-HELLOs every keepaliveInterval until shutdown.
+// keepaliveLoop re-HELLOs every keepaliveInterval until shutdown. The initial
+// HELLO is a single UDP datagram and can be lost: until the FIRST frame
+// arrives, re-HELLO quickly (3 retries at helloRetryInterval, prime requested
+// again) before falling back to the slow keepalive cadence — otherwise a lost
+// HELLO costs a full keepaliveInterval of silence at session start.
 func (s *subscription) keepaliveLoop() {
 	defer s.wg.Done()
+
+	if s.tr == TransportUDP {
+		for i := 0; i < helloRetries; i++ {
+			select {
+			case <-s.done:
+				return
+			case <-time.After(helloRetryInterval):
+			}
+			s.mu.Lock()
+			got := s.gotFrame
+			s.mu.Unlock()
+			if got {
+				break // stream flowing; no retry needed
+			}
+			s.log.Info("hello retry (no frames yet)", "attempt", i+1, "master", s.addr.String())
+			s.helloUDP(TypeHello, true) // prime-me again: the first may be lost
+		}
+	}
+
 	t := time.NewTicker(keepaliveInterval)
 	defer t.Stop()
 	for {

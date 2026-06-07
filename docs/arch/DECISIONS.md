@@ -336,3 +336,11 @@ blip is accepted; the session is **not** restarted. (A/C/E/I/J/K)
   comes from `--join` seeds + observed-IP reporting (memberlist + HTTP traffic
   both feed `Observe`). (K)
 - K reconciles exact constructor names at integration (the fix-loop). (K)
+
+**D38 — bring-up aids (user round)**: `POST /api/tone` plays a 1 s 440 Hz
+tone through the node's local output backend (`Sink.TestTone`; 409 while a
+session or tone is active; respects the live volume) — surfaced as a
+"test tone" button per node in the UI, proxy-able. And: the initial UDP
+HELLO may be lost, so until the FIRST frame arrives the subscriber re-HELLOs
+(prime-me) 3× at 500 ms before falling back to the 5 s keepalive cadence.
+(E/G/I/J)

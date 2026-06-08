@@ -9,11 +9,20 @@
   let dragging = $state(false);
   let pct = $state(0);
   let lastSent = null; // last 0–1 value actually sent
+  let pending = null; // 0–1 value sent but not yet echoed back in `value`
 
-  // Re-sync to the server truth when a new snapshot arrives and not dragging.
+  // Re-sync to the server truth when a new snapshot arrives. While a value is in
+  // flight (sent but not yet echoed) we KEEP showing the thumb where the user
+  // left it — otherwise releasing snaps back to the old value for one round-trip
+  // (the snapshot echo lags the PATCH), then jumps to the new one. Suppress that.
   $effect(() => {
     const v = Math.round((value || 0) * 100);
-    if (!dragging) pct = v;
+    if (dragging) return;
+    if (pending !== null) {
+      if (Math.round(pending * 100) !== v) return; // server hasn't caught up yet
+      pending = null; // echoed — resume tracking server truth
+    }
+    pct = v;
   });
 
   let timer = null;
@@ -25,8 +34,10 @@
     const v = pct / 100;
     if (v === lastSent) return; // already sent this exact value — do nothing
     lastSent = v;
+    pending = v;
     onchange(v).catch(() => {
       lastSent = null; // failed → allow a retry
+      pending = null; // and resync to server truth
     });
   }
 

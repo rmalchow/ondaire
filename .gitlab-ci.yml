@@ -40,7 +40,7 @@ test:
   script:
     - go vet ./...
     - go test ./...
-    - out="$(gofmt -l . | grep -v node_modules || true)"; if [ -n "$out" ]; then echo "gofmt:"; echo "$out"; exit 1; fi
+    - out="$(gofmt -l cmd internal *.go | grep -vE "node_modules|\.gomodcache" || true)"; if [ -n "$out" ]; then echo "gofmt:"; echo "$out"; exit 1; fi
     - GOOS=linux GOARCH=arm64 go build ./...   # proves the arm64 cross-build stays clean
   tags:
     - shared

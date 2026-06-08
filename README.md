@@ -170,8 +170,9 @@ servo'd playout so the audio leaves every speaker at the same instant.
 
 Deeper docs live in [`docs/`](docs/): [`README.md`](docs/README.md) is the full
 spec, [`arch/`](docs/arch) has per-component design and the decision log,
-[`DUMB-CLIENT.md`](docs/DUMB-CLIENT.md) is the wire protocol, and
-[`RELEASING.md`](RELEASING.md) covers tagging a release.
+[`DUMB-CLIENT.md`](docs/DUMB-CLIENT.md) is the wire protocol,
+[`esp32.md`](docs/esp32.md) the ESP32-S2 hardware node, [`calibrate.md`](docs/calibrate.md)
+the acoustic auto-calibration, and [`RELEASING.md`](RELEASING.md) covers releases.
 
 ## Status & scope
 

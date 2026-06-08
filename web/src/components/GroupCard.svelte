@@ -91,9 +91,17 @@
   let gvBase = null; // {avg, vols: Map<id, 0..1>} captured at drag start
   let gvLast = new Map(); // last value sent per member (dedup within a drag)
   let gvTimer = null;
+  // Settle hold: after a drag the per-member PATCHes round-trip and the average
+  // re-converges over a frame or two. Holding the thumb across that window stops
+  // it snapping back to the old average before the echoes land. Clamping means
+  // the achieved average needn't exactly equal the target, so this is a short
+  // time window rather than an exact-match guard (cf. VolumeSlider).
+  let gvPending = $state(false);
+  let gvSettleTimer = null;
   $effect(() => {
     const v = Math.round(avgVol * 100);
-    if (!gvDragging) gvPct = v;
+    if (gvDragging || gvPending) return;
+    gvPct = v;
   });
 
   function applyGroupVolume() {
@@ -130,6 +138,13 @@
     applyGroupVolume();
     gvDragging = false;
     gvBase = null;
+    // hold the thumb briefly while the member PATCHes echo back into avgVol.
+    gvPending = true;
+    if (gvSettleTimer) clearTimeout(gvSettleTimer);
+    gvSettleTimer = setTimeout(() => {
+      gvSettleTimer = null;
+      gvPending = false; // resume tracking the server-reported average
+    }, 500);
   }
 
   // alive nodes not already in this group → "Add node…" select.

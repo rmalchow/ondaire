@@ -1,10 +1,10 @@
 <script>
-  // Media section (J arch §4): node picker → file list → Play here, plus URL
-  // and Input play paths gated on the picked node's reported sources (§6.1).
+  // Media section (J arch §4): the SELECTED group (clicked card) is the play
+  // target — no node picker. File list → Play, plus URL and Input play paths gated
+  // on the target group master's reported sources (§6.1).
   import { bytes, relTime } from "../lib/fmt.js";
-  import { nodeById, activeGroup } from "../lib/derive.js";
+  import { nodeById, activeGroup, groupLabel } from "../lib/derive.js";
   import { getMedia, playOnNode } from "../lib/api.js";
-  import { cluster } from "../lib/ws.svelte.js";
   import { entriesFor, crumbs, parentDir, joinDir } from "../lib/tree.js";
 
   let { snapshot, self, selectedMaster, selectTick } = $props();
@@ -36,12 +36,12 @@
     }
   });
 
-  // nodes that can decode local media (non-empty formats).
-  let mediaNodes = $derived(
-    (snapshot.nodes || []).filter(
-      (n) => (n.capabilities?.formats ?? []).length > 0,
-    ),
+  // The group this media plays into = the group mastered by the picked node (the
+  // selected card). Its label gives the section its context.
+  let targetGroup = $derived(
+    (snapshot.groups || []).find((g) => g.master === pickedNodeId),
   );
+  let targetLabel = $derived(targetGroup ? groupLabel(targetGroup) : "");
 
   let picked = $derived(nodeById(snapshot, pickedNodeId));
   let sources = $derived(picked?.capabilities?.sources ?? []);
@@ -84,14 +84,10 @@
       });
   });
 
-  // playHere takes over the picked node when it's a follower, then plays. The
-  // live snapshot comes from the ws store (playOnNode polls it to confirm the
-  // takeover landed before issuing /play). §5.2 / J §4.
+  // play `uri` into the selected group: its master sources it directly (every node
+  // masters its own group — no takeover).
   function playHere(uri) {
-    const name = picked?.name;
-    playOnNode(pickedNodeId, uri, () => cluster.snapshot, { name }).catch(
-      () => {},
-    );
+    if (pickedNodeId) playOnNode(pickedNodeId, uri).catch(() => {});
   }
   function playFile(f) {
     playHere("file:" + f.path);
@@ -118,14 +114,11 @@
   <h2>Media</h2>
   <div class="card">
     <div class="row wrap" style="margin-bottom: 10px;">
-      <label class="row">
-        Node
-        <select bind:value={pickedNodeId}>
-          {#each mediaNodes as n (n.id)}
-            <option value={n.id}>{n.name}</option>
-          {/each}
-        </select>
-      </label>
+      {#if targetLabel}
+        <span class="muted">Playing into <strong>{targetLabel}</strong></span>
+      {:else}
+        <span class="muted">Select a group above to play into it.</span>
+      {/if}
       {#if loading}<span class="muted small">loading…</span>{/if}
     </div>
 

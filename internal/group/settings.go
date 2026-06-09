@@ -84,10 +84,10 @@ func (e *Engine) SetSettings(s contracts.GroupSettings) error {
 	}
 	snap := e.p.Cluster.Snapshot()
 	mv := myGroup(snap, e.self)
-	if !mv.found || mv.role == roleFollower {
-		return ErrNotMaster
+	if !mv.found {
+		return ErrNotSynced
 	}
-	groupID := mv.group.ID
+	groupID := mv.group.ID // settings always apply to the group I master (== self)
 
 	e.p.Cluster.SetGroupSettings(groupID, v)
 	e.log.Info("group settings applied", "group", groupID.String(),
@@ -107,6 +107,6 @@ func (e *Engine) SetSettings(s contracts.GroupSettings) error {
 	// Note: codec changes do not rebuild the running encoder mid-session — a codec
 	// change takes effect at the next Play. Transport/bufferMs apply live.
 	e.p.Source.StartSession(gen, stream.ParseTransport(v.Transport), v.BufferMs)
-	e.repointLocked(mv.master, gen, v.Transport, true)
+	e.drivePlayerLocked(mv)
 	return nil
 }

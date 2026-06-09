@@ -3,10 +3,8 @@ package group
 import (
 	"net/netip"
 	"testing"
-	"time"
 
 	"ensemble/internal/contracts"
-	"ensemble/internal/id"
 )
 
 func TestRepointSubscriberOnMasterChange(t *testing.T) {
@@ -84,10 +82,13 @@ func TestRepointUsesDialCandidatesAndPorts(t *testing.T) {
 
 func TestMasterSubscribesToSelfLoopback(t *testing.T) {
 	self := idN(1)
-	r := newRig(self, 0, false)
-	// No dial candidates for self → loopback fallback.
-	r.cl.setSnap(withPlaying(soloSnap(self)))
-	r.e.reconcile()
+	r := newRig(self, 1000, true)
+	// self plays its own group (Following == self); Play sources it.
+	r.cl.setSnap(soloSnap(self))
+	if err := r.e.Play("input:"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	defer r.e.Close()
 
 	subs := r.sub.snapshotSubs()
 	if len(subs) != 1 {
@@ -98,39 +99,10 @@ func TestMasterSubscribesToSelfLoopback(t *testing.T) {
 	}
 }
 
-func TestWatchTearsDownSessionOnMasterLoss(t *testing.T) {
-	self, newMaster := idN(1), idN(2)
-	r := newRig(self, 1000, true)
-	r.cl.setSnap(soloSnap(self))
-	if err := r.e.Play("input:"); err != nil {
-		t.Fatalf("Play: %v", err)
-	}
-	defer r.e.Close()
-	waitFor(t, time.Second, func() bool { return len(r.srv.snapshotReleases()) >= 1 }, "first release")
-	plBefore := len(r.cl.playback)
-
-	// self loses mastership: now a follower of newMaster.
-	r.cl.dialResults[newMaster] = []netip.Addr{netip.AddrFrom4([4]byte{127, 0, 0, 9})}
-	r.cl.setSnap(masterSnap(newMaster, defaultSettings(), self))
-	r.e.reconcile()
-
-	// session torn down (StopSession), no status rewrite by the teardown itself.
-	if r.srv.stopCount() < 1 {
-		t.Fatal("StopSession not called on master loss")
-	}
-	r.e.mu.Lock()
-	sess := r.e.sess
-	r.e.mu.Unlock()
-	if sess != nil {
-		t.Fatal("session not cleared after master loss")
-	}
-	// teardown must NOT have written a fresh idle playback (we are no longer the
-	// writer); the only new playback writes would be from the heartbeat, which is
-	// gated on isMaster.
-	if len(r.cl.playback) != plBefore {
-		t.Fatalf("teardown rewrote playback: %d -> %d", plBefore, len(r.cl.playback))
-	}
-}
+// (Removed: TestWatchTearsDownSessionOnMasterLoss — under the crosswise model a node
+// is always the master of its own group, so it never "loses mastership"; a session
+// only ends via Stop/EOF/Close. And TestReconcileHealViaRun — self-heal is obsolete:
+// a player whose target is dead simply goes idle, no follow reset.)
 
 func TestReconcileSkipsBeforeSelfDerived(t *testing.T) {
 	self := idN(1)
@@ -142,20 +114,22 @@ func TestReconcileSkipsBeforeSelfDerived(t *testing.T) {
 	}
 }
 
-func TestReconcileHealViaRun(t *testing.T) {
-	self := idN(1)
+// A player whose target master is dead/unknown goes IDLE (Detach), with no
+// follow-reset (self-heal is obsolete under the crosswise model).
+func TestPlayerIdleWhenTargetDead(t *testing.T) {
+	self, dead := idN(1), idN(9)
 	r := newRig(self, 0, false)
-	r.e.p.Grace = 50 * time.Millisecond
-	// Dangling follow snapshot (stale).
-	n := node(self, idN(9), true)
-	g := contracts.GroupView{ID: id.XOR(self), Master: self, Members: []id.ID{self}}
+	// self's player targets `dead`, which is not a derived master → idle.
+	n := node(self, dead, true)
+	g := contracts.GroupView{ID: self, Master: self, Members: nil} // self's own (empty) group
 	r.cl.setSnap(contracts.Snapshot{Nodes: []contracts.NodeView{n}, Groups: []contracts.GroupView{g}})
 
-	r.e.reconcile()                   // arms healAt (fake now)
-	r.advance(100 * time.Millisecond) // past Grace
 	r.e.reconcile()
-	got, ok := r.cl.lastFollowing()
-	if !ok || got != id.Zero {
-		t.Fatalf("self-heal SetFollowing = %v,%v want Zero", got, ok)
+	if got := len(r.sub.snapshotSubs()); got != 0 {
+		t.Fatalf("idle player must not subscribe; got %d subs", got)
+	}
+	// following is NOT reset (no self-heal): the player just idles until the target returns.
+	if _, ok := r.cl.lastFollowing(); ok {
+		t.Fatal("dead target must not trigger a follow reset")
 	}
 }

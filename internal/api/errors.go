@@ -16,6 +16,7 @@ import (
 // unknown errors.
 var (
 	ErrNotMaster       = errors.New("not master")
+	ErrNotSynced       = errors.New("clock not synced")
 	ErrNotAlive        = errors.New("target not alive")
 	ErrTargetNotMaster = errors.New("target not a master")
 	ErrUnknownNode     = errors.New("unknown node")
@@ -35,8 +36,10 @@ func errStatus(err error) (int, string, string) {
 	switch {
 	case err == nil:
 		return http.StatusOK, "", ""
+	case errors.Is(err, ErrNotSynced):
+		return http.StatusServiceUnavailable, "not_synced", "clock not synced yet — retry shortly"
 	case errors.Is(err, ErrNotMaster):
-		return http.StatusConflict, "not_master", "use POST /api/group/master to take over first"
+		return http.StatusConflict, "not_master", "this node does not master that group"
 	case errors.Is(err, ErrNotAlive):
 		return http.StatusConflict, "not_alive", ""
 	case errors.Is(err, ErrTargetNotMaster):

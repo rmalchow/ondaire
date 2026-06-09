@@ -5,9 +5,6 @@ import (
 	"net/netip"
 	"testing"
 	"time"
-
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
 )
 
 func TestRunReconcilesOnClusterChange(t *testing.T) {
@@ -36,41 +33,15 @@ func TestRunReconcilesOnClusterChange(t *testing.T) {
 	r.cl.setSnap(snap)
 	r.cl.signal()
 
+	// New model: self's player follows `master` → it subscribes to master's source.
 	waitFor(t, time.Second, func() bool {
 		subs := r.sub.snapshotSubs()
-		if len(subs) == 0 {
-			return false
-		}
-		return r.e.Group().Master == master
+		return len(subs) > 0 && subs[len(subs)-1].addr.Addr() == netip.AddrFrom4([4]byte{127, 0, 0, 9})
 	}, "reconcile on cluster change")
 }
 
-func TestRunHealsOnBoot(t *testing.T) {
-	self := idN(1)
-	r := newRig(self, 0, false)
-	r.e.p.Grace = 30 * time.Millisecond
-	// Boot following a dead/unknown node → stale.
-	n := node(self, idN(9), true)
-	g := contracts.GroupView{ID: id.XOR(self), Master: self, Members: []id.ID{self}}
-	r.cl.setSnap(contracts.Snapshot{Nodes: []contracts.NodeView{n}, Groups: []contracts.GroupView{g}})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	// Use real time for boot heal so the 1 s ticker (and Grace) advance naturally;
-	// override the now seam to real time by advancing it in a loop.
-	go func() {
-		for i := 0; i < 100; i++ {
-			r.advance(20 * time.Millisecond)
-			time.Sleep(2 * time.Millisecond)
-		}
-	}()
-	go r.e.Run(ctx)
-
-	waitFor(t, 2*time.Second, func() bool {
-		got, ok := r.cl.lastFollowing()
-		return ok && got == id.Zero
-	}, "boot self-heal")
-}
+// (Removed TestRunHealsOnBoot — self-heal is obsolete under the crosswise model: a
+// player whose target is dead simply idles, with no follow reset.)
 
 func TestCloseHaltsSessionAndUnsubscribes(t *testing.T) {
 	self := idN(1)

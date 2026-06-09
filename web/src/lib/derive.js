@@ -19,28 +19,21 @@ export function nameOf(snapshot, id) {
   return n && n.name ? n.name : shortId(id);
 }
 
-// isMaster reports whether a node is a master (solo or group master): its
-// following points at the zero id.
-export function isMaster(node) {
+// isIdle reports whether a node's PLAYER is idle (plays nothing): its `following`
+// points at the zero id (D49+). Every node always MASTERS its own group (1:1), so
+// "master" is no longer a distinguishing node property — only the player's target
+// (idle / own / another group) varies.
+export function isIdle(node) {
   return !!node && node.following === ZERO_ID;
 }
 
-// masterCandidates returns the member ids eligible for "make master" — all
-// members (§5.2).
-export function masterCandidates(group) {
-  return group && group.members ? group.members : [];
-}
-
-// joinTargets returns other alive masters this node could follow: alive,
-// master (following === ZERO_ID), not itself, and not its current master.
+// joinTargets returns the groups this node could send its PLAYER to: every OTHER
+// alive node is a zone (it masters its own group), minus self and the current
+// target (a no-op). "Play own" and "idle" are separate actions.
 export function joinTargets(snapshot, node) {
   if (!snapshot || !snapshot.nodes || !node) return [];
   return snapshot.nodes.filter(
-    (n) =>
-      n.id !== node.id &&
-      n.alive &&
-      n.following === ZERO_ID &&
-      n.id !== node.following,
+    (n) => n.id !== node.id && n.alive && n.id !== node.following,
   );
 }
 
@@ -65,22 +58,24 @@ export function selfNode(snapshot, selfId) {
   return nodeById(snapshot, selfId);
 }
 
-// deriveRole computes self's LIVE role from the cluster snapshot (not the
-// one-shot boot status, which goes stale). Find the group self belongs to:
-//   - self is the group's master & the group has >1 member → "master"
-//   - self is the group's master & alone                   → "solo"
-//   - self is a member but not the master                  → "follower"
-// Falls back to the boot-status role (or "solo") when self isn't yet resolvable
-// in the snapshot (convergence skew / unknown self id).
+// deriveRole computes a LIVE status word for THIS node, reflecting where its
+// PLAYER plays (D49+ crosswise) from its own `following`:
+//   - following Zero            → "idle" (speakers play nothing)
+//   - following self            → "solo" (plays own group), or "master" once other
+//                                 players have joined that group
+//   - following another node    → "follower" (speakers play that node's group)
+// Falls back to `fallback` (or "idle") when self isn't resolvable in the snapshot.
 export function deriveRole(snapshot, selfId, fallback) {
-  const fb = fallback || "solo";
-  if (!snapshot || !snapshot.groups || !selfId) return fb;
-  const group = snapshot.groups.find(
-    (g) => g.members && g.members.includes(selfId),
-  );
-  if (!group) return fb;
-  if (group.master === selfId) {
-    return (group.members.length > 1) ? "master" : "solo";
+  const fb = fallback || "idle";
+  const self = nodeById(snapshot, selfId);
+  if (!self) return fb;
+  const f = self.following;
+  if (!f || f === ZERO_ID) return "idle";
+  if (f === selfId) {
+    const own = ((snapshot && snapshot.groups) || []).find(
+      (g) => g.master === selfId,
+    );
+    return own && (own.members || []).length > 1 ? "master" : "solo";
   }
   return "follower";
 }
@@ -100,11 +95,18 @@ export function activeGroup(snapshot, selfId) {
   return groups[0];
 }
 
-// addTargets returns alive nodes that are NOT members of the given group —
-// candidates for the group card's "Add node…" control. Following one onto the
-// group's master folds it into this group (§5.1).
+// addTargets returns the nodes eligible to be added to a group as PLAYERS —
+// candidates for the group card's "Add node…" control. A node qualifies when it is
+// alive, can actually play (capabilities.playback — a `--role master` node has no
+// player and is excluded), and is not already a member. Adding one points its player
+// at this group (follow → following = group.master).
 export function addTargets(snapshot, group) {
   if (!snapshot || !snapshot.nodes || !group) return [];
   const members = new Set(group.members || []);
-  return snapshot.nodes.filter((n) => n.alive && !members.has(n.id));
+  return snapshot.nodes.filter(
+    (n) =>
+      n.alive &&
+      !members.has(n.id) &&
+      !!(n.capabilities && n.capabilities.playback),
+  );
 }

@@ -71,6 +71,25 @@ func TestParseOptionsHostFlag(t *testing.T) {
 	}
 }
 
+// validateConfigFlags (the up-front dry-parse) must accept every flag config.Load
+// defines, or a real flag is rejected before config ever sees it. This guards the
+// two flag lists against drift (the --role/--control-port regression).
+func TestParseOptionsAcceptsConfigFlags(t *testing.T) {
+	args := []string{
+		"--role", "master",
+		"--control-port", "9300",
+		"--http-port", "8080",
+		"--stream-port", "9090",
+		"--source-port", "9200",
+		"--gossip-port", "7946",
+		"--data", "/tmp/x",
+		"--no-mdns",
+	}
+	if _, err := parseOptions(args, env(nil)); err != nil {
+		t.Fatalf("parseOptions rejected a valid config flag: %v", err)
+	}
+}
+
 func TestParseOptionsHostEnv(t *testing.T) {
 	opt, _ := parseOptions(nil, env(map[string]string{"ENSEMBLE_HOST": "127.0.0.1"}))
 	if opt.Host != "127.0.0.1" {
@@ -198,12 +217,9 @@ func TestMapErrTranslatesToAPISentinels(t *testing.T) {
 		in   error
 		want error
 	}{
-		{group.ErrNotMaster, api.ErrNotMaster},
-		{group.ErrTargetUnknown, api.ErrUnknownNode},
-		{group.ErrTargetDead, api.ErrNotAlive},
-		{group.ErrTargetFollower, api.ErrTargetNotMaster},
 		{group.ErrNoOpus, api.ErrNoCodec},
 		{group.ErrBadSettings, api.ErrNoCodec},
+		{group.ErrNotSynced, api.ErrNotSynced},
 	}
 	for _, c := range cases {
 		got := mapErr(c.in)

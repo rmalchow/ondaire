@@ -18,25 +18,28 @@ import (
 
 // Defaults (spec §2). Ports are bases; bind-or-increment happens in netx/main.
 const (
-	DefaultHTTPPort   = 8080
-	DefaultStreamPort = 9090
-	DefaultSourcePort = 9200
-	DefaultGossipPort = 7946
-	DefaultDataDir    = "data" // relative to CWD if not overridden
-	DefaultOutput     = ""     // "" = auto-detect backend (sink decides; "auto")
+	DefaultHTTPPort    = 8080
+	DefaultStreamPort  = 9090
+	DefaultSourcePort  = 9200
+	DefaultControlPort = 9300 // playback CONTROL_PORT (master→playback commands, D58)
+	DefaultGossipPort  = 7946
+	DefaultDataDir     = "data" // relative to CWD if not overridden
+	DefaultOutput      = ""     // "" = auto-detect backend (sink decides; "auto")
 )
 
 // Env var names (spec §2, §8.5). Flags override env; env overrides defaults.
 const (
-	EnvHTTPPort   = "ENSEMBLE_HTTP_PORT"
-	EnvStreamPort = "ENSEMBLE_STREAM_PORT"
-	EnvSourcePort = "ENSEMBLE_SOURCE_PORT"
-	EnvGossipPort = "ENSEMBLE_GOSSIP_PORT"
-	EnvDataDir    = "ENSEMBLE_DATA_DIR"
-	EnvMediaDir   = "ENSEMBLE_MEDIA_DIR"
-	EnvOutput     = "ENSEMBLE_OUTPUT"  // named sink backend: "", "auto", "exec", "null", "file:<path>", "alsa"
-	EnvJoin       = "ENSEMBLE_JOIN"    // dev seed list: comma-separated host:gossipPort (§2, D20)
-	EnvNoMDNS     = "ENSEMBLE_NO_MDNS" // "1"/"true": disable mDNS register+browse (tests; gossip via --join)
+	EnvHTTPPort    = "ENSEMBLE_HTTP_PORT"
+	EnvStreamPort  = "ENSEMBLE_STREAM_PORT"
+	EnvSourcePort  = "ENSEMBLE_SOURCE_PORT"
+	EnvControlPort = "ENSEMBLE_CONTROL_PORT"
+	EnvGossipPort  = "ENSEMBLE_GOSSIP_PORT"
+	EnvRole        = "ENSEMBLE_ROLE" // "master" | "playback" | "master,playback" (D49); default both
+	EnvDataDir     = "ENSEMBLE_DATA_DIR"
+	EnvMediaDir    = "ENSEMBLE_MEDIA_DIR"
+	EnvOutput      = "ENSEMBLE_OUTPUT"  // named sink backend: "", "auto", "exec", "null", "file:<path>", "alsa"
+	EnvJoin        = "ENSEMBLE_JOIN"    // dev seed list: comma-separated host:gossipPort (§2, D20)
+	EnvNoMDNS      = "ENSEMBLE_NO_MDNS" // "1"/"true": disable mDNS register+browse (tests; gossip via --join)
 )
 
 // Config is the fully-resolved startup configuration. All fields are final:
@@ -59,11 +62,16 @@ type Config struct {
 	DataDir  string // e.g. /abs/data; contains node.json
 	MediaDir string // e.g. /abs/data/media; default DataDir/media
 
+	// Roles enabled on this node (D49). Default: both. Runtime config, not
+	// replicated; the advertised role goes into mDNS TXT (D50/D51).
+	Role Role
+
 	// Base ports (§2). Actual bound ports are decided later by netx (K).
-	HTTPPort   int
-	StreamPort int
-	SourcePort int // audio source: subscriptions + stream control (§8.7)
-	GossipPort int
+	HTTPPort    int
+	StreamPort  int
+	SourcePort  int // audio source: subscriptions + stream control (§8.7)
+	ControlPort int // playback CONTROL_PORT: master→playback commands (D58)
+	GossipPort  int
 
 	// Sink backend override (§8.5). "" => auto-detect ("auto"); selects a NAMED
 	// backend: "auto" | "exec" | "null" | "file:<path>" | "alsa" (where built).
@@ -108,15 +116,17 @@ func Load(opts Options) (*Config, error) {
 	fs := flag.NewFlagSet("ensemble", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var (
-		fHTTP   = fs.Int("http-port", 0, "HTTP API base port")
-		fStream = fs.Int("stream-port", 0, "stream + clock base port")
-		fSource = fs.Int("source-port", 0, "audio source base port")
-		fGossip = fs.Int("gossip-port", 0, "memberlist gossip base port")
-		fData   = fs.String("data", "", "data directory (contains node.json)")
-		fMedia  = fs.String("media", "", "media directory (default DATA_DIR/media)")
-		fName   = fs.String("name", "", "initial node name (first start only)")
-		fJoin   = fs.String("join", "", "dev gossip seed list: host:gossipPort,...")
-		fNoMDNS = fs.Bool("no-mdns", false, "disable mDNS discovery (tests; use --join)")
+		fHTTP    = fs.Int("http-port", 0, "HTTP API base port")
+		fStream  = fs.Int("stream-port", 0, "stream + clock base port")
+		fSource  = fs.Int("source-port", 0, "audio source base port")
+		fControl = fs.Int("control-port", 0, "playback control base port (master→playback)")
+		fGossip  = fs.Int("gossip-port", 0, "memberlist gossip base port")
+		fRole    = fs.String("role", "", "node roles: master|playback|master,playback (default both)")
+		fData    = fs.String("data", "", "data directory (contains node.json)")
+		fMedia   = fs.String("media", "", "media directory (default DATA_DIR/media)")
+		fName    = fs.String("name", "", "initial node name (first start only)")
+		fJoin    = fs.String("join", "", "dev gossip seed list: host:gossipPort,...")
+		fNoMDNS  = fs.Bool("no-mdns", false, "disable mDNS discovery (tests; use --join)")
 	)
 	if err := fs.Parse(opts.Args); err != nil {
 		return nil, fmt.Errorf("config: parse flags: %w", err)
@@ -134,7 +144,13 @@ func Load(opts Options) (*Config, error) {
 	if cfg.SourcePort, err = resolvePort(*fSource, getenv(EnvSourcePort), DefaultSourcePort, EnvSourcePort); err != nil {
 		return nil, err
 	}
+	if cfg.ControlPort, err = resolvePort(*fControl, getenv(EnvControlPort), DefaultControlPort, EnvControlPort); err != nil {
+		return nil, err
+	}
 	if cfg.GossipPort, err = resolvePort(*fGossip, getenv(EnvGossipPort), DefaultGossipPort, EnvGossipPort); err != nil {
+		return nil, err
+	}
+	if cfg.Role, err = ParseRole(resolveString(*fRole, getenv(EnvRole), "")); err != nil {
 		return nil, err
 	}
 

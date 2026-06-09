@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"ensemble/internal/id"
+	"ensemble/internal/playback"
 	"ensemble/internal/stream"
 )
 
@@ -58,59 +59,67 @@ func (e *Engine) reconcile() {
 		return
 	}
 
-	// Log observed group composition changes (membership / master / our role).
+	// Log observed composition changes (the group I master + my player target).
 	e.logCompositionLocked(mv)
 
-	// Self-heal dangling follow (§5).
-	e.reconcileHeal(mv, now)
-
-	// Tear down a session this node no longer hosts (lost mastership). No status
-	// rewrite — H is no longer the writer of that group's record (§3.4).
-	isMaster := mv.role == roleMaster || mv.role == roleSolo
-	if e.sess != nil && !isMaster {
-		e.stopLocked()
-	}
-
-	// D42: the group id is the MASTER's node id, so it no longer drifts on
-	// membership churn (a member joining/leaving keeps the master, hence the id +
-	// playback record). It changes only on a master move, which is a takeover that
-	// stops the session first — so no mid-session playback re-point is needed.
-
-	// Re-point local plumbing at the current master (the heart of "members follow
-	// the master automatically", §3.2). Subscribe/arm only while the group has an
-	// active session: an idle node must not HELLO, must not arm its sink (no
-	// boot-time starvation warnings), and must BYE when the session ends.
-	// A paused session (D39) is frozen: not "playing" for plumbing purposes, so
-	// members unsubscribe + Disarm and the master leaves its own source too.
-	activeSess := e.sess != nil && !e.sess.paused.Load()
-	gen := e.curGen
-	if isMaster && activeSess {
-		gen = e.sess.gen.Load() // our own running session
-	}
-	playing := mv.group.Playback.State == "playing" || (isMaster && activeSess)
-	e.repointLocked(mv.master, gen, mv.group.Settings.Transport, playing)
-
-	// Mid-session codec renegotiation (D33): a master with a running session whose
-	// effective codec is no longer supported by ALL current members (a member
-	// disabled opus, or a non-opus node joined) downgrades the live session to pcm
-	// in place. Only DOWNGRADES auto-apply mid-session; an upgrade waits for the
-	// next play/settings change. May bump gen + restart the source session, so it
-	// runs after repoint (which re-points the master's own loopback for `playing`).
-	if e.sess != nil && isMaster && !e.sess.paused.Load() {
+	// Mid-session codec renegotiation (D33) for the group THIS node SOURCES: a live
+	// session whose effective codec is no longer supported by all of MY group's
+	// players downgrades to pcm in place. Run BEFORE driving the player so a gen bump
+	// is picked up the same tick. A live session implies we source group(self).
+	if e.sess != nil && !e.sess.paused.Load() {
 		e.renegotiateLocked(snap, mv)
 	}
 
-	// Heartbeat (D28): master, while playing, every Heartbeat interval.
-	if e.sess != nil && isMaster && !now.Before(e.lastBeat.Add(e.p.Heartbeat)) {
+	// Drive THIS node's PLAYER at its target group — group(self.Following) — which is
+	// independent of what it sources (D49+ crosswise). Idle (Detach) when Following is
+	// Zero / dead / unknown. When the target is self's own group, the live session
+	// state is used (the snapshot's playback record lags).
+	e.drivePlayerLocked(mv)
+
+	// Heartbeat (D28): while sourcing, every Heartbeat interval.
+	if e.sess != nil && !now.Before(e.lastBeat.Add(e.p.Heartbeat)) {
 		e.p.Cluster.SetPlayback(e.sess.groupID, e.sess.playbackRecord(now, e.p.Source.Stats()))
 		e.lastBeat = now
 	}
 
-	// 1 Hz playing stats: one INFO line per active side per second (master via
-	// SourceStats; member via sink/clock/client counters). Stops when idle.
-	e.logPlayingStatsLocked(mv, isMaster, now)
+	// 1 Hz playing stats: one INFO line per active side per second.
+	e.logPlayingStatsLocked(mv, e.sess != nil, now)
 
 	e.mu.Unlock()
+}
+
+// drivePlayerLocked points the local player at this node's TARGET group
+// (group(self.Following)) — what its speakers play — independent of what it sources
+// (D49+). Idle (Detach) when there is no live target. When the target is self's own
+// group, it trusts the live session (the snapshot's playback record lags). Caller
+// holds e.mu.
+func (e *Engine) drivePlayerLocked(mv myView) {
+	if !mv.hasTarget {
+		// The PLAYER is idle (Following Zero / dead): the speakers play nothing. But
+		// this node still MASTERS its own group (1:1) and must be able to SOURCE it,
+		// which needs master-time — so keep the clock follower synced to its own clock
+		// server over the NORMAL network (repointLocked → dialIP(self) → the node's
+		// real advertised address, the same UDP clock probes any member uses; no
+		// loopback shortcut) while leaving the sink disarmed (playing=false → Sync, no
+		// Subscribe/arm). An idle player must not starve the master's own clock, else
+		// Play's waitForClock times out → the misleading "not_master".
+		e.repointLocked(e.self, e.curGen, mv.group.Settings.Transport, false)
+		return
+	}
+	master := mv.target.Master
+	transport := mv.target.Settings.Transport
+	playing := mv.target.Playback.State == "playing"
+	gen := e.curGen
+	if master == e.self {
+		// Playing my own group: trust my live session, not the lagging record.
+		if e.sess != nil && !e.sess.paused.Load() {
+			gen = e.sess.gen.Load()
+			playing = true
+		} else {
+			playing = false
+		}
+	}
+	e.repointLocked(master, gen, transport, playing)
 }
 
 // repointLocked arms the three local consumers (subscriber, sink, clock) for the
@@ -155,17 +164,25 @@ func (e *Engine) repointLocked(master id.ID, gen uint32, transport string, playi
 	srcAddr := netip.AddrPortFrom(ip, uint16(srcPort))
 	clkAddr := netip.AddrPortFrom(ip, uint16(streamPort))
 
-	// The clock follower tracks the master ALWAYS (cheap; keeps every member
-	// synced and ready). Stream subscription + sink arming are session-gated.
-	e.p.ClockCtl.SetMaster(clkAddr, gen)
+	// Drive the local player (D61). The clock follower tracks the master ALWAYS
+	// (cheap; keeps every member synced and ready) — Attach points it as part of
+	// playing, Sync keeps it warm while idle. Stream subscription + sink arming are
+	// session-gated. (Same SetMaster→Reset→Subscribe / SetMaster→Unsubscribe→Disarm
+	// ordering as before the split.)
 	if playing {
-		e.p.Sink.Reset(gen)
-		_ = e.p.Sub.Subscribe(srcAddr, gen, stream.ParseTransport(transport))
-	} else if e.haveCur && e.curPlaying {
-		// Session ended: leave the source politely (BYE) and disarm playout
-		// cleanly (no starvation warnings).
-		e.p.Sub.Unsubscribe()
-		e.p.Sink.Disarm()
+		e.player.Attach(playback.Attach{
+			Source:    srcAddr,
+			Clock:     clkAddr,
+			Gen:       gen,
+			Transport: stream.ParseTransport(transport),
+		})
+	} else {
+		e.player.Sync(clkAddr, gen)
+		if e.haveCur && e.curPlaying {
+			// Session ended: leave the source politely (BYE) and disarm playout
+			// cleanly (no starvation warnings).
+			e.player.Detach()
+		}
 	}
 
 	e.curMaster = master

@@ -78,15 +78,18 @@ e2e:
     matrix:
       - { GOOS: linux, GOARCH: amd64 }
       - { GOOS: linux, GOARCH: arm64 }
+      - { GOOS: linux, GOARCH: arm, GOARM: "6" }   # Pi Zero W / Pi 1 (ARMv6); GOARM=6 mandatory
   script:
     - VER="${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}"   # release tag, else dev sha
-    - SUFFIX="${GOOS}-${GOARCH}"
+    # arm → armv<N> in the artifact name (matches scripts/build.sh); others use GOARCH as-is.
+    - if [ "$GOARCH" = "arm" ]; then ARCH="armv${GOARM}"; else ARCH="$GOARCH"; fi
+    - SUFFIX="${GOOS}-${ARCH}"
     - go build -trimpath -ldflags "-s -w -X main.version=$VER"
         -o "bin/ensemble-$SUFFIX" ./cmd/ensemble
     # Hand this job's id to the release stage (dotenv): release asset links
     # must address the EXACT build job — the by-ref artifacts endpoint resolves
     # branch/tag names only, never a commit SHA.
-    - ARCH_KEY=$(echo "$GOARCH" | tr '[:lower:]' '[:upper:]')
+    - ARCH_KEY=$(echo "$ARCH" | tr '[:lower:]' '[:upper:]')
     - echo "BUILD_JOB_ID_${ARCH_KEY}=$CI_JOB_ID" > build.env
   tags:
     - shared
@@ -138,7 +141,7 @@ changelog:
           git log --no-merges --pretty='- %s' "$CI_COMMIT_TAG" | head -50
         fi
         echo
-        echo "Static pure-Go binaries for linux/amd64 + linux/arm64."
+        echo "Pure-Go binaries for linux/amd64 + linux/arm64 + linux/armv6 (Pi Zero W / Pi 1)."
         echo "Optional libraries (libopus, libasound) are loaded at runtime."
       } > release-notes.md
     - cat release-notes.md
@@ -165,7 +168,7 @@ release:
   needs: [build-release, changelog, test]
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
-  script: [ 'echo "Releasing $CI_COMMIT_TAG (amd64 job $BUILD_JOB_ID_AMD64, arm64 job $BUILD_JOB_ID_ARM64)"' ]
+  script: [ 'echo "Releasing $CI_COMMIT_TAG (amd64 job $BUILD_JOB_ID_AMD64, arm64 job $BUILD_JOB_ID_ARM64, armv6 job $BUILD_JOB_ID_ARMV6)"' ]
   release:
     tag_name: "$CI_COMMIT_TAG"
     name: "Ensemble $CI_COMMIT_TAG"
@@ -176,5 +179,7 @@ release:
           url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_AMD64/artifacts/raw/bin/ensemble-linux-amd64"
         - name: "ensemble-linux-arm64 ($CI_COMMIT_TAG)"
           url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_ARM64/artifacts/raw/bin/ensemble-linux-arm64"
+        - name: "ensemble-linux-armv6 ($CI_COMMIT_TAG)"
+          url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_ARMV6/artifacts/raw/bin/ensemble-linux-armv6"
   tags:
     - shared

@@ -6,56 +6,59 @@ import (
 	"ensemble/internal/id"
 )
 
-// logCompositionLocked diffs this node's freshly-derived group view against the
-// previously observed one and logs membership joins/leaves, master changes, and
-// our own role changes at INFO. Caller holds e.mu.
+// logCompositionLocked diffs this node's freshly-derived view against the previous
+// one and logs player join/leave (of the group it MASTERS) and changes to its own
+// PLAYER target (the group its speakers play). Caller holds e.mu.
 func (e *Engine) logCompositionLocked(mv myView) {
 	members := make(map[id.ID]bool, len(mv.group.Members))
 	for _, m := range mv.group.Members {
 		members[m] = true
 	}
+	target := id.Zero
+	if mv.hasTarget {
+		target = mv.target.Master
+	}
 
 	if !e.havePrev {
 		e.havePrev = true
-		e.prevRole = mv.role
-		e.prevMaster = mv.master
+		e.prevTarget = target
 		e.prevMembers = members
 		e.log.Info("group composition",
-			"group", mv.group.ID.String(), "role", mv.role.String(),
-			"master", mv.master.String(), "members", len(members))
+			"group", mv.group.ID.String(), "players", len(members), "playTarget", targetLabel(target))
 		return
 	}
 
 	for m := range members {
 		if !e.prevMembers[m] {
-			e.log.Info("group member joined", "group", mv.group.ID.String(), "member", m.String())
+			e.log.Info("group player joined", "group", mv.group.ID.String(), "player", m.String())
 		}
 	}
 	for m := range e.prevMembers {
 		if !members[m] {
-			e.log.Info("group member left", "group", mv.group.ID.String(), "member", m.String())
+			e.log.Info("group player left", "group", mv.group.ID.String(), "player", m.String())
 		}
 	}
-	if mv.master != e.prevMaster {
-		e.log.Info("group master changed", "group", mv.group.ID.String(),
-			"from", e.prevMaster.String(), "to", mv.master.String())
-	}
-	if mv.role != e.prevRole {
-		e.log.Info("role changed", "group", mv.group.ID.String(),
-			"from", e.prevRole.String(), "to", mv.role.String())
+	if target != e.prevTarget {
+		e.log.Info("play target changed", "from", targetLabel(e.prevTarget), "to", targetLabel(target))
 	}
 
-	e.prevRole = mv.role
-	e.prevMaster = mv.master
+	e.prevTarget = target
 	e.prevMembers = members
 }
 
+// targetLabel renders a play target for logs: "idle" for the zero target.
+func targetLabel(t id.ID) string {
+	if t.IsZero() {
+		return "idle"
+	}
+	return t.String()
+}
+
 // logPlayingStatsLocked emits the master-side 1 Hz playing-stats line while this
-// node runs a session. One INFO line per second; silent when idle. Caller holds
-// e.mu. (The member side is logged from K's wiring, which owns the sink/clock/
-// client directly.)
-func (e *Engine) logPlayingStatsLocked(mv myView, isMaster bool, now time.Time) {
-	if e.sess == nil || !isMaster {
+// node SOURCES a session. One INFO line per second; silent when idle. Caller holds
+// e.mu. (The member side is logged from K's wiring.)
+func (e *Engine) logPlayingStatsLocked(mv myView, sourcing bool, now time.Time) {
+	if e.sess == nil || !sourcing {
 		return
 	}
 	if now.Before(e.lastStats.Add(time.Second)) {

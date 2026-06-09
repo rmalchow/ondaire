@@ -15,15 +15,27 @@ func TestNewSampleMath(t *testing.T) {
 	}
 }
 
-func TestEstimatorUnsyncedUntilFirstSample(t *testing.T) {
+func TestEstimatorUnsyncedUntilConfident(t *testing.T) {
 	var e estimator
 	if _, ok := e.offset(); ok {
 		t.Fatal("offset ok=true with zero samples, want false")
 	}
+	// Below confidentSamples, offset() withholds (ok=false) — a 1-sample median is
+	// too skewable to start playout on — even though a raw estimate already exists.
+	for i := 0; i < confidentSamples-1; i++ {
+		e.add(sample{offset: 50, rtt: 1})
+		if _, ok := e.offset(); ok {
+			t.Fatalf("offset ok=true with %d samples, want false (< confident)", i+1)
+		}
+		if _, _, ok := e.estimate(); !ok {
+			t.Fatalf("estimate ok=false with %d samples, want true (raw)", i+1)
+		}
+	}
+	// At confidentSamples it becomes usable.
 	e.add(sample{offset: 50, rtt: 1})
 	off, ok := e.offset()
 	if !ok || off != 50 {
-		t.Fatalf("offset = %d ok=%v, want 50 true", off, ok)
+		t.Fatalf("offset = %d ok=%v, want 50 true at %d samples", off, ok, confidentSamples)
 	}
 }
 
@@ -53,15 +65,19 @@ func TestEstimatorMedianOfBestFive(t *testing.T) {
 	}
 }
 
-func TestEstimatorFewerThanFiveSamples(t *testing.T) {
+func TestEstimatorRawMedianFewerThanFiveSamples(t *testing.T) {
 	var e estimator
-	// 3 samples: offsets 5,15,25 -> median 15.
+	// 3 samples: offsets 5,15,25 -> raw median 15. offset() still withholds
+	// (< confident), but estimate() (stats/logging) medians whatever it has.
 	e.add(sample{offset: 25, rtt: 3})
 	e.add(sample{offset: 5, rtt: 1})
 	e.add(sample{offset: 15, rtt: 2})
-	off, ok := e.offset()
+	if _, ok := e.offset(); ok {
+		t.Fatal("offset ok=true with 3 samples, want false (< confident)")
+	}
+	off, _, ok := e.estimate()
 	if !ok || off != 15 {
-		t.Fatalf("median = %d ok=%v, want 15 true", off, ok)
+		t.Fatalf("estimate median = %d ok=%v, want 15 true", off, ok)
 	}
 }
 

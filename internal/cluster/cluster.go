@@ -352,6 +352,16 @@ func (c *Cluster) tryJoin(p discovery.Peer) {
 	if p.ID == c.self {
 		return
 	}
+	if p.PlaybackOnly() {
+		// A non-gossiping playback node (D50): represent it as a proxied member and
+		// (later) drive it over the control plane, rather than gossip-joining it.
+		c.UpsertPlaybackNode(p)
+		return
+	}
+	if p.GossipPort == 0 {
+		c.log.Debug("skipping gossip join for non-gossiping peer", "peer", p.ID, "playback", p.Playback)
+		return
+	}
 	for _, m := range c.ml.Members() {
 		if m.Name == p.ID.String() {
 			return // already a member

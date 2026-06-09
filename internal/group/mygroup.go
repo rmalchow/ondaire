@@ -5,57 +5,32 @@ import (
 	"ensemble/internal/id"
 )
 
-// role classifies this node within its derived group.
-type role int
-
-const (
-	roleSolo     role = iota // master of a group of 1 (following == Zero, alone)
-	roleMaster               // master of a multi-member group
-	roleFollower             // a valid follower of someone else
-)
-
-// String renders a role for structured logging.
-func (r role) String() string {
-	switch r {
-	case roleSolo:
-		return "solo"
-	case roleMaster:
-		return "master"
-	case roleFollower:
-		return "follower"
-	default:
-		return "unknown"
-	}
-}
-
-// myView is this node's resolved position in the pre-derived snapshot (D5).
-// C already filled Snapshot.Groups; H only LOCATES this node's group + reads
-// its own NodeView. No XOR, no membership computation here.
+// myView is this node's resolved position in the pre-derived snapshot. Under the
+// crosswise model, mastership and playback are independent (D49+):
+//
+//   - `group` is the group this node MASTERS (Master == self, always 1:1). It is
+//     what this node SOURCES when it plays; its Members are the players that follow
+//     this node. Used for Play/Stop/settings/codec-negotiation/heartbeat.
+//   - `target` is the group this node's PLAYER plays — group(self.Following). It
+//     drives the clock/subscriber/sink. hasTarget is false when Following is Zero or
+//     points at a dead/unknown/non-master node (the player is then IDLE).
+//
+// found == false when self has no NodeView or its own group isn't derived yet
+// (transient): callers skip reconcile for that tick.
 type myView struct {
-	group  contracts.GroupView // the group containing self
-	self   contracts.NodeView  // this node's own record
-	role   role
-	master id.ID // group.Master
-	stale  bool  // self.Following points at an invalid target (§5 self-heal trigger)
-	found  bool  // self located in some derived group + has a NodeView
+	self  contracts.NodeView  // this node's own record
+	group contracts.GroupView // the group self MASTERS (Master == self)
+	found bool
+
+	target    contracts.GroupView // the group self's PLAYER plays (Master == self.Following)
+	hasTarget bool                // Following is a live master with a derived group
 }
 
-// myGroup finds this node's group in snap.Groups (the unique group whose
-// Members contain self), reads self's NodeView, and classifies role +
-// staleness.
-//
-// stale == true iff self.Following != Zero AND C derived self into its OWN solo
-// group (master == self, members == {self}) despite the non-empty Following —
-// i.e. the follow target was dead/unknown/itself-following (§5). That is exactly
-// the self-heal trigger.
-//
-// found == false when self is not yet present in any derived group (a transient
-// snapshot before C derived self, or before self's own record exists): callers
-// skip reconcile for that tick.
+// myGroup resolves this node's master group (group it sources) and player target
+// (group it plays), from the pre-derived snapshot. Pure.
 func myGroup(snap contracts.Snapshot, self id.ID) myView {
 	var mv myView
 
-	// Locate self's NodeView.
 	var selfNode contracts.NodeView
 	haveNode := false
 	for _, n := range snap.Nodes {
@@ -65,42 +40,38 @@ func myGroup(snap contracts.Snapshot, self id.ID) myView {
 			break
 		}
 	}
-
-	// Locate the derived group containing self.
-	var g contracts.GroupView
-	haveGroup := false
-	for _, grp := range snap.Groups {
-		for _, m := range grp.Members {
-			if m == self {
-				g = grp
-				haveGroup = true
-				break
-			}
-		}
-		if haveGroup {
-			break
-		}
-	}
-
-	if !haveGroup || !haveNode {
+	if !haveNode {
 		return mv // found == false
 	}
 
-	mv.group = g
+	// The group I master (Master == self) — always derived for an alive node.
+	var ownGroup contracts.GroupView
+	haveOwn := false
+	for _, grp := range snap.Groups {
+		if grp.Master == self {
+			ownGroup = grp
+			haveOwn = true
+			break
+		}
+	}
+	if !haveOwn {
+		return mv // found == false (self not derived yet)
+	}
+
 	mv.self = selfNode
-	mv.master = g.Master
+	mv.group = ownGroup
 	mv.found = true
 
-	switch {
-	case g.Master != self:
-		mv.role = roleFollower
-	case len(g.Members) == 1:
-		mv.role = roleSolo
-		// Stale: self is solo (its own single-member group) yet Following != Zero
-		// → C demoted a dangling follow to solo (§5).
-		mv.stale = !selfNode.Following.IsZero()
-	default:
-		mv.role = roleMaster
+	// The group my player plays: group(self.Following), if Following is a live
+	// master (a derived group exists for it). Zero / dead / unknown ⇒ idle.
+	if t := selfNode.Following; !t.IsZero() {
+		for _, grp := range snap.Groups {
+			if grp.Master == t {
+				mv.target = grp
+				mv.hasTarget = true
+				break
+			}
+		}
 	}
 	return mv
 }

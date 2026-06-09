@@ -2,14 +2,14 @@
   // One member inside a group card (J arch §4): name, volume, master badge,
   // source stats (master row only when playing), leave. Grouping a node in is
   // done from the group's "Add node…" control, not per-member.
-  import { renameNode, setVolume, unfollow } from "../lib/api.js";
+  import { nodeRename, nodeSetVolume, leaveGroup } from "../lib/api.js";
   import EditableText from "./EditableText.svelte";
   import VolumeSlider from "./VolumeSlider.svelte";
 
   let { member, group, self } = $props();
 
   let isThisMaster = $derived(member.id === group.master);
-  let solo = $derived(group.members.length <= 1);
+  let solo = $derived((group.members || []).length <= 1);
   let pb = $derived(group.playback || { state: "idle" });
   let src = $derived(pb.source || {});
   let showStats = $derived(isThisMaster && pb.state === "playing");
@@ -20,7 +20,7 @@
     <span class="dot {member.alive ? 'alive' : 'dead'}"></span>
     <EditableText
       value={member.name}
-      onsave={(n) => renameNode(member.id, n)}
+      onsave={(n) => nodeRename(member, n)}
       placeholder="(unnamed)"
     />
     {#if isThisMaster}<span class="badge">master</span>{/if}
@@ -29,12 +29,15 @@
 
   <VolumeSlider
     value={member.volume}
-    onchange={(v) => setVolume(member.id, v)}
+    onchange={(v) => nodeSetVolume(member, v)}
   />
 
-  {#if showStats}
-    <span class="chip">{src.clients ?? 0} listeners</span>
-    <span class="chip">{src.restarts ?? 0} reconnects</span>
+  <!-- Rams: silence is not a signal — show counts only when they mean something. -->
+  {#if showStats && (src.clients ?? 0) > 0}
+    <span class="chip">{src.clients} listeners</span>
+  {/if}
+  {#if showStats && (src.restarts ?? 0) > 0}
+    <span class="chip">{src.restarts} reconnects</span>
   {/if}
 
   <span class="spacer"></span>
@@ -42,7 +45,7 @@
   {#if !solo}
     <button
       class="btn icon-btn"
-      onclick={() => unfollow(member.id)}
+      onclick={() => leaveGroup(member)}
       title="leave group"
       aria-label="leave group">✕</button
     >

@@ -538,18 +538,8 @@ func TestGroupNameBadGroupID(t *testing.T) {
 	}
 }
 
-func TestGroupMasterForwards(t *testing.T) {
-	self := id.New()
-	node := id.New()
-	cfg, _, fg := baseConfig(self)
-	_, ts := testServer(t, cfg)
-	resp := doJSON(t, ts, http.MethodPost, "/api/group/master",
-		map[string]any{"node": node.String()})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent || fg.makeMasterArg != node {
-		t.Fatalf("status=%d arg=%v", resp.StatusCode, fg.makeMasterArg)
-	}
-}
+// (Removed TestGroupMasterForwards — the /group/master takeover route is gone;
+// every node masters its own group under the crosswise model.)
 
 func TestPlayURI(t *testing.T) {
 	self := id.New()

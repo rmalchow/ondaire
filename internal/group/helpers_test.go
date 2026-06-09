@@ -13,7 +13,6 @@ import (
 type testRig struct {
 	e   *Engine
 	cl  *fakeCluster
-	fc  *fakeFollowClient
 	med *fakeMedia
 	srv *fakeSourceServer
 	sub *fakeSubscriber
@@ -33,7 +32,6 @@ type testRig struct {
 func newRig(self id.ID, srcFrames int, live bool) *testRig {
 	r := &testRig{
 		cl:  newFakeCluster(self),
-		fc:  &fakeFollowClient{},
 		med: &fakeMedia{src: &fakeSource{remaining: srcFrames, live: live}},
 		srv: &fakeSourceServer{},
 		sub: &fakeSubscriber{},
@@ -52,7 +50,6 @@ func newRig(self id.ID, srcFrames int, live bool) *testRig {
 		Sink:     r.snk,
 		Clock:    r.clk,
 		ClockCtl: r.cc,
-		Follow:   r.fc,
 		Caps:     contracts.Capabilities{Codecs: []string{"pcm"}},
 		now:      r.nowFn(),
 		PersistFollowing: func(t id.ID) {
@@ -102,35 +99,50 @@ func node(nid id.ID, following id.ID, alive bool) contracts.NodeView {
 	}
 }
 
-// soloSnap makes self a solo master (group of 1).
+// soloSnap makes self the master of its own group, playing its own stream
+// (Following == self → its player is in its own group). New model: a node plays
+// its own group by following itself.
 func soloSnap(self id.ID) contracts.Snapshot {
-	n := node(self, id.Zero, true)
+	n := node(self, self, true) // Following == self: plays own group
 	g := contracts.GroupView{
-		ID:       self, // D42: group id == master (== own) id
+		ID:       self, // group id == master id (D44)
 		Master:   self,
-		Members:  []id.ID{self},
+		Members:  []id.ID{self}, // the master's own player
 		Settings: defaultSettings(),
 		Playback: contracts.Playback{State: "idle"},
 	}
 	return contracts.Snapshot{Nodes: []contracts.NodeView{n}, Groups: []contracts.GroupView{g}}
 }
 
-// masterSnap makes `master` master over `members` (master included), all alive.
+// masterSnap makes `master` source a group whose players are the master itself
+// (self-follow) plus `members` (each following the master). New model: Members are
+// the PLAYERS following the master; the master is a member because it self-follows.
 func masterSnap(master id.ID, settings contracts.GroupSettings, members ...id.ID) contracts.Snapshot {
 	all := append([]id.ID{master}, members...)
 	var nodes []contracts.NodeView
-	nodes = append(nodes, node(master, id.Zero, true))
+	nodes = append(nodes, node(master, master, true)) // master plays its own group
 	for _, m := range members {
 		nodes = append(nodes, node(m, master, true))
 	}
-	g := contracts.GroupView{
-		ID:       master, // D42: group id == master id
+	// Every alive node masters its OWN group (1:1). group(master) holds all players;
+	// each member also masters its own (empty) group.
+	groups := []contracts.GroupView{{
+		ID:       master,
 		Master:   master,
 		Members:  all,
 		Settings: settings,
 		Playback: contracts.Playback{State: "idle"},
+	}}
+	for _, m := range members {
+		groups = append(groups, contracts.GroupView{
+			ID:       m,
+			Master:   m,
+			Members:  nil,
+			Settings: defaultSettings(),
+			Playback: contracts.Playback{State: "idle"},
+		})
 	}
-	return contracts.Snapshot{Nodes: nodes, Groups: []contracts.GroupView{g}}
+	return contracts.Snapshot{Nodes: nodes, Groups: groups}
 }
 
 func addrFor(n contracts.NodeView, port int) netip.AddrPort {

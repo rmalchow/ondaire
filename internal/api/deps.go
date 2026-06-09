@@ -25,6 +25,15 @@ type Cluster interface {
 	SetOutputDevice(device string)
 	// SetDisabled sets THIS node's operator-disabled feature list (D40).
 	SetDisabled(disabled []string)
+	// AssignPlaybackNode assigns (target != Zero) or clears a non-gossiping
+	// playback node's group, master-side (D59). Returns false if the node is
+	// unknown or not a playback node.
+	AssignPlaybackNode(node, target id.ID) bool
+	// PatchPlaybackNode mutates a non-gossiping playback node's record master-side
+	// (D59): name / volume / output-delay / group. A playback node has no HTTP API
+	// (D56), so these never proxy to the node — the master owns the record and the
+	// control driver pushes the knobs. Returns false if unknown / not playback.
+	PatchPlaybackNode(node id.ID, name *string, volume *float64, delayMs *int, following *id.ID) bool
 	// Observe records that we received traffic from peer at ip (§3.1).
 	Observe(peer id.ID, ip netip.Addr)
 	// DialCandidates returns dial IPs for peer, ordered best-first per §3.1.
@@ -41,8 +50,6 @@ type Group interface {
 	Follow(ctx context.Context, target id.ID) error
 	// Unfollow makes THIS node solo master (§5.1).
 	Unfollow(ctx context.Context) error
-	// MakeMaster runs takeover so node becomes master of its group (§5.2).
-	MakeMaster(ctx context.Context, node id.ID) error
 	// NameGroup sets a group's display name (LWW, any node, §4/§9.1).
 	NameGroup(ctx context.Context, group id.ID, name string) error
 	// Play starts playback of a media-source URI on THIS node's group (master

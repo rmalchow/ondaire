@@ -92,6 +92,7 @@ type alsaBackend struct {
 	lastXrunLog time.Time
 	f           *alsaFuncs
 	pcm         uintptr
+	latencyMs   int // configured device latency (snd_pcm_set_params); D63 pre-roll
 	log         *slog.Logger
 	mu          sync.Mutex
 	closed      bool
@@ -140,8 +141,16 @@ func newAlsaBackend(device string, log *slog.Logger) (*alsaBackend, error) {
 		alsaBound.close(pcm)
 		return nil, fmt.Errorf("alsa: snd_pcm_set_params failed: %d", rc)
 	}
-	log.Info("alsa backend opened", "device", device)
-	return &alsaBackend{f: alsaBound, pcm: pcm, log: log}, nil
+	log.Info("alsa backend opened", "device", device, "latencyMs", latencyMs)
+	return &alsaBackend{f: alsaBound, pcm: pcm, latencyMs: latencyMs, log: log}, nil
+}
+
+// ConfiguredLatencyNs reports the device buffer the backend was opened with
+// (contracts.LatencyReporter). The playout writes this far ahead so the device is
+// pre-rolled to its full buffer (xrun cushion) and subtracts it from the deadline so
+// nodes with different device latencies still play in phase (D63).
+func (b *alsaBackend) ConfiguredLatencyNs() int64 {
+	return int64(b.latencyMs) * 1_000_000
 }
 
 func (b *alsaBackend) Write(frame []byte) error {

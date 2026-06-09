@@ -131,6 +131,43 @@ func TestServoSlewLimited(t *testing.T) {
 	}
 }
 
+func TestServoGentleNeverRailsOnJitter(t *testing.T) {
+	// The DEFAULT (production) config must track a real DAC drift while the Pi's
+	// ±10 ms (~±480 sample) snd_pcm_delay jitter is present, WITHOUT railing at the
+	// ±300 clamp. The old Kq=1.5 railed on a single jitter sample → ±300 ppm
+	// excursions → the audible "stumbling" (D64). The gentle gain must stay well off
+	// the rail.
+	s := newRateServo(defaultServoConfig())
+	var master int64
+	var consumed float64
+	queue := float64(stream.SampleRate) / 5 // ~200 ms filled
+	var out, maxAbs float64
+	seed := int64(99)
+	rnd := func() float64 {
+		seed = seed*6364136223846793005 + 1442695040888963407
+		return float64(uint64(seed)>>40) / float64(uint64(1)<<24)
+	}
+	for i := 0; i < 120000; i++ { // ~40 min sim (pure math, instant)
+		master += stream.FrameNanos
+		produced := float64(stream.FrameSamples) * (1 + out/1e6)
+		queue += produced - float64(stream.FrameSamples)*(1+120.0/1e6) // DAC +120 ppm
+		consumed += produced
+		measured := queue + (2*rnd()-1)*480 // ±480-sample (10 ms) jitter
+		out = s.observe(int64(consumed), master, int64(measured/float64(stream.SampleRate)*1e9), true)
+		if i > 30000 { // past warmup + convergence
+			if a := math.Abs(out); a > maxAbs {
+				maxAbs = a
+			}
+		}
+	}
+	if math.Abs(out-120) > 50 {
+		t.Fatalf("gentle servo did not track +120 ppm drift: out=%.1f", out)
+	}
+	if maxAbs > 250 {
+		t.Fatalf("gentle servo railed on jitter (max|out|=%.1f); must stay well off ±300", maxAbs)
+	}
+}
+
 func TestServoResetClears(t *testing.T) {
 	s := newRateServo(fastServoCfg())
 	driveServoQueue(s, 200, 2000, 0)

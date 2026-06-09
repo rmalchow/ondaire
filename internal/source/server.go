@@ -1,9 +1,11 @@
 package source
 
 import (
+	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,13 +55,19 @@ type Server struct {
 	bufferMs  int
 	seq       uint64
 
+	// statuses holds the last STATUS (D55) each playback node reported, keyed by
+	// its node id (from the payload). Read by the master for per-room health +
+	// STATUS-recency liveness (D60). Guarded by mu.
+	statuses map[id.ID]PlaybackStatus
+
 	scratch []byte // reusable encode buffer (under mu)
 
-	stats sourceCounters
-	done  chan struct{}
-	wg    sync.WaitGroup
-	once  sync.Once
-	log   *slog.Logger
+	stats    sourceCounters
+	onStatus func(id.ID) // D60: refresh playback-node liveness on STATUS (nil-safe)
+	done     chan struct{}
+	wg       sync.WaitGroup
+	once     sync.Once
+	log      *slog.Logger
 }
 
 // Config wires a Server to its already-bound SOURCE_PORT sockets (owned by K).
@@ -68,6 +76,10 @@ type Config struct {
 	UDP  *net.UDPConn
 	TCP  *net.TCPListener
 	Log  *slog.Logger
+	// OnStatus is called with a playback node's id each time its STATUS arrives
+	// (D55/D60): the master uses it to refresh that node's liveness so an actively-
+	// playing node stays alive even if its mDNS re-announce lapses. nil-safe.
+	OnStatus func(id.ID)
 }
 
 // NewServer builds a Server; no goroutines yet.
@@ -77,14 +89,35 @@ func NewServer(cfg Config) *Server {
 		log = slog.Default()
 	}
 	return &Server{
-		self:    cfg.Self,
-		udp:     cfg.UDP,
-		tcpLn:   cfg.TCP,
-		reg:     newRegistry(),
-		scratch: make([]byte, 0, stream.HeaderSize+stream.FrameBytes),
-		done:    make(chan struct{}),
-		log:     log.With("comp", "source"),
+		self:     cfg.Self,
+		udp:      cfg.UDP,
+		tcpLn:    cfg.TCP,
+		reg:      newRegistry(),
+		statuses: make(map[id.ID]PlaybackStatus),
+		onStatus: cfg.OnStatus,
+		scratch:  make([]byte, 0, stream.HeaderSize+stream.FrameBytes),
+		done:     make(chan struct{}),
+		log:      log.With("comp", "source"),
 	}
+}
+
+// PlaybackStatus is one playback node's last-reported STATUS (D55) plus when it
+// arrived (for STATUS-recency liveness, D60).
+type PlaybackStatus struct {
+	Status   stream.StatusPayload
+	LastSeen time.Time
+}
+
+// Statuses returns a copy of the latest STATUS reported by each playback node,
+// keyed by node id. Safe to call from any goroutine.
+func (s *Server) Statuses() map[id.ID]PlaybackStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[id.ID]PlaybackStatus, len(s.statuses))
+	for k, v := range s.statuses {
+		out[k] = v
+	}
+	return out
 }
 
 // Run starts the UDP control read loop, the TCP accept loop, and the expiry
@@ -348,6 +381,18 @@ func (s *Server) handleControlUDP(pkt []byte, from netip.AddrPort) {
 		if removed {
 			s.log.Info("client left (BYE)", "addr", from.String(), "transport", "udp")
 		}
+	case stream.TypeStatus:
+		// A playback node's telemetry (D55). It arrives from the node's CONTROL_PORT
+		// (not its audio source addr), so correlate by the node id in the payload.
+		if st, err := stream.DecodeStatus(payload); err == nil {
+			nid := id.ID(st.NodeID)
+			s.mu.Lock()
+			s.statuses[nid] = PlaybackStatus{Status: st, LastSeen: now}
+			s.mu.Unlock()
+			if s.onStatus != nil {
+				s.onStatus(nid) // refresh liveness (D60): STATUS keeps a driven node alive
+			}
+		}
 	}
 }
 
@@ -473,6 +518,71 @@ func (s *Server) sweepLoop() {
 			for _, addr := range expired {
 				s.log.Info("client left (keepalive expiry)", "addr", addr.String(), "ttl", keepaliveTTL.String())
 			}
+			s.logRoomSkew(now)
+			s.logSourceStats()
 		}
 	}
+}
+
+// logSourceStats emits a 1 s source heartbeat (D64 telemetry) while a session is
+// active: subscribers, frames released, primes/restarts served, FEC parity sent.
+func (s *Server) logSourceStats() {
+	s.mu.Lock()
+	active := s.active
+	gen := s.gen
+	s.mu.Unlock()
+	if !active {
+		return
+	}
+	st := s.Stats()
+	s.log.Debug("stats", "gen", gen,
+		"clients", st.Clients, "released", st.Released, "connects", st.Connects,
+		"primes", st.Primes, "restarts", st.Restarts, "parity", st.Parity)
+}
+
+// logRoomSkew surfaces inter-room sync (D63 telemetry). For rooms currently playing
+// and recently heard, the master-clock speaker time ≈ pts + bufferMs − comp +
+// deviceDelay (comp is uniform), so the audible skew is the SPREAD of deviceDelay
+// across rooms. It logs that spread plus each room's device latency / clock offset /
+// RTT / synced, so a desync is visible without diffing per-node logs. No-op for <2
+// playing rooms.
+func (s *Server) logRoomSkew(now time.Time) {
+	type room struct {
+		id                          id.ID
+		ddMs, offMs, rttMs, phaseMs int64
+		synced, calibrated          bool
+	}
+	s.mu.Lock()
+	var rooms []room
+	for nid, ps := range s.statuses {
+		if !ps.Status.Playing || now.Sub(ps.LastSeen) > keepaliveTTL {
+			continue
+		}
+		rooms = append(rooms, room{
+			id:         nid,
+			ddMs:       ps.Status.DeviceDelayNs / 1_000_000,
+			offMs:      ps.Status.OffsetNs / 1_000_000,
+			rttMs:      ps.Status.RTTNs / 1_000_000,
+			phaseMs:    ps.Status.PhaseErrNs / 1_000_000,
+			synced:     ps.Status.Synced,
+			calibrated: ps.Status.Calibrated,
+		})
+	}
+	s.mu.Unlock()
+	if len(rooms) < 2 {
+		return
+	}
+	min, max := rooms[0].ddMs, rooms[0].ddMs
+	parts := make([]string, 0, len(rooms))
+	for _, r := range rooms {
+		if r.ddMs < min {
+			min = r.ddMs
+		}
+		if r.ddMs > max {
+			max = r.ddMs
+		}
+		parts = append(parts, fmt.Sprintf("%s(dd=%d phase=%d off=%d rtt=%d sync=%t cal=%t)",
+			r.id.String()[:8], r.ddMs, r.phaseMs, r.offMs, r.rttMs, r.synced, r.calibrated))
+	}
+	s.log.Info("room sync", "skewMs", max-min, "rooms", len(rooms), "detail", strings.Join(parts, " "))
 }

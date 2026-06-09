@@ -77,15 +77,27 @@ type FollowReq struct {
 	Target string `json:"target"` // 32-hex node id
 }
 
+// --- POST /api/playback/assign ---------------------------------------------
+type AssignPlaybackReq struct {
+	Node   string `json:"node"`   // 32-hex playback-node id
+	Master string `json:"master"` // 32-hex master id; "" = unassign (idle)
+}
+
+// --- POST /api/playback/patch ----------------------------------------------
+// Master-side mutation of a non-gossiping playback node's record (D56/D59): any
+// subset. A playback node has no HTTP API, so these are NOT proxied to it.
+type PatchPlaybackReq struct {
+	Node          string   `json:"node"`                    // 32-hex playback-node id
+	Name          *string  `json:"name,omitempty"`          // room/speaker label
+	Volume        *float64 `json:"volume,omitempty"`        // 0.0–1.0 (D35)
+	OutputDelayMs *int     `json:"outputDelayMs,omitempty"` // ±500 (D36)
+	Following     *string  `json:"following,omitempty"`     // 32-hex master id; "" = idle
+}
+
 // --- POST /api/group/name --------------------------------------------------
 type GroupNameReq struct {
 	Group string `json:"group"` // 32-hex group id
 	Name  string `json:"name"`
-}
-
-// --- POST /api/group/master (§5.2) -----------------------------------------
-type MasterReq struct {
-	Node string `json:"node"` // 32-hex node id to become master
 }
 
 // --- POST /api/play (§6, §9.1) ---------------------------------------------

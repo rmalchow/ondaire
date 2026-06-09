@@ -3,9 +3,9 @@
   // liveness, volume, output-delay calibration.
   import { shortId, cidrList, relTime, ports } from "../lib/fmt.js";
   import {
-    renameNode,
-    setVolume,
-    setOutputDelay,
+    nodeRename,
+    nodeSetVolume,
+    nodeSetOutputDelay,
     setOutputDevice,
     setDisabled,
     testTone,
@@ -36,7 +36,7 @@
       clearTimeout(delayTimer);
       delayTimer = null;
     }
-    setOutputDelay(node.id, delayMs).catch(() => {});
+    nodeSetOutputDelay(node, delayMs).catch(() => {});
   }
   function onDelayInput(e) {
     delayDragging = true;
@@ -44,7 +44,7 @@
     if (delayTimer) clearTimeout(delayTimer);
     delayTimer = setTimeout(() => {
       delayTimer = null;
-      setOutputDelay(node.id, delayMs).catch(() => {});
+      nodeSetOutputDelay(node, delayMs).catch(() => {});
     }, 200);
   }
   function onDelayCommit() {
@@ -119,7 +119,7 @@
       <span class="dot {node.alive ? 'alive' : 'dead'}"></span>
       <EditableText
         value={node.name}
-        onsave={(n) => renameNode(node.id, n)}
+        onsave={(n) => nodeRename(node, n)}
         placeholder="(unnamed)"
       />
       {#if isSelf}<span class="chip">this node</span>{/if}
@@ -171,31 +171,35 @@
     </div>
   {/if}
 
-  <div class="row wrap">
-    <span class="muted small">vol</span>
-    <VolumeSlider value={node.volume} onchange={(v) => setVolume(node.id, v)} />
-    <span class="spacer"></span>
-    <div class="delay">
-      <div class="row small muted delay-ctl">
-        <span>output delay</span>
-        <input
-          type="range"
-          min="0"
-          max="150"
-          step="5"
-          value={delayMs}
-          oninput={onDelayInput}
-          onchange={onDelayCommit}
-          onpointerup={onDelayCommit}
-          aria-label="output delay (ms)"
-        />
-        <span class="delay-val">{delayMs} ms</span>
-      </div>
-      <div class="hint">
-        compensates fixed device latency; causes a brief local restart
+  <!-- Player controls only for nodes that actually play (a --role master node has
+       playback:false — no player, no volume/delay). -->
+  {#if caps.playback}
+    <div class="row wrap">
+      <span class="muted small">vol</span>
+      <VolumeSlider value={node.volume} onchange={(v) => nodeSetVolume(node, v)} />
+      <span class="spacer"></span>
+      <div class="delay">
+        <div class="row small muted delay-ctl">
+          <span>output delay</span>
+          <input
+            type="range"
+            min="0"
+            max="150"
+            step="5"
+            value={delayMs}
+            oninput={onDelayInput}
+            onchange={onDelayCommit}
+            onpointerup={onDelayCommit}
+            aria-label="output delay (ms)"
+          />
+          <span class="delay-val">{delayMs} ms</span>
+        </div>
+        <div class="hint">
+          compensates fixed device latency; causes a brief local restart
+        </div>
       </div>
     </div>
-  </div>
+  {/if}
 
   <div class="row wrap">
     {#if outputDevices.length > 0}

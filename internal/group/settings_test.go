@@ -14,8 +14,8 @@ func TestSettingsDefaults(t *testing.T) {
 	r := newRig(self, 0, false)
 	r.cl.setSnap(soloSnap(self))
 	s := r.e.Settings()
-	if s.Codec != "opus" || s.Transport != "udp" || s.BufferMs != 150 {
-		t.Fatalf("settings = %+v, want opus/udp/150", s)
+	if s.Codec != "opus" || s.Transport != "udp" || s.BufferMs != 300 {
+		t.Fatalf("settings = %+v, want opus/udp/300", s)
 	}
 }
 
@@ -50,12 +50,17 @@ func TestSetSettingsMasterWritesAndReconfigs(t *testing.T) {
 	}
 }
 
-func TestSetSettingsRejectsFollower(t *testing.T) {
+// New model: settings apply to the group a node masters (its own), so any node may
+// set them — even while its player follows another master's group.
+func TestSetSettingsAppliesToOwnGroup(t *testing.T) {
 	master, self := idN(1), idN(2)
 	r := newRig(self, 0, false)
 	r.cl.setSnap(masterSnap(master, defaultSettings(), self))
-	if err := r.e.SetSettings(contracts.GroupSettings{Codec: "pcm", Transport: "udp", BufferMs: 150}); !errors.Is(err, ErrNotMaster) {
-		t.Fatalf("err = %v, want ErrNotMaster", err)
+	if err := r.e.SetSettings(contracts.GroupSettings{Codec: "pcm", Transport: "udp", BufferMs: 150}); err != nil {
+		t.Fatalf("SetSettings on own group should succeed, got %v", err)
+	}
+	if sc, ok := r.cl.lastSettings(); !ok || sc.group != self {
+		t.Fatalf("settings should be written for the node's OWN group (self), got %+v ok=%v", sc, ok)
 	}
 }
 

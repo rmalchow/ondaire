@@ -4,7 +4,6 @@
 
 import { pushToast } from "./toast.svelte.js";
 import { ZERO_ID } from "./derive.js";
-import { shortId } from "./fmt.js";
 
 // ApiError carries the server's message for the Toast.
 export class ApiError extends Error {
@@ -106,10 +105,41 @@ export function follow(nodeId, targetId) {
 export function unfollow(nodeId) {
   return toasted(req("POST", base(nodeId) + "/unfollow"));
 }
-export function makeMaster(memberId, newMasterId) {
-  return toasted(
-    req("POST", base(memberId) + "/group/master", { node: newMasterId }),
-  );
+
+// --- playback-node mutations (MASTER-LOCAL) ---
+// A non-gossiping playback node has no HTTP API (D56), so its name/volume/delay/
+// group are set on the LOCAL master (which owns the proxied record and drives the
+// node over the control plane) — NEVER proxied to the node via base(nodeId).
+export function patchPlaybackNode(fields) {
+  return toasted(req("POST", "/api/playback/patch", fields));
+}
+
+// node-aware routers: a playback node goes through the master-local patch; a normal
+// gossiping node uses the per-node / follow endpoints (proxy-aware).
+export function nodeRename(node, name) {
+  return node.playbackNode
+    ? patchPlaybackNode({ node: node.id, name })
+    : renameNode(node.id, name);
+}
+export function nodeSetVolume(node, volume) {
+  return node.playbackNode
+    ? patchPlaybackNode({ node: node.id, volume })
+    : setVolume(node.id, volume);
+}
+export function nodeSetOutputDelay(node, outputDelayMs) {
+  return node.playbackNode
+    ? patchPlaybackNode({ node: node.id, outputDelayMs })
+    : setOutputDelay(node.id, outputDelayMs);
+}
+export function assignToGroup(node, masterId) {
+  return node.playbackNode
+    ? patchPlaybackNode({ node: node.id, following: masterId })
+    : follow(node.id, masterId);
+}
+export function leaveGroup(node) {
+  return node.playbackNode
+    ? patchPlaybackNode({ node: node.id, following: "" })
+    : unfollow(node.id);
 }
 
 // --- group naming (LWW from any node; issued locally) ---
@@ -125,55 +155,12 @@ export function play(nodeId, uri) {
   return toasted(req("POST", base(nodeId) + "/play", { uri }));
 }
 
-// playOnNode plays `uri` on `nodeId`, doing a CLIENT-SIDE takeover first when
-// `nodeId` is NOT its group's master. Sequence:
-//   1. read the current snapshot; if nodeId already masters its group → play.
-//   2. else makeMaster(nodeId) → poll getSnapshot() until that group's master
-//      is nodeId (or until the timeout) → then play.
-// Surfaces a "moving playback…" toast during the wait; on timeout, an error
-// toast and no play call. `getSnapshot` returns the latest Snapshot (the live
-// ws store in the app; getCluster in tests). Avoids the server's "not master"
-// rejection that play() alone would hit on a follower.
-export async function playOnNode(nodeId, uri, getSnapshot, opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? 5000;
-  const pollMs = opts.pollMs ?? 250;
-  const nameOfNode = opts.name || shortId(nodeId);
-
-  // groupOf(snap) → the group `nodeId` is a member of, or undefined.
-  const groupOf = (snap) =>
-    snap && snap.groups
-      ? snap.groups.find((g) => g.members && g.members.includes(nodeId))
-      : undefined;
-
-  let snap = getSnapshot();
-  let group = groupOf(snap);
-
-  // Already the master (or unknown topology) → straight play.
-  if (!group || group.master === nodeId) {
-    return play(nodeId, uri);
-  }
-
-  // Not the master → take over, then wait for the snapshot to confirm.
-  pushToast("moving playback to " + nameOfNode + "…", "ok");
-  await makeMaster(nodeId, nodeId);
-
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, pollMs));
-    let next;
-    try {
-      next = await getSnapshot();
-    } catch {
-      next = undefined;
-    }
-    const g = groupOf(next);
-    if (g && g.master === nodeId) {
-      return play(nodeId, uri);
-    }
-  }
-
-  pushToast("timed out moving playback to " + nameOfNode, "error");
-  throw new ApiError(0, "takeover timed out");
+// playOnNode plays `uri` on the master of the group to play. Under the crosswise
+// model every node ALWAYS masters its own group, so this is a direct play — no
+// takeover dance. Extra args (a snapshot getter, opts) are accepted for call-site
+// compatibility and ignored.
+export async function playOnNode(nodeId, uri) {
+  return play(nodeId, uri);
 }
 export function stop(masterId) {
   return toasted(req("POST", base(masterId) + "/stop"));

@@ -29,36 +29,101 @@ func parseEntry(e *zeroconfServiceEntry, self id.ID) (Peer, bool) {
 		return Peer{}, false
 	}
 
-	gossip, ok := parsePort(txt["gossip"])
-	if !ok {
-		return Peer{}, false
-	}
-	http, ok := parsePort(txt["http"])
-	if !ok {
-		return Peer{}, false
-	}
-	stream, ok := parsePort(txt["stream"])
-	if !ok {
-		return Peer{}, false
-	}
-	source, ok := parsePort(txt["source"])
-	if !ok {
-		return Peer{}, false
+	master, playback := parseRoles(txt["role"])
+	p := Peer{ID: pid}
+
+	switch {
+	case master:
+		// A master must carry all four ports (as before role-awareness, §3).
+		gossip, ok := parsePort(txt["gossip"])
+		if !ok {
+			return Peer{}, false
+		}
+		http, ok := parsePort(txt["http"])
+		if !ok {
+			return Peer{}, false
+		}
+		stream, ok := parsePort(txt["stream"])
+		if !ok {
+			return Peer{}, false
+		}
+		source, ok := parsePort(txt["source"])
+		if !ok {
+			return Peer{}, false
+		}
+		p.Master = true
+		p.GossipPort, p.HTTPPort, p.StreamPort, p.SourcePort = gossip, http, stream, source
+	case playback:
+		// A playback node must carry a control port; ports/caps follow (D50/D51).
+		control, ok := parsePort(txt["control"])
+		if !ok {
+			return Peer{}, false
+		}
+		p.Playback = true
+		p.ControlPort = control
+		p.Name = txt["name"]
+		p.Caps = parseCaps(txt)
+	default:
+		return Peer{}, false // no usable role (parseRoles defaults to master)
 	}
 
 	addr, ok := chooseAddr(e.AddrIPv4, e.AddrIPv6)
 	if !ok {
 		return Peer{}, false
 	}
+	p.Addr = addr
+	return p, true
+}
 
-	return Peer{
-		ID:         pid,
-		Addr:       addr,
-		GossipPort: gossip,
-		HTTPPort:   http,
-		StreamPort: stream,
-		SourcePort: source,
-	}, true
+// parseRoles parses the TXT "role" value into role flags. An absent/empty/garbage
+// value defaults to master (legacy adverts predate the role key, and a master is
+// the safe default for the gossip-join path). Adverts emit exactly one of
+// "master" / "playback" (§5), but both are tolerated (master wins).
+func parseRoles(s string) (master, playback bool) {
+	if s == "" {
+		return true, false
+	}
+	for _, f := range strings.Split(s, ",") {
+		switch strings.TrimSpace(f) {
+		case "master":
+			master = true
+		case "playback":
+			playback = true
+		}
+	}
+	if !master && !playback {
+		return true, false
+	}
+	return master, playback
+}
+
+// parseCaps reads the playback capability TXT keys (DUMB-CLIENT §5). Missing keys
+// yield zero values (a conservative "can't do it").
+func parseCaps(txt map[string]string) Caps {
+	c := Caps{
+		MaxRate:        atoiOr(txt["rate"], 0),
+		HWVolume:       txt["hwvol"] == "1",
+		FixedDelayMs:   atoiOr(txt["delayms"], 0),
+		CanReportQueue: txt["queue"] == "1",
+		Input:          txt["input"] == "1",
+	}
+	if cs := strings.TrimSpace(txt["codecs"]); cs != "" {
+		for _, codec := range strings.Split(cs, ",") {
+			if codec = strings.TrimSpace(codec); codec != "" {
+				c.Codecs = append(c.Codecs, codec)
+			}
+		}
+	}
+	return c
+}
+
+// atoiOr parses a decimal int, returning def on any error.
+func atoiOr(s string, def int) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 // parseTXT turns ["k=v", ...] into a map. The first occurrence of a key wins;

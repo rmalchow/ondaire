@@ -9,7 +9,9 @@ import (
 	"context"
 	"log/slog"
 	"net/netip"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,31 +41,78 @@ var (
 type zeroconfServiceEntry = zeroconf.ServiceEntry
 
 // Peer is one discovered ensemble node, as advertised in its mDNS TXT record
-// (§3) plus the address the responder was reached on. It is the unit C consumes
-// to decide gossip joins; B does no joining itself.
+// (§3 / DUMB-CLIENT §5) plus the address the responder was reached on. It is the
+// unit C consumes: a Master peer is gossip-joined; a playback-only peer (D50) is
+// represented as a non-gossiping member instead.
+//
+// A node advertises EITHER role=master (gossips; carries gossip/http/stream/source)
+// OR role=playback (wire-driven; carries control + caps). A combined master+playback
+// node advertises as master — its local playout is driven in-process (D61), so it is
+// just a master to the network.
 type Peer struct {
-	ID         id.ID      // from TXT "id=" (32 hex); never Zero on a valid Peer
-	Addr       netip.Addr // chosen responder IP (IPv4 preferred, then IPv6)
-	GossipPort int        // from TXT "gossip="
-	HTTPPort   int        // from TXT "http="
-	StreamPort int        // from TXT "stream="
-	SourcePort int        // from TXT "source=" (§8.7 SOURCE_PORT)
+	ID   id.ID      // from TXT "id=" (32 hex); never Zero on a valid Peer
+	Addr netip.Addr // chosen responder IP (IPv4 preferred, then IPv6)
+
+	Master   bool   // role=master: gossips
+	Playback bool   // role=playback: wire-driven, non-gossiping (D50)
+	Name     string // advertised room/speaker name (playback nodes; masters gossip theirs)
+
+	// Master fields (zero when !Master).
+	GossipPort int // from TXT "gossip="
+	HTTPPort   int // from TXT "http="
+	StreamPort int // from TXT "stream="
+	SourcePort int // from TXT "source=" (§8.7 SOURCE_PORT)
+
+	// Playback fields (zero/empty when !Playback).
+	ControlPort int  // from TXT "control=" (master→playback commands, D58)
+	Caps        Caps // advertised capabilities (DUMB-CLIENT §5)
+}
+
+// Caps are a playback node's advertised capabilities (DUMB-CLIENT §5). They inform
+// the master/operator (e.g. a UI warning when assigning a pcm-only speaker to an
+// opus group); they never gate membership or fan-out (D51).
+type Caps struct {
+	Codecs         []string // decodable codecs, preference order ("codecs=pcm,opus")
+	MaxRate        int      // max output sample rate ("rate=48000")
+	HWVolume       bool     // hardware volume control present ("hwvol=1")
+	FixedDelayMs   int      // unchangeable output delay, ms ("delayms=30")
+	CanReportQueue bool     // can report output-queue depth → runs the servo ("queue=1")
+	Input          bool     // has line-in capture ("input=1")
 }
 
 // GossipAddrPort is the address C dials to join the peer's gossip cluster (§3).
+// Only meaningful for a Master peer.
 func (p Peer) GossipAddrPort() netip.AddrPort {
 	return netip.AddrPortFrom(p.Addr, uint16(p.GossipPort))
 }
 
-// Config carries this node's own advertised identity. All fields required.
+// PlaybackOnly reports whether this peer is a wire-driven, non-gossiping playback
+// node (D50): the master ingests it as a member and drives it over the control
+// plane rather than gossip-joining it.
+func (p Peer) PlaybackOnly() bool {
+	return p.Playback && !p.Master && p.ControlPort > 0
+}
+
+// Config carries this node's own advertised identity. A node advertises as a
+// master (gossip/http/stream/source) when Master is set, else as a playback node
+// (control + caps). Master and Playback come from the node's role (D49).
 type Config struct {
-	ID         id.ID  // this node's immutable node ID (§1)
-	Instance   string // mDNS instance name; use ID.String() for uniqueness
-	GossipPort int    // actually-bound ports (§2 bind-or-increment result)
+	ID       id.ID  // this node's immutable node ID (§1)
+	Instance string // mDNS instance name; use ID.String() for uniqueness
+
+	Master   bool   // advertise role=master + its ports
+	Playback bool   // (when !Master) advertise role=playback + control + caps
+	Name     string // advertised room/speaker name (playback-only advert)
+
+	GossipPort int // actually-bound ports (§2 bind-or-increment result)
 	HTTPPort   int
 	StreamPort int
-	SourcePort int          // actually-bound SOURCE_PORT (§2/§8.7)
-	Log        *slog.Logger // optional; defaults to slog.Default() with comp=discovery
+	SourcePort int // actually-bound SOURCE_PORT (§2/§8.7)
+
+	ControlPort int  // bound CONTROL_PORT (playback-only advert, D58)
+	Caps        Caps // advertised capabilities (playback-only advert)
+
+	Log *slog.Logger // optional; defaults to slog.Default() with comp=discovery
 }
 
 // seenEntry is per-peer dedup state (§ control flow).
@@ -160,15 +209,68 @@ func (d *Discovery) Close() error {
 	return nil
 }
 
-// txtRecords builds the five advertised TXT key=value strings (§3).
+// txtRecords builds the advertised TXT key=value strings (§3 / DUMB-CLIENT §5).
+// A master advertises its four ports; a (non-master) playback node advertises its
+// control port + capabilities. The `role` key is always present.
 func txtRecords(cfg Config) []string {
-	return []string{
+	recs := []string{
 		"id=" + cfg.ID.String(),
-		"gossip=" + strconv.Itoa(cfg.GossipPort),
-		"http=" + strconv.Itoa(cfg.HTTPPort),
-		"stream=" + strconv.Itoa(cfg.StreamPort),
-		"source=" + strconv.Itoa(cfg.SourcePort),
+		"role=" + advertRole(cfg),
 	}
+	if playbackOnly(cfg) {
+		// Playback-only advert (D50/D51): control + capabilities, no gossip.
+		return append(recs,
+			"control="+strconv.Itoa(cfg.ControlPort),
+			"name="+cfg.Name,
+			"codecs="+strings.Join(cfg.Caps.Codecs, ","),
+			"rate="+strconv.Itoa(cfg.Caps.MaxRate),
+			"hwvol="+boolBit(cfg.Caps.HWVolume),
+			"delayms="+strconv.Itoa(cfg.Caps.FixedDelayMs),
+			"queue="+boolBit(cfg.Caps.CanReportQueue),
+			"input="+boolBit(cfg.Caps.Input),
+		)
+	}
+	// Master advert (the default for a combined node and any legacy/zero Config).
+	return append(recs,
+		"gossip="+strconv.Itoa(cfg.GossipPort),
+		"http="+strconv.Itoa(cfg.HTTPPort),
+		"stream="+strconv.Itoa(cfg.StreamPort),
+		"source="+strconv.Itoa(cfg.SourcePort),
+	)
+}
+
+// playbackOnly reports whether the node advertises as a wire-driven playback node:
+// it has the playback role and NOT the master role. Everything else (combined,
+// master-only, zero/legacy Config) advertises as a master (D61).
+func playbackOnly(cfg Config) bool {
+	return cfg.Playback && !cfg.Master
+}
+
+// advertRole renders the mDNS role from the advert kind.
+func advertRole(cfg Config) string {
+	if playbackOnly(cfg) {
+		return "playback"
+	}
+	return "master"
+}
+
+func boolBit(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
+// srvPort is the (informational) mDNS SRV port: a master's HTTP port, else a
+// playback node's control port, else any bound port — never 0 (zeroconf rejects
+// "Missing port"). The authoritative ports are always in TXT (D4).
+func srvPort(cfg Config) int {
+	for _, p := range []int{cfg.HTTPPort, cfg.ControlPort, cfg.StreamPort, cfg.GossipPort, cfg.SourcePort} {
+		if p > 0 {
+			return p
+		}
+	}
+	return 1 // last-resort placeholder; TXT carries the real ports
 }
 
 // registerKeeper registers the mDNS service, retrying on failure until ctx is
@@ -183,9 +285,11 @@ func (d *Discovery) registerKeeper() {
 		if d.ctx.Err() != nil {
 			return
 		}
-		// Advertised SRV port is HTTP — informational only; real ports are in
-		// TXT (D4). nil ifaces => all multicast-capable interfaces.
-		srv, err := zeroconf.Register(d.cfg.Instance, ServiceName, Domain, d.cfg.HTTPPort, txt, nil)
+		// Advertised SRV port is informational only — real ports are in TXT (D4) —
+		// but zeroconf rejects port 0 ("Missing port"). A master advertises its HTTP
+		// port; a playback-only node (no HTTP) falls back to its control port.
+		// nil ifaces => all multicast-capable interfaces.
+		srv, err := zeroconf.Register(d.cfg.Instance, ServiceName, Domain, srvPort(d.cfg), txt, nil)
 		if err == nil {
 			d.mu.Lock()
 			if d.closed {
@@ -197,12 +301,25 @@ func (d *Discovery) registerKeeper() {
 			d.server = srv
 			d.mu.Unlock()
 			d.log.Info("mDNS registered", "instance", d.cfg.Instance)
+			d.reannounceLoop(srv, txt)
 			return
 		}
 		d.log.Warn("mDNS register failed, retrying", "err", err)
 		if !d.sleep(retryInterval) {
 			return
 		}
+	}
+}
+
+// reannounceLoop periodically re-emits the mDNS announcement so a peer stays fresh
+// between the responder's sparse RFC6762 bursts (a player node that no longer
+// follows anyone still announces, so the master's browse keeps seeing it and
+// liveness holds). SetText re-announces the TXT with cache-flush — no Shutdown, so
+// no "goodbye"/gap. Complements the control-plane liveness poll (D60). Blocks until
+// ctx is done.
+func (d *Discovery) reannounceLoop(srv *zeroconf.Server, txt []string) {
+	for d.sleep(reEmitInterval) {
+		srv.SetText(txt)
 	}
 }
 
@@ -297,10 +414,24 @@ func (d *Discovery) maybeEmit(peer Peer) {
 // same ID (§2 rule 2).
 func changed(a, b Peer) bool {
 	return a.Addr != b.Addr ||
+		a.Master != b.Master || a.Playback != b.Playback ||
 		a.GossipPort != b.GossipPort ||
 		a.HTTPPort != b.HTTPPort ||
 		a.StreamPort != b.StreamPort ||
-		a.SourcePort != b.SourcePort
+		a.SourcePort != b.SourcePort ||
+		a.ControlPort != b.ControlPort ||
+		a.Name != b.Name ||
+		capsChanged(a.Caps, b.Caps)
+}
+
+// capsChanged reports whether two advertised capability sets differ.
+func capsChanged(a, b Caps) bool {
+	return !slices.Equal(a.Codecs, b.Codecs) ||
+		a.MaxRate != b.MaxRate ||
+		a.HWVolume != b.HWVolume ||
+		a.FixedDelayMs != b.FixedDelayMs ||
+		a.CanReportQueue != b.CanReportQueue ||
+		a.Input != b.Input
 }
 
 // sleep waits d or returns false early if ctx is cancelled.

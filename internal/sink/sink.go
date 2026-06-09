@@ -42,17 +42,19 @@ type Playout struct {
 	consumed   int64 // cumulative output samples/ch written to the backend
 	restartHit bool  // RESTART already fired this starvation episode
 
-	clock         contracts.Clock
-	out           contracts.Backend
-	delay         contracts.DelayReporter // out asserted to DelayReporter, or nil
-	flush         contracts.Flusher       // out asserted to Flusher, or nil
-	gain          *gainStage
-	bufferNs      int64
-	delayOffsetNs int64 // output-delay calibration (D36); subtracted from the deadline
-	watchdog      time.Duration
-	restart       RestartFunc
-	now           func() int64
-	log           *slog.Logger
+	clock           contracts.Clock
+	out             contracts.Backend
+	delay           contracts.DelayReporter // out asserted to DelayReporter, or nil
+	flush           contracts.Flusher       // out asserted to Flusher, or nil
+	gain            *gainStage
+	bufferNs        int64
+	delayOffsetNs   int64 // output-delay calibration (D36, acoustic/room); subtracted from the deadline
+	equalizeDelayNs int64 // master-driven cross-room device-buffer equalization (D65); ADDED to the deadline (delays a faster room to match the slowest)
+	deviceLatencyNs int64 // backend's configured output latency (D63); subtracted from the deadline
+	watchdog        time.Duration
+	restart         RestartFunc
+	now             func() int64
+	log             *slog.Logger
 
 	silence []byte
 	wake    chan struct{}
@@ -112,6 +114,12 @@ func New(cfg Config) *Playout {
 	}
 	if dr, ok := cfg.Backend.(contracts.DelayReporter); ok {
 		p.delay = dr
+	}
+	// The backend's configured output latency (ALSA) is recorded for telemetry /
+	// the upcoming per-node device-latency compensation (D63/D64), but is NOT yet
+	// subtracted from the deadline (see the loop comment).
+	if lr, ok := cfg.Backend.(contracts.LatencyReporter); ok {
+		p.deviceLatencyNs = lr.ConfiguredLatencyNs()
 	}
 	p.wg.Add(1)
 	go p.loop()
@@ -229,6 +237,36 @@ func (p *Playout) SetDelayOffset(nanos int64) {
 	}
 }
 
+// SetEqualizeDelay sets the master-driven cross-room equalization delay in
+// nanoseconds (D65). This is a SEPARATE component from the D36 acoustic offset
+// (SetDelayOffset): the deadline adds it, so the master can delay a faster room to
+// match the slowest WITHOUT clobbering the node's own acoustic calibration. Clamped
+// to ≥0 (it only ever delays). Re-anchors exactly like SetDelayOffset; a no-op when
+// the value is unchanged so the master's 1 Hz re-assert never re-anchors (an audible
+// glitch) — only a real change does.
+func (p *Playout) SetEqualizeDelay(nanos int64) {
+	if nanos < 0 {
+		nanos = 0
+	}
+	nanos = clampDelayNs(nanos)
+	p.mu.Lock()
+	if p.closed || p.equalizeDelayNs == nanos {
+		p.mu.Unlock()
+		return
+	}
+	p.equalizeDelayNs = nanos
+	p.jb.reset()
+	p.originSet = false
+	p.stats.Buffered = 0
+	restart := p.restart
+	eqMs := p.equalizeDelayNs / 1_000_000
+	p.mu.Unlock()
+	p.log.Info("equalize delay changed; re-anchoring", "equalizeMs", eqMs, "willRestart", restart != nil)
+	if restart != nil {
+		restart()
+	}
+}
+
 // SwapBackend replaces the live output backend (D37, §8.5): used when the node's
 // selected output device changes. Under the mutex it closes the old backend, sets
 // the new one (re-asserting DelayReporter), and logs. A brief audio blip is
@@ -250,6 +288,14 @@ func (p *Playout) SwapBackend(nb contracts.Backend) {
 		p.delay = dr
 	} else {
 		p.delay = nil
+	}
+	// D63: the new backend may have a different configured device latency (e.g.
+	// swapping an alsa device for the null backend) — re-read it so the deadline
+	// pre-roll tracks the live backend.
+	if lr, ok := nb.(contracts.LatencyReporter); ok {
+		p.deviceLatencyNs = lr.ConfiguredLatencyNs()
+	} else {
+		p.deviceLatencyNs = 0
 	}
 	p.mu.Unlock()
 	if old != nil {
@@ -303,6 +349,7 @@ func (p *Playout) Stats() contracts.SinkStats {
 	s := p.stats
 	s.Buffered = p.jb.len()
 	s.RatePPM = p.servo.ratePPM()
+	s.Calibrated = p.servo.setpointNs() > 0 // D65: setpoint frozen → stable device-queue depth
 	_, ok := p.clock.MasterNow()
 	s.Synced = ok
 	return s
@@ -379,15 +426,25 @@ func (p *Playout) loop() {
 
 		seq := p.jb.nextSeq
 		pts := p.slotPTS(seq)
-		// Deadline: pts + buffer − manual calibration. Deliberately NOT minus
-		// the live device queue: writing earlier fills the queue further,
-		// which grows the measurement, which moves deadlines earlier — an
-		// unstable feedback loop (audibly choppy). Inter-device phase is
-		// handled at the SOURCE instead: the alsa backend opens with a small
-		// FIXED device latency so its queue stays small and comparable to the
-		// pipe backends'; residual constant offsets are the manual
-		// outputDelayMs calibration's job (D36).
-		target := pts + p.bufferNs - p.delayOffsetNs
+		// Deadline: pts + buffer − acoustic calibration − configured device latency.
+		// We subtract the backend's CONFIGURED device latency (a known constant), NOT
+		// the LIVE device queue: subtracting the live queue is the unstable feedback
+		// loop the old design avoided (writing earlier grows the queue, which moves
+		// deadlines earlier…). Subtracting the constant pre-rolls the device to its
+		// full buffer (xrun cushion) and makes speaker_time = MasterToLocal(pts+buffer)
+		// on EVERY node regardless of its device latency — so heterogeneous DACs and
+		// Deadline = pts + buffer − acoustic calibration. Deliberately NOT minus the
+		// device queue: subtracting the live queue is a positive-feedback loop (write
+		// earlier → queue grows → write earlier…), and subtracting a CALIBRATED
+		// constant that switches in mid-session jolts the schedule. Compensating the
+		// per-node device-buffer DIFFERENCE for tight cross-node sync is the next,
+		// data-driven step (D64); the room-sync telemetry below measures it first.
+		// + equalizeDelayNs: master-driven cross-room equalization (D65). The master
+		// computes maxSetpoint−ownSetpoint across rooms and pushes it here; ADDING it
+		// delays a faster room (smaller device buffer) so its speaker_time matches the
+		// slowest room. Always ≥0, so it only ever adds latency — never pre-rolls
+		// harder than the device buffer allows (the failure mode D63's revert avoided).
+		target := pts + p.bufferNs - p.delayOffsetNs + p.equalizeDelayNs
 		local, ok := p.clock.MasterToLocal(target)
 		if !ok {
 			// unsynced gate (§7)
@@ -405,18 +462,29 @@ func (p *Playout) loop() {
 			if p.delay != nil {
 				dDelay, dok = p.delay.DeviceDelay()
 			}
+			if dok {
+				p.stats.DeviceDelayNs = dDelay // D63 telemetry: surfaced via Stats()→STATUS
+			}
 			ppm := p.servo.observe(p.consumed, mNow, dDelay, dok)
 			p.rs.setRate(ppm)
 			p.stats.RatePPM = ppm
+			// phaseErr: the device queue's deviation from its calibrated setpoint
+			// (dDelay − setpoint), in ns — the per-node playout phase the master diffs
+			// across rooms to see skew. Small in lock; a sustained value is drift the
+			// gentle servo is correcting. (D64 telemetry.)
+			if sp := p.servo.setpointNs(); sp > 0 {
+				p.stats.PhaseErrNs = dDelay - sp
+			}
 			if now := p.now(); now-p.lastServoLog > 1_000_000_000 {
 				p.lastServoLog = now
-				p.log.Debug("servo",
+				p.log.Debug("stats",
 					"outPPM", int64(ppm),
-					"queueErrSamples", int64(p.servo.queueErr),
-					"queueEMASamples", int64(p.servo.ddEMA),
-					"setpointSamples", int64(p.servo.setpoint),
+					"phaseErrMs", p.stats.PhaseErrNs/1_000_000,
 					"deviceDelayMs", dDelay/1_000_000, "delayOK", dok,
-					"buffered", p.stats.Buffered)
+					"setpointMs", p.servo.setpointNs()/1_000_000,
+					"queueErrSamples", int64(p.servo.queueErr),
+					"buffered", p.stats.Buffered,
+					"played", p.stats.Played, "silence", p.stats.Silence, "late", p.stats.LateDrop)
 			}
 		}
 

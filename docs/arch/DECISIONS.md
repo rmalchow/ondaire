@@ -1,117 +1,528 @@
-# Contract reconciliation — integrator decisions
+# Architecture decisions
 
-The eleven piece architects raised 43 contract concerns against
-[S-skeleton.md](S-skeleton.md) and the [spec](../README.md). This file
-resolves every one that needed a decision; trivially-confirmed items are
-grouped at the end. **These decisions amend the arch docs** — where a piece
-doc disagrees with this file, this file wins. (Surgical fixes already applied
-to S-skeleton.md are marked ✎S.)
+The living record of load-bearing design decisions for ensemble. Each is numbered
+`Dn`; **those numbers are stable anchors cited from code comments** (e.g.
+`// D64 telemetry`) — they are never reused or renumbered. Decisions are grouped by
+topic below; superseded ones live only in the [index](#index--d1d65) with a pointer
+to what replaced them. Where a piece/spec doc disagrees with this file, this file
+wins.
 
-## Decisions
+---
 
-**D1 — node.json holds `{id, name, volume, outputDelayMs, outputDevice, disabled,
-following}`** *(amended by D35/D36/D37/D40/D45)*. (A) The remaining node-record
-fields (ports, addrs, caps, observations) are runtime/replicated, in-memory only,
-rebuilt on start. `following` (D45) is persisted as the boot seed + last-known
-follow target (`""` == solo); its live value still lives in the replicated record.
+## 1. Identity, persistence & config
 
-**D2 — `ENSEMBLE_OUTPUT` is env-only** (`auto` default | `null` | `file:<path>`
-| explicit backend name). No flag. Added to spec §2. (A/E/K)
+**D1 — `node.json` is the only persisted per-node state.** It holds
+`{id, name, volume, outputDelayMs, outputDevice, disabled, following}`. Everything
+else on a node record (ports, addrs, caps, observations) is runtime/replicated,
+in-memory, rebuilt on start. Fields decode presence-aware (an absent field takes its
+default; a malformed one warns and defaults — never fatal). `following` is the boot
+seed + last-known follow target (`""` = solo); its live value rides the replicated
+record. Atomic temp+fsync+rename writes. (Fields added over time: volume D35,
+outputDelayMs D36, outputDevice D37, disabled D40, following D45.)
 
-**D3 — capabilities are assembled by K (main) at startup** — PATH probe for
-the exec tools **plus runtime dlopen probes** (D32: `libopus.so.0` →
-`codecs:["pcm","opus"]`, `libasound.so.2` → `backends` includes `"alsa"`),
-static format/scheme lists — and handed to cluster via its config/setter.
-A stays pure, D stays decode-only. A node with `ENSEMBLE_OUTPUT=null` reports
-`playback:false` but still receives and "plays" to the null sink; playback
-capability never gates group membership or stream fan-out. (A/D/E/K)
+**D2 — `ENSEMBLE_OUTPUT` is env-only**, no flag: `auto` (default) | `null` |
+`file:<path>` | an explicit backend name. `auto` picks alsa → exec → null (D27).
 
-**D4 — discovery `Peer` is `{ID id.ID; Addr netip.Addr; GossipPort, HTTPPort,
-StreamPort int}`** with a `GossipAddrPort()` helper; B's channel is
-`<-chan Peer`, closed on shutdown. zeroconf's SRV port carries HTTP_PORT but
-is informational — **TXT records are authoritative** for all three ports. (B/C)
+**D41 / D47 — `cluster.json` persists only the long-lived lookup tables.** Two
+things, each a FULL LWW record (version + writer, so the gossip merge applies):
+the group override-**names** map (XOR-keyed — an override names a specific
+COMBINATION of rooms, so it survives master changes) and this node's **own**
+group-settings record (self-keyed, since group id == master id, D44). NOT node
+records, NOT playback, NOT peers' settings (all live replicated state owned
+elsewhere). Loaded at `cluster.New` before the memberlist join; once gossip starts
+the normal LWW rule reconciles loaded-vs-gossiped. Saved debounced (~2 s, coalescing
+change storms) plus a final save on `Close`; atomic like `node.json`. Missing file =
+clean empty start; corrupt = warn + empty (never fatal). Empty `StatePath` (tests)
+disables persistence. A restart-version guard (`reconcileOwnSettingsVersion`, the D7
+rule for settings) jumps the local counter above any peer copy with version ≥ ours so
+the next local write wins. Group names + settings are exempt from the 30-day purge
+(kept forever); node records + playback age out at 30 days. Effect: a master that
+restarts against the same data dir re-forms its solo group with its last
+codec/transport/bufferMs instead of cluster defaults.
 
-**D5 — group derivation is owned by C** (`cluster.DeriveGroups`, pure,
-exported); `Snapshot.Groups` arrives pre-derived and joined with
-names/playback/settings. H consumes `Snapshot.Groups` and does **not**
-re-derive; H's own copy of the algorithm in H-group.md is dropped. (C/H)
+---
 
-**D6 — DialCandidates falls back to self-reported CIDRs** when the
-observed-intersection is empty (cold peers must be dialable); it tightens to
-observed-only as soon as any observation exists. Initial memberlist join uses
-the discovery `Peer.Addr` directly — §3.1 resolution governs post-boot dials,
-not cold bootstrap. Spec §3.1 wording adjusted. (C/K)
+## 2. Cluster, discovery & grouping
 
-**D7 — own-record version reconciliation on restart**: after first push/pull,
-if a peer holds our own record with version ≥ ours, jump our counter above it.
-(C)
+**D4 — discovery `Peer` = `{ID; Addr; GossipPort, HTTPPort, StreamPort}`** with a
+`GossipAddrPort()` helper; the discovery channel is `<-chan Peer`, closed on
+shutdown. zeroconf's SRV port is informational — **TXT records are authoritative**
+for all ports.
 
-**D8 — gossip port handoff**: K uses netx to *probe* a free TCP+UDP pair for
-the gossip port, closes both, and passes the bare number to memberlist (which
-binds it itself). The tiny rebind race is accepted for v1. STREAM stays
-bound-and-handed-over (mux keeps the UDP socket). (C/K)
+**D5 — group derivation is pure and centralized** in `cluster.DeriveGroups`
+(exported). `Snapshot.Groups` arrives pre-derived, joined with
+names/playback/settings; consumers do not re-derive. (Group keying redefined by D44:
+group id = master id, not the member-set XOR.)
 
-**D9 — audio EOF semantics** (pinned for D and H): `ReadFrame(dst []byte)
-error` fills exactly `stream.FrameBytes` into caller-owned `dst`; the final
-partial frame is zero-padded and returned with `nil`; the *next* call returns
-`io.EOF`. H's `Source` seam adopts this signature (H-group.md's
-`ReadFrame() ([]byte, error)` is superseded). (D/H)
+**D6 — `DialCandidates` falls back to self-reported CIDRs** when the
+observed-intersection is empty (cold peers must be dialable), tightening to
+observed-only once any observation exists. The initial memberlist join uses the
+discovery `Peer.Addr` directly.
 
-**D10 — `contracts.Clock` gains `LocalToMaster(localNanos int64) (int64, bool)`**
-— H stamps PTS in master time and needs the forward conversion. ✎S (F/H)
+**D7 — own-record version reconciliation on restart.** After the first push/pull, if
+a peer holds our own record with version ≥ ours, jump our counter above it. The same
+rule applies to the self-keyed settings record (D47) and to discovered playback-node
+records across masters (D62).
 
-**D11 — clock generation rides `Header.Gen`**; the 24-byte t1|t2|t3 payload
-stands; the follower trusts its locally-recorded t1 keyed by `Header.Seq`
-(echoed payload t1 is advisory). (F)
+**D8 — gossip port handoff.** K probes a free TCP+UDP pair for the gossip port,
+closes both, and passes the bare number to memberlist (which binds it). The tiny
+rebind race is accepted. STREAM stays bound-and-handed-over (the mux keeps its UDP
+socket).
+
+**D14 — cluster write-side is concrete methods on `cluster.Cluster`** (not in
+`contracts`; consumers declare small Go-style consumer interfaces): `SetName`,
+`SetVolume`, `SetOutputDelayMs`, `SetOutputDevice`, `SetDisabled`, `SetFollowing`
+(Zero = solo), `SetPlayback(group, p)`, `SetGroupSettings(group, s)`,
+`SetGroupName(group, name)`, `Observe(peer, ip)`, `DialCandidates(peer)` (best-first),
+`Join(addrs)`.
+
+**D20 — `--join` / `ENSEMBLE_JOIN`** (comma-separated `host:gossipPort` seeds) is a
+dev flag for hermetic loopback e2e tests; mDNS remains the production path.
+
+**D44 — the group id IS the master's node id; hybrid naming; settings carry over on
+takeover.** Keying the group (and its master-written playback + settings records) by
+the master id means membership churn (a member joining/leaving, master unchanged)
+never changes the id, so those records are never orphaned; the id changes only on a
+master move (which stops the session first). Solo group id = the node's own id.
+`GroupView.ID = master`. **Hybrid naming:** the explicit override-names map stays
+member-set-XOR-keyed (survives master changes); with no override, `DeriveGroups`
+computes a DERIVED label from member names (sorted, `" + "`-joined, first 3 then
+`" +N more"`; solo = the node's name; missing member → 8-char short id).
+`GroupView.NameIsDerived` (json `nameDerived`) reports which; `POST /api/group/name`
+writes the override at the current member set's XOR, an empty name CLEARS it. On
+takeover, `group.MakeMaster` copies the settings record to the new master's key
+(playback does not carry — takeover stops the session). This superseded the
+XOR-of-members group id (D5/§5) and removed the D43 churn re-point.
+
+**D45 — a node persists `following` and rejoins its previous group on return;
+self-heal clears a dangling follow; grace is the decision window.** `node.json` holds
+`following` (D1); `cluster.New` seeds this node's own record's `Following` from it
+(gossiped from version 1, as if `SetFollowing` had been called), and the EXISTING
+machinery does the rest — if the old master is alive and a master, `DeriveGroups`
+re-forms the group; if it is dead/unknown, the §5 self-heal grace fires and resets
+the node to solo. No new rejoin logic. The engine persists on every follow change
+(`Follow`/`Unfollow`/takeover-directed/self-heal reset) via one `setFollowing`
+helper. The self-heal timer arms when the engine first OBSERVES the dangling follow
+(first stale reconcile), not at process start, so slow gossip convergence cannot
+insta-clear a follow still propagating. (For non-gossiping playback nodes the
+mechanism differs — see D63a.)
+
+---
+
+## 3. Clock & sync
+
+**D10 — `contracts.Clock` carries both directions:** `MasterToLocal` and
+`LocalToMaster(localNanos) (int64, bool)` — the source stamps PTS in master time and
+needs the forward conversion.
+
+**D11 — clock generation rides `Header.Gen`.** The 24-byte `t1|t2|t3` payload stands;
+the follower trusts its locally-recorded t1 keyed by `Header.Seq` (echoed payload t1
+is advisory).
+
+**D53 — cold-start convergence uses a startup burst, not 1 Hz.** To meet the <500 ms
+play-to-sound budget while withholding playout until synced, a joining node bursts
+clock probes (~10–20 over the first ~200 ms) then settles to 1 Hz steady state. The
+best-RTT-of-window offset filter is unchanged — only the probe schedule changes.
+
+---
+
+## 4. Audio source, streaming & sink
+
+**D9 — audio EOF semantics.** `ReadFrame(dst []byte) error` fills exactly
+`stream.FrameBytes` into caller-owned `dst`; the final partial frame is zero-padded
+and returned with `nil`; the *next* call returns `io.EOF`.
 
 **D12 — no `Mux.Unregister` in v1.** Handlers are one-per-node and long-lived;
-Receiver/Follower keep a `closed` guard so late dispatch is a no-op. (F/G)
+receiver/follower keep a `closed` guard so late dispatch is a no-op.
 
-**D13 — TCP stream framing is `uint32` big-endian length prefix** before each
-`header+payload` chunk. Both ends live in G; pinned here so nobody invents a
-second framing. FEC parity **is** flushed for a partial tail block on
-stop/EOF. (G)
+**D13 — TCP stream framing is a `uint32` big-endian length prefix** before each
+`header+payload` chunk. FEC parity IS flushed for a partial tail block on stop/EOF.
 
-**D14 — cluster write-side method set** (concrete methods on `cluster.Cluster`,
-not in `contracts`; H and I declare small consumer-side interfaces, Go-style):
+**D22 — subscribe model on SOURCE_PORT (default 9200, TCP+UDP, bind-or-increment).**
+The source listens; members subscribe via stream control (§8.7:
+HELLO/BYE/RESTART/RECONFIG, packet types 0x20–0x23, 1-byte flag payload). UDP
+subscribers HELLO **from their STREAM_PORT mux socket**, so audio flows back to the
+observed source addr:port and the member-side receive path (mux types 0x01/0x02) is
+unchanged; TCP subscribers dial SOURCE_PORT and share control + length-prefixed audio
+on the connection. HELLO keepalive every 5 s; subscriber expiry 15 s. Subscribers
+resolve the master via `cluster.DialCandidates(master)` (this removed the old
+`Resolver`/`SetEndpoints` seam, D18). The master's own sink subscribes over loopback
+like any client. Every node binds SOURCE_PORT (any node can become master) though it
+only matters on masters.
 
-```go
-SetName(string)
-SetVolume(float64)                                   // D35
-SetOutputDelayMs(int)                                // D36
-SetFollowing(id.ID)                                  // Zero = solo
-SetPlayback(group id.ID, p contracts.Playback)
-SetGroupSettings(group id.ID, s contracts.GroupSettings)
-SetGroupName(group id.ID, name string)
-Observe(peer id.ID, ip string)
-DialCandidates(peer id.ID) []netip.Addr              // best-first
-Join(addrs []string) error                           // seed list / discovery
-```
-(C/H/I)
+**D23 — live settings changes.** The master bumps gen, broadcasts RECONFIG, refreshes
+the replicated group-settings record; subscribers re-read settings and resubscribe
+under the new gen. RECONFIG with the stop flag is the explicit end-of-session notice.
+(Replaced the "bufferMs fixed per session" assumption, D21.)
 
-**D15 — go:embed lives in `web/embed.go`** (`package web`,
-`//go:embed all:dist`, exports `DistFS`), because `go:embed` cannot reference
-parent dirs from `internal/api`. The API piece takes the FS via its config.
-✎S (I)
+**D24 — source ring & burst prime.** A ring of released frames sized
+`max(2 × bufferMs, 1 s)`. Prime = replay ring frames whose `pts + bufferMs` deadline
+is still future (older frames are skipped — useless to the newcomer). UDP burst
+pacing ~4× realtime (one frame per ~5 ms); TCP back-to-back. A priming subscriber is
+**excluded from live fan-out** until its burst catches up to the live edge — else an
+interleaved live frame would anchor its reorder window ahead of the burst and the
+whole prime would drop as late; the >realtime rate guarantees catch-up terminates.
 
-**D16 — `FollowClient` is implemented in `internal/api` as a plain
-cluster-backed HTTP client** (no dependency on the Echo server), so K builds:
-cluster → followClient → group engine → api server. No construction cycle.
-(H/I/K)
+**D25 — the rate servo prevents DAC drift continuously.** The drift signal is the
+**output device queue depth** (ALSA `snd_pcm_delay` via the backend `DelayReporter`),
+NOT the playout scheduler — the scheduler is master-clock-locked, so the DAC's true
+crystal rate only shows up in queue depth. A proportional controller (gentle gain,
+slew-limited, ±300 ppm clamp — see D64) drives a 4-tap Catmull-Rom fractional
+resampler between the jitter buffer and the backend. Underruns stay silence +
+watchdog → RESTART (starved >2 s → RESTART to the source; still starved →
+unsubscribe, group self-heal takes over). `SinkStats` carries `RatePPM`, `Buffered`.
 
-**D17 — takeover forwarding is I's job** (proxy hop to current master);
-`group.MakeMaster` assumes it executes on the master and errors with
-`ErrNotMaster` otherwise. H owns re-pointing the clock follower
-(`SetMaster(addr, gen)`) whenever the elected master endpoint or generation
-changes. *(Endpoint-management half superseded by D22 — the subscribe model
-removes per-member stream endpoints; clock re-pointing stands.)* (H/K)
+**D26 — media-source abstraction.** A scheme-keyed factory (`file` / `http` / `input`
+/ `calibrate:` D48) → one `Source` contract (canonical-PCM `ReadFrame(dst)`, `Close`,
+D9 EOF). Pull-paced (`file`: decode-ahead, EOF ends session) vs live-paced
+(`http`/`input`: never EOF, underflow → the release ticker emits silence, cadence
+never stalls). `input` is exec-capture (`pw-record`/`arecord`). Available schemes are
+reported in `capabilities.sources`. Live-source underflow is the source's problem
+(silence internally, `ReadFrame` returns `nil`) — there is no `ErrUnderflow`
+sentinel.
 
-**D18 — ~~stream endpoints~~ SUPERSEDED by D22**: there is no `Resolver` /
-`SetEndpoints` seam. Subscribers dial the master's `SOURCE_PORT` (resolved
-via `cluster.DialCandidates(master)`); the source streams back to the address
-each subscription actually came from. (H/K)
+**D27 — sink-backend registry.** Named backends in the single build: `alsa`
+(runtime-loaded libasound, implements `DelayReporter`, v1), `exec` (fallback pipe),
+`null`, `file`. `alsa` registers itself only when the dlopen probe succeeds (D32).
+`ENSEMBLE_OUTPUT` selects by name; `auto` picks alsa → exec → null. Available names
+are reported in `capabilities.backends`; `playback` = a real (non-null) backend is
+usable.
 
-**D19 — `/api/status` JSON envelope** (pinned for I, J, and the e2e):
+**D28 — source stats surfacing.** `SourceStats{Clients, Connects, Restarts, Primes}`
+in `/api/status` (D19) and riding the master-written replicated playback record
+(`Playback.Source`), refreshed with the periodic position update so the UI reads it
+from the cluster snapshot.
+
+**D29 — seam names follow the concrete exports.** The source server is
+`source.NewServer(source.Config)` with `StartSession / ReleaseFrame / Reconfig /
+StopSession / Stats`; the subscriber is `stream.NewClient` with `Subscribe(sourceAddr,
+gen, transport) / Unsubscribe / Counters`.
+
+**D31 — no `api.SetGroup`; no construction cycle.** The group engine depends on the
+API only via `contracts.FollowClient` (a leaf), so K builds standalone
+`api.NewFollowClient(cluster)` → `group.New(...)` → `api.New(...)` last.
+
+**D34 — alsa backend (v1).** Simple-API binding via `internal/dl`: `snd_pcm_open(…,
+"default", PLAYBACK)`, `snd_pcm_set_params(S16_LE, RW_INTERLEAVED, 2, 48000, 1,
+latencyUs)`, `snd_pcm_writei` per frame with `snd_pcm_recover` on `-EPIPE`/`-ESTRPIPE`,
+`snd_pcm_delay` implementing `DelayReporter`, `snd_pcm_close`. Registers only when the
+probe succeeds; first in `auto` order.
+
+---
+
+## 5. Codecs & runtime library loading
+
+There is exactly **one build**, no cgo, no build tags. Optional native support is
+probed at runtime and degrades gracefully.
+
+**D3 — capabilities are assembled by K (main) at startup:** PATH probes for exec
+tools, runtime dlopen probes (`libopus.so.0` → `opus`; `libasound.so.2` → `alsa`),
+and static format/scheme lists — handed to cluster via its config/setter. A node with
+`ENSEMBLE_OUTPUT=null` reports `playback:false` but still "plays" to the null sink;
+capability never gates group membership or fan-out.
+
+**D32 — runtime loading via purego (`internal/dl`).** Optional shared libraries load
+with `github.com/ebitengine/purego` (dlopen/dlsym FFI from pure Go, CGO_ENABLED=0).
+`dl.Open(sonames, symbols)` tries sonames in order and **dlsym-verifies every required
+symbol before any `RegisterLibFunc`** — a missing library/version/symbol yields
+`dl.ErrUnavailable` (soft, never a panic) and the capability is reported off. Call
+rate ~50/s, so FFI overhead is irrelevant.
+
+**D33 — opus: placement, negotiation, late-join.** The codec lives in
+`internal/audio` (`NewOpusEncoder/NewOpusDecoder`, returning `dl.ErrUnavailable` when
+libopus isn't loadable; ~7 bound functions, bitrate 128k). **Master encodes once**
+(wired between source `ReadFrame` and fan-out); **each member decodes** (wired between
+the subscriber deliver callback and `Sink.Push` — the sink always consumes canonical
+PCM). No decoder PLC — a lost opus frame is silence, same as pcm.
+- **Negotiation:** the master never rejects `play` for a missing codec — it
+  negotiates the EFFECTIVE codec at every session start AND on mid-session membership
+  change. Effective = wanted `settings.codec` iff every current member's effective
+  caps include it and this master can encode it, else `pcm` (universal). Downgrades
+  log and are reflected in the replicated playback record. Mid-session, a running opus
+  session that becomes unsupported (a member disabled opus, or a non-opus node joined)
+  **downgrades in place** like a live settings change (bump gen, swap session encoder
+  to nil, `StartSession`, `Reconfig`, re-point, resume from position). Only downgrades
+  auto-apply mid-session; an upgrade waits for the next play/settings change. A genuine
+  encoder-build failure still fails the play with `ErrNoOpus`.
+- **Late-join stale-gen:** the member-side deliver consults the sink's ACTUAL armed
+  gen (`*sink.Playout.ArmedGen()`) and re-arms whenever the sink is not armed at the
+  incoming frame's gen — fixing a joiner that starved when the master's real gen
+  happened to equal the deliver closure's cached gen.
+
+**D42 — opus is the default codec, with transparent pcm downgrade.**
+`contracts.DefaultCodec = "opus"`. Rationale: a raw-PCM datagram is `24 + 3840 B` and
+IP-fragments into ~3 packets; on lossy Wi-Fi a lost fragment drops the whole frame and
+per-frame XOR FEC can't recover it (observed: Pi members on WLAN got clock packets but
+no audio). A 20 ms opus packet is ~320 B — one MTU. `group.Play` downgrades to pcm
+when the group can't do opus (per D33) rather than rejecting; an explicit
+`codec: opus` is still validated against the master's own capability.
+
+---
+
+## 6. Per-node controls & features
+
+**D35 — per-node volume (live software gain).** `volume` float `0.0–1.0` (default
+`1.0`), in `node.json` + the replicated record; `PATCH /api/node {volume}`. Applied as
+the last sink stage before the backend: per-sample int16 multiply, target read
+atomically each frame, linear ramp over one 20 ms frame — no restart, every backend.
+`0.0` is a real (muted) value: absent-field defaulting to `1.0` happens ONLY in A's
+presence-aware decode; every layer downstream treats the resolved value as
+authoritative.
+
+**D36 — per-node output-delay calibration.** `outputDelayMs` int (default 0, clamped
+±500) compensates fixed downstream latency invisible to the servo (pipe internals,
+DAC/amp/BT chains). Deadline contribution: `… − outputDelayMs`. Sign: **positive =
+device chain is late → write earlier**. `Sink.SetDelayOffset` takes ns; a live change
+drops the buffer and fires the restart hook (RESTART → burst re-prime) — a sub-second
+blip on that node only. Covers ONLY the acoustic/room offset; the device-buffer
+component is handled separately (D65).
+
+**D37 — output-device selection.** A node may pick which ALSA device the alsa backend
+opens. Enumeration is from `/proc/asound/pcm` (zero deps, pure/testable
+`parseProcPCM`): playback-capable `CC-DD` lines → `{ID:"hw:C,D"}`, prepended with
+`default`; empty when libasound isn't loadable or the file is missing. Enumerated once
+at startup, reported on the node record + `NodeView`. `node.json` gains `outputDevice`
+(default `"default"`); `PATCH /api/node {outputDevice}` validates against the node's
+own list, then persist → replicate → apply: only when the active backend is alsa, K
+reopens the backend and calls `Playout.SwapBackend(b)` (close old, set new, re-assert
+`DelayReporter`). A brief blip is accepted; the session is NOT restarted. The exec
+backend ignores the device in v1.
+
+**D38 — bring-up aids.** `POST /api/tone` plays a 1 s 440 Hz tone through the local
+backend (`Sink.TestTone`; 409 while a session/tone is active; respects live volume),
+surfaced as a per-node button. And: the initial UDP HELLO may be lost, so until the
+first frame arrives the subscriber re-HELLOs (prime-me) 3× at 500 ms before falling
+back to the 5 s keepalive.
+
+**D39 — per-group play/pause.** A `paused` state joins `idle`/`playing`, written only
+by the master. **Pause** (`POST /api/pause`, 409 `not_playing`): the master stops
+releasing frames but KEEPS the source open and the session/gen alive with the position
+frozen; writing `state="paused"` cleanly unsubscribes every member through the
+existing `state=="playing"` gating. **Resume** (`POST /api/resume`, 409 `not_paused`):
+bump gen, re-anchor `sessionStart`, frame index → 0, source continues from where it
+stopped — audio is contiguous though pts restart with the new gen. Live sources resume
+at the live edge. The UI bar is play/pause aware.
+
+**D40 — operator-disabled features (effective capabilities).** A node may locally turn
+off `playback`, `opus`, or `input`. `node.json` gains `disabled:[…]` (normalized
+subset); the replicated record carries both the operator list AND the probed caps.
+**Effective caps = probed − disabled**, computed in one place (`cluster.effectiveCaps`
+in `nodeView`): disabling `playback` → `Playback:false`; `opus` → out of `Codecs`;
+`input` → out of `Sources`. Probed caps are never mutated, so re-enabling restores
+them; `NodeView` exposes the raw `Disabled` for the UI. `PATCH /api/node {disabled}`
+validates a subset of `{playback,opus,input}`, then persist → replicate → apply (the
+live apply swaps the sink to **null** when `playback` is newly disabled, reopens the
+device when re-enabled; `opus`/`input` need no swap). Local constructors also refuse
+(belt-and-suspenders), but the primary gate is the effective-caps subtraction. The UI
+renders tri-state chips (ON solid green ●, OFF amber outline ○, UNAVAILABLE dimmed
+struck ✕, not clickable).
+
+---
+
+## 7. Device latency, drift & cross-room sync
+
+The playout deadline is `target = MasterToLocal(pts + bufferMs − outputDelayMs +
+equalize)`. The three terms below pin down how heterogeneous DACs are kept in phase.
+`DefaultBufferMs` is 300 ms (jitter window ≈ `bufferMs − deviceLatency`; play-to-sound
+stays under 500 ms).
+
+**D63 — device-latency telemetry + `LatencyReporter` (constant-subtraction
+reverted).** D63 originally subtracted the backend's CONFIGURED output latency
+(`ENSEMBLE_ALSA_LATENCY_MS`, default 200 ms; 0 for pipe/null via the optional
+`contracts.LatencyReporter`) from the deadline, to pre-roll the device to its full
+buffer and put heterogeneous DACs in phase. **That subtraction was reverted by D64**
+(it jolted the schedule when a calibrated constant switched mid-session). What
+survives and is current: the `LatencyReporter` interface, and the device-latency
+**telemetry** — `SinkStats.DeviceDelayNs` (the live `snd_pcm_delay`) surfaced over the
+wire (still tagged `D63 telemetry` in code). The orphaned `deviceLatencyNs` sink field
+is dead and may be removed.
+
+**D64 — gentle anti-drift servo.** The audible "stumbling" (nodes drift apart then
+snap back over seconds) was the rate servo HUNTING: at `Kq=1.5 ppm/sample` the Pi's
+±10 ms `snd_pcm_delay` jitter mapped to >300 ppm, railing the loop at ±ClampPPM and
+swinging the playout phase. Fix: retune gentle (`Kq=0.08`, `SlewPPM=20`) so ±10 ms maps
+to tens of ppm — small, smooth, never railed. The servo's job is unchanged (hold the
+device queue near its calibrated setpoint); only the gain changed. Subtracting the
+LIVE device delay from the deadline was rejected as a positive-feedback loop (write
+earlier → queue grows → write earlier…; reproduced as a test failure). To drive the
+proper fix, STATUS gained `DeviceDelayNs` + `PhaseErrNs`, the master logs a 1 s
+`room sync skewMs` line, and every piece emits a 1 s `msg=stats` line.
+
+**D65 — master-driven cross-room device-buffer equalization.** Rooms with different
+output latencies (measured: pipewire-pulse ~250 ms vs a Pi `hw` device ~180 ms) play
+~70 ms apart even though each is clock-locked — the audible inter-room desync the
+`room sync skewMs` line reports. The **master** equalizes it: the stable per-room
+constant is the servo's calibrated setpoint, recovered from STATUS as
+`DeviceDelayNs − PhaseErrNs` (a `StatusFlagCalibrated` bit marks it frozen — the live
+`DeviceDelayNs` swings ±10 ms and must not be used). The driver finds the slowest
+room's setpoint and tells every faster room to DELAY by `max − own` via a new control
+type `SETEQ` (0x35, unsigned ms). The sink sums it into the deadline as a SEPARATE
+component from the D36 acoustic offset (`… + equalize`), so the master never clobbers
+the node-owned acoustic calibration. It only ever ADDS delay, so it never pre-rolls
+harder than the device buffer allows (the feedback failure mode D63/D64 avoided).
+Soft-state: re-asserted every tick, the listener dedups the re-anchor, so a steady
+target re-anchors once and a lost datagram self-heals. Withheld until EVERY room has a
+settled setpoint, so the reference `max` is final. The `room sync` line gains `cal=`;
+the driver logs `room equalized` on change. **Limitation:** v1 equalizes the remote
+rooms a master drives; a master that is also a local player is not yet folded into the
+`max` (follow-up).
+
+---
+
+## 8. Acoustic calibration
+
+**D48 — acoustic auto-calibration (`docs/calibrate.md`).** A mic node measures every
+group member's output delay and writes their `outputDelayMs` (D36).
+- **Relative, not absolute.** The §5 solve needs only pairwise delay DIFFERENCES (the
+  shared `K` absorbs any common offset). Each node's sweep arrival is stamped in
+  master-clock time, reduced to a loop-phase delay referenced to the first node, and
+  unwrapped — so the constant mic-capture-pipe latency CANCELS (same mic, fresh capture
+  per node).
+- **The reference is a source scheme, not a file.** `calibrate:`
+  (`internal/audio/calibrate_src.go`) loops a windowed log-sweep forever (live-paced);
+  the master streams it via `group.Play("calibrate:")`. The signal comes from the same
+  `calibrate.NewReference(default)` the estimator correlates against — that identity is
+  what makes the matched filter exact.
+- **Pure core, injected edges.** `internal/calibrate` is I/O-free (sweep gen,
+  energy-normalised matched-filter estimator with parabolic sub-sample + per-loop
+  median + peak-to-sidelobe confidence, §5 solve, a `Run` state machine over
+  `Controller`/`Recorder`). The API layer wires the real `Controller` (drives
+  `/api/play|stop` + `PATCH /api/node` through a peer HTTP client — no new mutation
+  logic) and `Recorder` (the `input:` source + clock follower).
+- **API/UI.** `POST /api/calibrate` starts a run (needs `input`, a synced clock, ≥2
+  alive members); `GET /api/calibrate` reports live progress + the result table.
+  All-or-nothing on the delay set, always restores pre-run volumes, low-confidence
+  nodes keep their prior delay.
+- **Known limit.** The mic timeline anchors on the first captured frame's clock stamp
+  and the `input:` reader buffers, so absolute capture latency is approximate — fine
+  because it cancels in the relative solve; per-node envelope-ramp attribution and a
+  smaller capture buffer are follow-ups for noisy rooms.
+
+---
+
+## 9. Playback role split (master / playback nodes)
+
+Informed by a study of competing multiroom protocols (archived in `../external/`:
+Snapcast, SlimProto/Squeezelite, AirPlay 2 / NQPTP, Roc/FECFRAME, Google Cast). The
+cross-cutting finding: every synced-audio system converges on *shared clock + buffer
+lead + per-receiver rate correction*, which ensemble already does. **Pre-release
+latitude:** these decisions may renumber wire `type`s and reassign ports freely —
+there is no external client to keep compatible.
+
+**D46 — wire protocol v1: magic `0xE5` is the version marker.** Receivers ignore
+unknown packet types (new optional types are additive); an incompatible revision
+changes the magic. This lets a protocol-minimal receive-only client
+(`docs/DUMB-CLIENT.md`, `cmd/dumbclient`) interoperate without cluster membership.
+
+**D49 — two independently-enableable roles, `master` and `playback`** (default both).
+- **`master`** participates in memberlist gossip, owns/replicates cluster state,
+  serves the REST/WS API + SPA, and sources/streams audio. It is the only external
+  control surface (D56).
+- **`playback`** is the receive-and-play role (wire behavior =
+  [DUMB-CLIENT.md](../DUMB-CLIENT.md)): subscribe, clock-follow, play in sync. It
+  announces via mDNS, **never gossips, holds no cluster state**, and is **driven by a
+  master**, idle until told to join. The protocol is identical for Go and MCU; only
+  capabilities differ (D51). A combined node gossips *because* it is a master.
+
+**D50 — masters discover playback nodes via mDNS and represent them in gossiped state
+as non-gossiping members.** The TXT carries node id, `role=playback`, control/clock/
+audio ports, and the minimal cap set (D51). Each is assigned to a group via the
+existing model; assignment is a single cluster-owned record per node, so multiple
+masters arbitrate through the existing gossip CRDT rather than racing for a speaker.
+
+**D51 — capabilities are announced, not assumed.** A playback node advertises a small
+flat cap set (mDNS TXT, echoed in the control handshake): decodable `codecs`,
+`maxRate`, `hwVolume`, `fixedLatencyMs`, `canReportQueue` (drives D52), `input`. This
+generalizes D3 to the non-gossiping role. Caps still never gate membership or fan-out.
+
+**D52 — the rate servo + resampler is canonical drift correction, for Go AND MCU.** An
+MCU with `canReportQueue` (observable I2S/DMA fill; an S3-class FPU runs Catmull-Rom at
+48 k stereo) SHOULD run the identical loop (D25). Without it, DAC drift is unobservable
+and accepted — the skip-late/silence-gap path is the floor, not the target. This is
+what satisfies the inaudible-drift non-negotiable.
+
+**D54 — the control plane is a small set of wire packets, master↔playback.** Verbs:
+`ATTACH <stream/gen>`, `DETACH`, `SETVOL <pct,mute>`, `SETDELAY <ms>` (D36 acoustic
+offset), `SETEQ <ms>` (D65 equalization), `SETCAP <bit,on>`, and `STATUS`
+(playback→master, D55). `SETVOL`/`SETDELAY` drive the existing per-node fields over the
+wire, so an MCU needs no HTTP server.
+
+**D55 — playback nodes emit STATUS telemetry to their master** (~1 Hz / on change):
+the existing `SinkStats` (jitter-buffer fullness, last `seq`, clock `offset`/`rtt`,
+`ratePPM`, underrun/skip counters) plus the device-latency fields (D63/D64). The master
+never depends on it for correctness — observability + adaptation (e.g. D65), not
+control. It feeds the SPA's per-room health view.
+
+**D56 — the master is the only external control surface.** All REST/WS/SPA — and any
+future Home Assistant / MQTT / Snapcast-compatible façade — live on masters only,
+keeping MCU firmware tiny. *Direction (deferred):* expose the current REST/WS as the
+HA surface first; later evaluate a Snapcast-compatible JSON-RPC façade or MQTT bridge.
+
+**D57 — direction (not committed): Spotify & rich media via a process/pipe source.**
+Add a process source scheme so a master can run `go-librespot` (Spotify Connect,
+zeroconf-credentialed by the user's phone) or consume a Mopidy output, per the Snapcast
+pattern — reuse rather than reimplementing auth/search/indexing. No wire/port impact.
+
+**D58 — the control plane is UDP soft-state, not request/response.** The master
+re-asserts desired state to each node's CONTROL_PORT (ATTACH + SETVOL/SETDELAY/SETEQ/
+SETCAP) on a ~1 Hz heartbeat and on change; the node applies each command
+idempotently and acks nothing. A lost datagram self-heals on the next heartbeat
+(Snapcast's "server pushes state, client persists nothing"). TCP control was rejected:
+more state, no gain (the data plane already offers TCP where reliability matters).
+
+**D59 — playback assignment reuses `Following`, written by a master.** A playback node
+is a `NodeRecord` with `Role=playback`, `Gossips=false`, a `ControlPort`, and its
+announced `Caps`; its **assignment is its `Following` set to the master's id**, but
+since it doesn't gossip the field is written by a master/operator (`PATCH /api/node
+{following}` on a master), not the node. `DeriveGroups` already attaches followers to
+their master, so an assigned node appears as a group member with minimal new logic.
+
+**D60 — liveness for non-gossiping playback nodes = mDNS freshness OR recent STATUS.**
+memberlist liveness doesn't apply. A node is alive if its mDNS advert is fresh OR it
+sent a STATUS recently; it expires when both go stale. `DeriveGroups`/`nodeView`
+`isAlive` consult this for `Role=playback` records.
+
+**D61 — a combined master+playback node drives its own playback in-process.** The
+`Player` verb interface (`Attach`/`Detach`/`SetVolume`/`SetDelay`/`SetEqualize`/
+`SetCap`/`Status`) is the single seam for ALL playout. The group engine drives the
+**local** `Player` with direct in-process calls; the wire control plane (D58) is used
+**only** for remote nodes. Both front-ends hit the identical interface, so "behaves the
+same for Go and MCU" holds without a node ever wire-driving itself over loopback. This
+collapses the former two playout paths (full member; standalone `cmd/dumbclient`) into
+one component.
+
+**D62 — multi-master convergence reuses the D7 reconcile.** The master that first
+discovers a playback peer injects its `NodeRecord`; the record (and its `Following`
+assignment) replicates among masters by LWW + own-version reconciliation. No new
+arbitration — two masters seeing the same speaker converge on one record; the master
+named by `Following` runs the control driver for that node.
+
+**D63a — `following` persists across a master's absence (non-gossiping nodes).** A
+player whose target master goes offline is simply not grouped (idle) by `DeriveGroups`
+while the master is absent; its `following` is NOT reset, and it rejoins automatically
+when the master returns or it is reassigned. There is no self-heal/auto-clear for these
+nodes (unlike the gossiping-member grace of D45 — the old `heal.go` was removed with
+the crosswise model).
+
+---
+
+## 10. API & web
+
+**D15 — go:embed lives in `web/embed.go`** (`package web`, `//go:embed all:dist`,
+exports `DistFS`) because `go:embed` can't reference parent dirs from `internal/api`;
+the API takes the FS via config.
+
+**D16 — `FollowClient` is a plain cluster-backed HTTP client in `internal/api`** (no
+dependency on the Echo server), so the build order is cluster → followClient → group
+engine → api server with no cycle.
+
+**D17 — takeover forwarding is the API's job** (a proxy hop to the current master);
+`group.MakeMaster` assumes it runs on the master and errors `ErrNotMaster` otherwise.
+The group engine owns re-pointing the clock follower (`SetMaster(addr, gen)`) when the
+elected master endpoint or generation changes. (The per-member stream-endpoint half is
+gone — D22's subscribe model removed it.)
+
+**D19 — `/api/status` JSON envelope:**
 
 ```json
 {
@@ -124,517 +535,95 @@ each subscription actually came from. (H/K)
   "source": {"clients": 0, "connects": 0, "restarts": 0, "primes": 0}
 }
 ```
-(I/K; `role:"solo"` = master of a group of 1; `source` present only while
-this node runs an active audio source.)
 
-**D20 — `--join` / `ENSEMBLE_JOIN`** (comma-separated `host:gossipPort` seed
-list) is added as a dev flag in A, passed to `cluster.Join`. It exists for
-hermetic loopback e2e tests; mDNS remains the production path. Added to spec
-§2 as dev-only. (K)
-
-**D21 — ~~bufferMs is fixed per session~~ PARTIALLY SUPERSEDED by D23**:
-settings changes now apply live — the master bumps the generation and
-broadcasts RECONFIG; subscribers re-fetch replicated group settings and
-resubscribe (spec §8.7). Still true: sink `Stats().Synced` is computed live
-from the Clock at call time; `Backend.Write` may block; the exec backend gets
-a write deadline via process kill on Close — accepted v1 limitation. (E)
+`role:"solo"` = master of a group of 1; `source` present only while this node runs an
+active audio source. `/api/status` carries only `groupId`/`role`; the full group
+object comes from `/api/cluster`.
 
 ---
-
-## Audio source/sink restructure (second review round)
-
-Spec §6/§8 were reworked after user review: subscribe-based streaming on a
-dedicated SOURCE_PORT, source ring + burst priming, live settings changes,
-a continuous DAC rate servo, and interchangeable source/backend
-implementations. Decisions D22+ pin the parameters; arch docs D, E, G, H, K
-were regenerated against them.
-
-**D22 — subscribe model on SOURCE_PORT (default 9200, TCP+UDP,
-bind-or-increment)**: the source listens; members subscribe via stream
-control (§8.7: HELLO/BYE/RESTART/RECONFIG, packet types 0x20–0x23, 1-byte
-flag payload). UDP subscribers HELLO **from their STREAM_PORT mux socket**,
-so audio flows back to the observed source addr:port and the member-side
-receive path (mux types 0x01/0x02) is unchanged. TCP subscribers dial
-SOURCE_PORT; control + length-prefixed audio share the connection. HELLO
-keepalive every 5 s; subscriber expiry 15 s. The master's own sink subscribes
-over loopback like any client. Inbound SOURCE_PORT only matters on masters,
-but every node binds it (any node can become master). (G/H/K)
-
-**D23 — live settings changes**: master bumps gen, broadcasts RECONFIG,
-refreshes the replicated group-settings record; subscribers re-read settings
-and resubscribe under the new gen. RECONFIG with the stop flag is the
-explicit end-of-session notice (§8.6). (G/H)
-
-**D24 — source ring & burst prime**: ring of released frames sized
-`max(2 × bufferMs, 1 s)`. Prime = replay ring frames whose `pts + bufferMs`
-deadline is still future (older frames are skipped — useless to the
-newcomer). UDP burst pacing ~4× realtime (one frame per ~5 ms); TCP
-back-to-back. Primes are counted in SourceStats (at burst initiation).
-*Implementation refinement:* a priming subscriber is **excluded from live
-fan-out** until its burst has caught up to the live edge via the ring
-(`framesAfter` loop) — otherwise an interleaved live frame would anchor the
-newcomer's reorder window/sink ahead of the burst and the entire prime would
-be dropped as late. The >‑realtime burst rate guarantees catch-up
-terminates. (G)
-
-**D25 — rate servo (E)**: skew estimator — cumulative samples consumed vs
-master-clock elapsed, ~3 s averaging window; backend `DelayReporter`
-(`DeviceDelay()`) used when implemented, backpressure inference otherwise —
-feeding a PI controller, output clamped ±300 ppm and slew-limited, driving a
-4-tap Catmull-Rom fractional resampler between jitter buffer and backend.
-Runs continuously (drift *prevention*); underruns stay silence + watchdog →
-RESTART (§8.6: starved > 2 s → RESTART to the source; still starved →
-unsubscribe, group self-heal takes over). Target buffer level = bufferMs.
-`SinkStats` gains `RatePPM`, `Buffered`. (E/G)
-
-**D26 — media-source abstraction (D)**: scheme-keyed factory `file` / `http` /
-`input` → one `Source` contract (canonical-PCM `ReadFrame(dst)`, `Close`,
-D9 EOF semantics). Pull-paced (`file`: decode-ahead, EOF ends session) vs
-live-paced (`http`/`input`: never EOF, underflow → the release ticker emits
-silence, cadence never stalls). `input` is exec-capture (`pw-record`/
-`arecord`), mirroring the exec playback backend. Available schemes reported
-in `capabilities.sources`. (D/H)
-
-**D27 — sink-backend registry (E)** *(amended by D32 — no build tags)*:
-named backends `alsa` (runtime-loaded libasound, implements `DelayReporter`,
-**v1**), `exec` (fallback pipe), `null`, `file` — all in the one and only
-build; `alsa` registers itself only when the dlopen probe succeeds.
-`ENSEMBLE_OUTPUT` selects by name; `auto` picks **alsa → exec → null**.
-Available names reported in `capabilities.backends`; `playback` = a real
-(non-null) backend is usable. (E/K)
-
-**D28 — source stats surfacing**: `SourceStats{Clients, Connects, Restarts,
-Primes}` — in `/api/status` (D19) and riding the master-written replicated
-playback record (`Playback.Source`), refreshed with the periodic position
-update, so the UI reads it from the cluster snapshot. (G/C/I/J)
-
-**D29 — seam names follow G's concrete exports** (consistency-sweep
-resolution): the source server is `source.NewServer(source.Config)` with
-`StartSession / ReleaseFrame / Reconfig / StopSession / Stats`; the
-subscriber is `stream.NewClient` (package `internal/stream`) with
-`Subscribe(sourceAddr, gen, transport)` / `Unsubscribe` / `Counters`. H's
-consumer-side interfaces adopt these method names (its `Publish` /
-`SubscribeTo` / `EndSession` spellings in H-group.md are superseded). (G/H/K)
-
-**D30 — live-source underflow is D's problem, not H's**: live sources
-(`http`, `input`) emit silence internally on momentary underflow and
-`ReadFrame` returns `nil` — there is **no** `audio.ErrUnderflow` sentinel;
-H-group.md's references to it are superseded. The release ticker always gets
-a frame. D's `Open(ctx, uri, mediaDir)` signature stands; H bridges with a
-closure. (D/H)
-
-**D31 — no `api.SetGroup`**: H depends on I only via `contracts.FollowClient`
-(leaf package, no cycle), so K builds the API server **last** with the group
-engine in `api.Config` and obtains the follow client via
-`apiSrv.FollowClient()` — actually constructed standalone before the engine:
-`api.NewFollowClient(cluster)` → `group.New(...)` → `api.New(Config{Group:
-engine, ...})`. K-main-e2e.md's `SetGroup` fallback is unused. (H/I/K)
-
----
-
-## Runtime library loading (third review round)
-
-User question: can the binary ALWAYS carry libopus/libalsa support and probe
-loadability at runtime, degrading gracefully? Yes — and it kills the
-build-tag convention entirely. There is exactly **one build**, no cgo.
-
-**D32 — runtime loading via purego (`internal/dl`, S-owned)**: optional
-shared libraries are loaded with `github.com/ebitengine/purego`
-(dlopen/dlsym FFI from pure Go, works with CGO_ENABLED=0).
-`dl.Open(sonames, symbols)` tries sonames in order (`libopus.so.0` then
-`libopus.so`; `libasound.so.2` then `libasound.so`), and **dlsym-verifies
-every required symbol before any `RegisterLibFunc`** — a missing library,
-wrong version, or missing symbol yields `dl.ErrUnavailable` (soft), never a
-panic, and the corresponding capability is simply reported off (D3).
-Call-rate is ~50/s (per 20 ms frame) so FFI overhead is irrelevant. The
-CGO_ENABLED=0 static-build interaction is purego's documented supported mode;
-verified at implementation time. Build tags for `opus`/`alsa` are abolished
-everywhere. (S/D/E/K)
-
-**D33 — opus placement & validation (supersedes the §8.3 build-tag text)**:
-the codec module lives in `internal/audio` (piece D):
-`audio.NewOpusEncoder() / NewOpusDecoder()` return `dl.ErrUnavailable` when
-libopus isn't loadable. The ~7 functions bound: `opus_encoder_create`,
-`opus_encoder_ctl` (bitrate 128k), `opus_encode`, `opus_encoder_destroy`,
-`opus_decoder_create`, `opus_decode`, `opus_decoder_destroy`. **Master
-encodes once** (H wires it between source `ReadFrame` and `source.Server`
-fan-out); **each member decodes** (wired between the subscriber's deliver
-callback and `Sink.Push` — the sink always consumes canonical PCM).
-No packet-loss concealment on the decoder — a lost opus frame is silence,
-same as pcm (§8.5); keep simple. (D/E/G/H)
-
-**D33 amendment — session codec NEGOTIATION (supersedes the reject-behavior)**:
-the master no longer rejects `play` when a member lacks the wanted codec — it
-**negotiates** the EFFECTIVE codec at every session start (play, resume, settings
-change) AND on membership change mid-session. The effective codec is the wanted
-`settings.codec` iff every CURRENT member's effective caps
-(`NodeView.Capabilities`, already probed-minus-disabled D40) include it AND this
-master can encode it, else `"pcm"` (always universal). A downgrade is logged
-(`INFO codec negotiated wanted=opus got=pcm lacking=[names]`); the replicated
-playback record shows the EFFECTIVE codec. **Mid-session renegotiation**: the
-master's reconcile (`group/watch.go renegotiateLocked`) detects that a running
-opus session is no longer supported by all members (a member disabled opus, or a
-non-opus node joined) and **downgrades in place** exactly like a live settings
-change — bump gen, swap the session encoder to nil (atomic, the run goroutine
-loads it per tick), `Source.StartSession`, `Reconfig` (members reconnect via the
-RECONFIG machinery), re-point, rewrite the record — resuming from the current
-position. Only DOWNGRADES auto-apply mid-session; an upgrade (codec became newly
-possible) waits for the next play/settings change (keep it simple). The opus
-factory returning `dl.ErrUnavailable` at encoder build still fails the play with
-`ErrNoOpus` (a genuine runtime failure, distinct from negotiation). (D/E/G/H,
-spec §8.3)
-
-**D33 amendment — late-join stale-gen fix (member-side deliver)**: a node that
-follows into an ALREADY-PLAYING group (or leaves + rejoins mid-stream) primes
-correctly from the source ring, but the member-side `newDeliver` closure cached
-its `curGen` across subscriptions while `repointLocked` independently `Sink.Reset`s
-the sink to a guessed gen on (re)subscribe. When the master's real gen happened to
-equal the closure's cached gen, deliver skipped re-arming and the sink stayed armed
-at the guessed gen — every frame dropped as stale-gen and the joiner starved. Fix:
-deliver consults the sink's ACTUAL armed gen (`*sink.Playout.ArmedGen()`) and
-re-arms whenever the sink is not armed at the incoming frame's gen, regardless of
-its own cache. (E/H)
-
-**D34 — alsa backend (E, v1)**: simple-API binding via `internal/dl`:
-`snd_pcm_open(&pcm, "default", PLAYBACK, 0)`,
-`snd_pcm_set_params(pcm, S16_LE, RW_INTERLEAVED, 2, 48000, 1, latencyUs)`,
-`snd_pcm_writei` per frame with `snd_pcm_recover` on `-EPIPE`/`-ESTRPIPE`,
-`snd_pcm_delay` implementing `contracts.DelayReporter` (exact servo
-measurement), `snd_pcm_close`. Registers in the backend registry only when
-the probe succeeds; first in `auto` order (D27). (E)
-
----
-
-## Per-node volume & output-delay calibration (user addition)
-
-**D35 — per-node volume (live software gain)**: `volume` float `0.0–1.0`,
-default `1.0`. Stored in `node.json` (D1 amended: `{id, name, volume,
-outputDelayMs}`) and the replicated node record; set via
-`PATCH /api/node {volume}` (UI proxies to the node). Applied in the sink as
-the last stage before the backend (`Sink.SetGain`): per-sample int16
-multiply, target read atomically each frame, linear ramp over one 20 ms
-frame on change — continuous, no restart. Gain applies on every backend
-(incl. null/file). `0.0` is a real value (muted): absent-field defaulting to
-`1.0` happens **only** in A's presence-aware node.json decode; every layer
-downstream (K→C→E) treats the resolved value as authoritative — no
-zero-means-unset remapping anywhere. Hardware-mixer volume is out of scope
-v1. (A/C/E/I/J)
-
-**D36 — per-node output-delay calibration**: `outputDelayMs` int, default 0,
-clamped ±500. Compensates fixed downstream latency invisible to both the
-servo and `DeviceDelay()` (pipe player internals, DAC/amp/BT chains).
-Playout deadline = `MasterToLocal(pts) + bufferMs − outputDelayMs`. Stored
-like D35; set via `PATCH /api/node {outputDelayMs}`. Sign convention:
-**positive = the device chain is late → write earlier** (the deadline
-subtracts it); `Sink.SetDelayOffset` takes nanoseconds (I converts
-`ms · 1e6`). A live change calls `Sink.SetDelayOffset` → the sink drops its
-buffer and fires the restart hook (RESTART → burst re-prime, §8.6) — the
-user-visible cost is a sub-second blip on that node only. (A/C/E/I/J)
-
-## Output-device selection (user addition)
-
-**D37 — output-device selection**: each node may select which ALSA device the
-alsa backend opens, instead of always `default`. *Enumeration source* is
-`/proc/asound/pcm`, parsed with zero external deps (`sink.ListOutputDevices` →
-`parseProcPCM`, pure/testable): playback-capable `CC-DD` lines become
-`{ID:"hw:C,D", Desc:<id>}`, prepended with `{ID:"default", Desc:"system
-default"}`. The list is empty when libasound is not loadable (the alsa backend
-never registered → selection is meaningless) OR `/proc/asound/pcm` is missing.
-It is enumerated **once at startup** and reported on the node record
-(`OutputDevices []contracts.OutputDevice`) plus the resolved `NodeView`.
-*Persistence*: `node.json` gains `outputDevice` (default `"default"`,
-presence-aware decode + clamp/normalize like `volume`); `config.SetOutputDevice`
-mirrors `SetVolume`. *Selection semantics*: `sink.OpenDevice(spec, device, log)`
-routes the configured device down the alsa path (auto-selected or explicit
-`alsa`); every other backend ignores it — the **exec backend ignores the device
-in v1** (plays to its tool's own default). *Live apply*: `PATCH /api/node
-{outputDevice}` validates against the node's own enumerated list or `"default"`
-(≤64 chars, non-empty), then persist (A) → replicate (C, `SetOutputDevice`) →
-apply: only when the active backend kind is alsa, K reopens the backend for the
-new device and calls `Playout.SwapBackend(b)` (under the sink mutex: close old,
-set new, re-assert `DelayReporter`, log `output backend swapped`). A brief audio
-blip is accepted; the session is **not** restarted. (A/C/E/I/J/K)
-
-## Per-group play/pause (user addition)
-
-**D39 — per-group play/pause toggle**. A new playback state `paused` joins
-`idle`/`playing`, written only by the master into the replicated playback record.
-- **Pause** (`POST /api/pause`, master-only; 409 `not_playing` when nothing is
-  playing or already paused): the master freezes the session — it stops releasing
-  frames (the 20 ms ticker keeps ticking but reads/publishes nothing) yet KEEPS
-  the media source open and the session/generation alive, with the position
-  frozen. It writes `playback.state="paused"`. The member-side session gating
-  (group/watch.go) already treats only `state=="playing"` as active, so flipping
-  to `paused` cleanly unsubscribes every member (BYE) and `Disarm()`s their sinks
-  through the existing path; the master leaves its own loopback subscription too
-  and broadcasts RECONFIG/stop so any still-attached subscriber drops.
-- **Resume** (`POST /api/resume`, master-only; 409 `not_paused` when not paused):
-  the master bumps the generation and re-anchors `sessionStart =
-  LocalToMaster(now)+lead`; the frame index resets to 0 and the source continues
-  from where it stopped, so **audio is contiguous though pts restart with the new
-  generation** (pts stay monotonic within a generation; the gen bump is the
-  re-anchor boundary that receivers already handle). It re-arms the source session
-  (`StartSession`), re-points local plumbing, resumes releasing, and writes
-  `playback.state="playing"`.
-- **Live sources** (`Live()==true`): pause discards whatever arrives meanwhile
-  (the live readahead already drops on overflow); resume returns at the live edge.
-- The UI playback bar is play/pause aware: ⏸ pause while playing, ▶ resume + a
-  paused indicator while paused; stop stays in both. (spec §4 playback record,
-  §9.1 routes, §11 updated.)
-
-## Tri-state feature display + per-node disable toggles (user addition)
-
-**D40 — operator-disabled features (effective capabilities)**. A node may turn
-off three features locally: `playback` (output), `opus` (codec), `input`
-(capture). Persistence + replication mirror D35/D37:
-- **node.json** gains `disabled:[…]` (presence-aware decode, default empty;
-  `config.Store.SetDisabled([]string)` / `config.Config.SetDisabled`, normalized
-  to the valid subset, deduped + sorted, via the same atomic temp+rename).
-- **Replicated node record** carries the operator's `disabled` list AND the
-  PROBED capabilities (K passes probed caps as today). Cluster setter
-  `SetDisabled([]string)` (a D14 extension) bumps version + broadcasts.
-- **Effective capabilities** = probed − disabled, computed in ONE place
-  (`cluster.effectiveCaps`, applied in `nodeView` when projecting `NodeView`):
-  disabling `playback` → `Playback:false`; `opus` → removed from `Codecs`;
-  `input` → removed from `Sources`. Backends/formats untouched; probed caps are
-  never mutated, so re-enabling restores them. `NodeView` also exposes the raw
-  `Disabled []string` so the UI can render tri-state.
-- **API**: `PATCH /api/node {disabled}` validates a subset of
-  `{playback,opus,input}` (400 `bad_disabled` otherwise), then persist → replicate
-  → apply. The live apply (`ApplyDisabled`, K) swaps the sink to the **null**
-  backend when `playback` is newly disabled and reopens the configured
-  device/backend when re-enabled (mirroring D37's `ApplyOutputDevice`); `opus`/
-  `input` need no swap. Belt-and-suspenders, the LOCAL constructors refuse too:
-  K's media factory rejects an `input:` URI and its opus factory returns
-  `dl.ErrUnavailable` (→ `ErrNoOpus`) while disabled, and the member deliver path
-  drops opus frames — but the primary gate is the effective-caps subtraction
-  (master-side D33 NEGOTIATION downgrades an opus session to pcm when a member
-  lacks the `opus` cap, rather than rejecting — see the D33 negotiation amendment).
-- **UI**: capability chips for playback/opus/input are tri-state with three
-  UNMISTAKABLE states, grouped under a small "features" label distinct from the
-  passive "formats" chips: **ON** (available + enabled) solid green `●`, click to
-  disable; **OFF** (available but disabled) amber outline `○`, click to enable;
-  **UNAVAILABLE** (not probed on this host) dimmed + struck `✕`, NOT clickable
-  (cursor not-allowed), tooltip "not available on this host". Cursor pointer only
-  on the togglable (on/off) chips; pcm/wav/mp3/flac stay plain non-toggleable.
-  (spec §1, §9.1 PATCH row updated.)
-
-## Persisted cluster config (user addition)
-
-**D41 — persisted cluster lookup tables** *(narrowed by D44, amended by D47)*. The
-long-lived lookup state persisted to `DATA_DIR/cluster.json` is the group
-override-**NAMES** map (XOR-keyed) PLUS this node's **OWN group-settings record**
-(keyed by self id, since group id == master id, D44/D47) — each as a FULL record
-(incl. `version` + `writer` so the LWW merge applies). NOT node records, NOT
-playback (runtime/replicated), and NOT peers' settings records (master-keyed live
-state owned by other nodes).
-- **Load** at cluster `New` (before memberlist join) into the doc; once gossip
-  starts, the exact existing LWW rule reconciles loaded-vs-gossiped (an older
-  loaded version loses to a newer gossiped record, and vice-versa).
-- **Save** debounced — a `markDirty` from any names/settings change (setter or
-  gossiped merge) (re)arms a ~2 s timer; a change storm coalesces to a bounded
-  number of writes — plus a final save on `Close`. Atomic temp+fsync+rename in
-  the same dir, like `node.json`.
-- A **missing** file is a clean empty start; a **corrupt** file warns and starts
-  empty (never fatal). The path is wired via `cluster.Config.StatePath` (K passes
-  `filepath.Join(cfg.DataDir, "cluster.json")`); an empty path (tests) disables
-  persistence entirely. A `SaveDebounce` config + `saveNotify` test hook (injected
-  timing) make the debounce deterministic in tests.
-- **Purge horizon**: group names + settings are exempt from the 30-day purge
-  entirely — the lookup table is kept indefinitely (spec §4 updated). Node
-  records + playback still age out at 30 days.
-
-## Opus-by-default + playback-record follows the group id (user round)
-
-**D42 — opus is the default codec, with transparent pcm downgrade**.
-`contracts.DefaultCodec` is now `"opus"` (was `"pcm"`). Rationale: a raw-PCM
-stream datagram is `24 + 3840 = 3864 B` and IP-fragments into ~3 packets; on
-lossy Wi-Fi losing any fragment drops the whole frame and the per-frame XOR FEC
-cannot recover it (observed: Raspberry-Pi members on WLAN received clock packets
-— 24 B, unfragmented — but no audio at all). A 20 ms opus packet is ~320 B, so
-the datagram (~344 B) stays under one MTU. To keep "opus everywhere" from
-breaking heterogeneous clusters, `group.Play` **downgrades the session to pcm**
-when the group can't do opus (a member lacks the `opus` cap, or this master has
-no opus encoder) instead of rejecting — opus is the default, pcm is the
-universal fallback. An *explicit* `codec: opus` via `POST /api/group/settings`
-is still validated against the master's own capability (`validateSettings`).
-(spec §8.3 updated.)
-
-**D43 — the master's playback record follows the live group id**. Bug fix: the
-group ID is the XOR of the member set (§5), so it CHANGES whenever a member
-joins/leaves. The session captured its group id at `Play` time and the heartbeat
-kept writing the playback record under that stale id; when members left (e.g. the
-Pis disconnected), the surviving group's new id had no playback record, so every
-remaining member — including a co-located secondary — saw `state="idle"` and
-**stopped playout**, and it never self-healed (the master kept writing the wrong
-id). Fix: each reconcile, a master with a running session compares
-`sess.groupID` to the freshly-derived `mv.group.ID`; on a change it clears the
-OLD record to `idle` and immediately writes the live record under the NEW id
-(then `sess.groupID` tracks it). Membership churn no longer stalls playout.
-
-## Group id = master id + hybrid naming (user round)
-
-**D44 — the group id is the MASTER's node id; hybrid naming; settings carry over
-on takeover**. A redesign of group keying that kills membership-churn orphaning by
-construction. **This supersedes the XOR-of-members group-id wording of D5/§5 and
-the §4 group-id record keying, and REPLACES the D43 churn re-point** (the re-point
-patch from 2a8bab7 is removed). D41 is narrowed to names-only.
-
-- **Group id = master id**. `DeriveGroups` keys the group — and its master-written
-  PLAYBACK + SETTINGS records — by the master's node id (solo group id = the
-  node's own id). Membership churn (a member joining/leaving, master unchanged)
-  no longer changes the id, so those records are never orphaned; the id changes
-  only on a master move (a takeover, which stops the session first). `GroupView.ID
-  = master`. The former D43 reconcile-time playback re-point is deleted (the bug
-  it patched can no longer occur).
-- **Hybrid naming**. The explicit name OVERRIDE map stays keyed by the member-set
-  **XOR** (an override names a specific COMBINATION of rooms; survives master
-  changes + re-forming). When no override exists, `DeriveGroups` computes a
-  server-side **DERIVED** label from the member NAMES: sorted, joined with `" + "`,
-  capped at the first 3 then `" +N more"`; solo = the node's name; missing member →
-  8-char short id. `GroupView.NameIsDerived` (json `nameDerived`) reports which.
-  `POST /api/group/name` resolves the group's CURRENT member set, computes its XOR,
-  and writes the override there; an **empty name CLEARS** it (back to derived). The
-  UI renders derived labels muted/italic and clears on an empty rename.
-- **Settings carry over on takeover**. Because settings are now master-keyed,
-  `group.MakeMaster` copies the current master's settings record to the new
-  master's key during the handoff (one extra `SetGroupSettings`). Playback does
-  NOT carry (takeover stops the session, as today).
-- **Persistence (amends D41)**. `cluster.json` persists the override-NAMES map
-  ONLY (XOR-keyed, purge-exempt, kept forever). Group settings are NO LONGER
-  persisted (master-keyed live state); node records + playback stay unpersisted.
-  (spec §4/§5/§9.1 updated.)
-
-## Persisted following — rejoin on return (user round)
-
-**D45 — a node persists its `following` and rejoins its previous group on
-return; self-heal clears it; grace is the decision window**. A node that
-temporarily disappears (reboot, crash, brief drop) should come back into the
-group it was in, without operator action.
-
-- **Persist (amends D1)**. `node.json` gains `following` — a 32-hex node id, or
-  `""` for solo (default). Presence-aware decode like `volume`; an absent or
-  malformed value loads as `""` (warn + treat as empty, never fatal). The config
-  `Store` gains `SetFollowing(id.ID)` following the `SetVolume` pattern (`id.Zero`
-  persists as `""`); `Config` exposes the loaded value as `id.ID`.
-- **Boot restore**. `cluster.Config` gains `InitialFollowing id.ID`; `cluster.New`
-  seeds this node's own record's `Following` with it — gossiped from version 1,
-  exactly as if `SetFollowing` had been called. K passes `cfg.Following`. The
-  EXISTING machinery does the rest: if the old master is alive + a master,
-  `DeriveGroups` re-forms the group; if it is dead/unknown, the §5 self-heal grace
-  fires and resets the node to solo. There is **no new rejoin logic**.
-- **Persist on change**. `group.Params` gains `PersistFollowing func(id.ID)`
-  (nil-safe no-op; K wires it to the config store's `SetFollowing`). The engine
-  calls it at EVERY site it writes `cluster.SetFollowing`: `Follow`, `Unfollow`,
-  takeover-directed follow, and the self-heal reset — via one internal
-  `setFollowing` helper that does both. Logged at debug.
-- **Grace is the decision window**. The self-heal `healAt` arms when the engine
-  first OBSERVES the dangling follow (the first stale reconcile), not at process
-  start, so slow gossip convergence cannot insta-clear a follow that is merely
-  still propagating. Verified: `heal.go` already keys off `mv.stale` per reconcile
-  and arms `now + Grace` only on the first stale tick — no change needed.
-
-**D46 — wire protocol v1: magic `0xE5` is the version marker; receivers ignore
-unknown packet types; an incompatible revision changes the magic**. This makes
-the wire format forward-compatible (new optional types are additive) and lets a
-protocol-minimal, receive-only client (`docs/DUMB-CLIENT.md`, `cmd/dumbclient`)
-interoperate without cluster membership. (§8.4)
-
-## Editable + persisted group settings (user round)
-
-**D47 — group settings are editable per group in the UI and persist with the
-group's master** (amends D41; re-introduces settings persistence that D44 had
-removed, now keyed correctly by self).
-
-- **UI**. The group card replaces the static "codec · transport · buffer" line
-  with compact inline controls: `codec` select (`pcm`/`opus`), `transport` select
-  (`udp`/`tcp`), and a `bufferMs` slider (50–500, step 25, ~250 ms debounce like
-  VolumeSlider). A change POSTs the FULL current trio with the one field applied to
-  `POST /api/group/settings`, addressed to the group's master via the proxy
-  (`base(group.master)`) — the endpoint is master-only but the proxy makes it work
-  from any viewer. Changes apply live mid-session (RECONFIG, D23). `lib/api.js`
-  `setGroupSettings(masterId, settings)`.
-
-- **Persistence**. Because the group id == the master id (D44), a master's
-  settings record is keyed by its own node id. The cluster persists ONLY the
-  self-keyed settings record (full LWW record, incl. version+writer) to
-  `cluster.json` alongside the override-names map — loaded at `New` before gossip,
-  saved debounced + on `Close`, exactly like names. A peer's settings record is
-  master-keyed live state and is NOT persisted. `SetGroupSettings` marks the table
-  dirty only when `group == self`; a gossiped settings merge marks dirty only when
-  the changed key is `self`.
-
-- **Restart-version guard (D7 for settings)**. On restart the loaded own-settings
-  record may sit below a version a peer still holds (broadcast but not yet saved
-  before the crash). `reconcileOwnSettingsVersion` (called from the delegate's
-  `MergeRemoteState`, mirroring the node-record `reconcileOwnVersion`) jumps our
-  local counter above any peer copy with version ≥ ours, re-broadcasts, and
-  re-persists — so the next local `SetGroupSettings` wins.
-
-- **Effect**. A master that restarts against the same data dir re-forms its (solo)
-  group with its last codec/transport/bufferMs instead of cluster defaults
-  (spec §4/§8.4 updated). (C/H/I/J)
-
-**D48 — acoustic auto-calibration is implemented (docs/calibrate.md)**: a mic
-node measures every group member's output delay and writes their `outputDelayMs`
-(D36). Key implementation decisions:
-
-- **Relative alignment, not absolute.** The solver only needs pairwise delay
-  DIFFERENCES (the common `K` in `outputDelayMs[n] = D[n] + K` absorbs any shared
-  offset, §5). So each node's sweep arrival is stamped in master-clock time and
-  reduced to a loop-phase delay referenced to the first measured node, then
-  unwrapped into one period. This makes the **constant mic-capture-pipe latency
-  cancel** (same mic, fresh capture per node) — we never need to know the
-  reference's absolute emit pts, only that the loop is periodic in master time.
-
-- **The reference is a source scheme, not a media file.** `calibrate:` is a new
-  `audio.Open` scheme (`internal/audio/calibrate_src.go`) that loops the windowed
-  log-sweep forever (live-paced, never EOF). The master streams it like any
-  source via `group.Play("calibrate:")`. The signal is generated from the SAME
-  `calibrate.NewReference(default)` the estimator correlates against — that
-  identity is what makes the matched filter exact.
-
-- **Pure core, injected edges.** `internal/calibrate` is I/O-free: sweep gen,
-  matched-filter estimator (energy-normalised, parabolic sub-sample, per-loop
-  median + peak-to-sidelobe confidence), §5 solve, and a `Run` state machine over
-  `Controller`/`Recorder` interfaces. The API layer wires the real
-  `Controller` (drives `/api/play|stop` on the master and `PATCH /api/node`
-  volume/delay on each member through a peer HTTP client — reusing existing
-  endpoints, no new per-node mutation logic) and `Recorder` (the `input:` source
-  + clock follower). Fully unit-tested with a synthetic rig.
-
-- **API/UI.** `POST /api/calibrate` starts a run on the mic node (needs the
-  `input` capability, a synced clock, and ≥2 alive members), `GET /api/calibrate`
-  reports live progress + the result table; the UI polls it. The group card's
-  Advanced settings carries a microphone selector (group members with `input`)
-  and a Calibrate button. Run is all-or-nothing on the delay set, always restores
-  pre-run volumes and stops the reference on exit, and low-confidence nodes keep
-  their prior delay (§7).
-
-- **Known limit (deferred to on-hardware iteration).** The mic timeline anchors
-  on the first captured frame's clock stamp; the `input:` live reader buffers, so
-  absolute capture latency is approximate — fine because it cancels in the
-  relative solve, but the per-node envelope-ramp attribution (§4) and a smaller
-  capture buffer are follow-ups for very noisy rooms. (D/E/F/I/J)
 
 ## Confirmed as designed (no change)
 
-- C's two-mutex exception (doc + liveness) with a never-hold-both rule. (C)
-- D imports only the PCM constants from `package stream`. (D)
-- Sink `Push` is fire-and-forget; no backpressure/close signal to G. (E/G)
-- G's transport `Counters` and E's `SinkStats` stay separate; `/api/status`
-  surfaces sink stats (D19); transport counters may be added later. (G/I)
-- `/api/status` carries only `groupId`/`role`; the full group object comes
-  from `/api/cluster`. (I)
-- Loopback e2e: nodes on 127.0.0.1 have empty `InterfaceCIDRs`; reachability
-  comes from `--join` seeds + observed-IP reporting (memberlist + HTTP traffic
-  both feed `Observe`). (K)
-- K reconciles exact constructor names at integration (the fix-loop). (K)
+- The cluster two-mutex exception (doc + liveness) with a never-hold-both rule.
+- The decoder imports only the PCM constants from `package stream`.
+- Sink `Push` is fire-and-forget; no backpressure/close signal upstream.
+- Transport `Counters` and `SinkStats` stay separate; `/api/status` surfaces sink
+  stats; transport counters may be added later.
+- Loopback e2e: nodes on 127.0.0.1 have empty `InterfaceCIDRs`; reachability comes
+  from `--join` seeds + observed-IP reporting (memberlist + HTTP traffic both feed
+  `Observe`).
 
-**D38 — bring-up aids (user round)**: `POST /api/tone` plays a 1 s 440 Hz
-tone through the node's local output backend (`Sink.TestTone`; 409 while a
-session or tone is active; respects the live volume) — surfaced as a
-"test tone" button per node in the UI, proxy-able. And: the initial UDP
-HELLO may be lost, so until the FIRST frame arrives the subscriber re-HELLOs
-(prime-me) 3× at 500 ms before falling back to the 5 s keepalive cadence.
-(E/G/I/J)
+---
+
+## Index — D1–D65
+
+Every decision number, with its home section or what superseded it.
+
+| # | Where |
+|---|-------|
+| D1 | §1 Identity |
+| D2 | §1 Identity |
+| D3 | §5 Codecs & loading |
+| D4 | §2 Cluster & grouping |
+| D5 | §2 Cluster & grouping (group-id keying superseded by **D44**) |
+| D6 | §2 Cluster & grouping |
+| D7 | §2 Cluster & grouping |
+| D8 | §2 Cluster & grouping |
+| D9 | §4 Audio pipeline |
+| D10 | §3 Clock & sync |
+| D11 | §3 Clock & sync |
+| D12 | §4 Audio pipeline |
+| D13 | §4 Audio pipeline |
+| D14 | §2 Cluster & grouping |
+| D15 | §10 API & web |
+| D16 | §10 API & web |
+| D17 | §10 API & web (stream-endpoint half superseded by **D22**) |
+| D18 | superseded by **D22** — no `Resolver`/`SetEndpoints` seam; subscribers dial SOURCE_PORT |
+| D19 | §10 API & web |
+| D20 | §2 Cluster & grouping |
+| D21 | superseded by **D23** — bufferMs/settings apply live, not fixed per session |
+| D22 | §4 Audio pipeline |
+| D23 | §4 Audio pipeline |
+| D24 | §4 Audio pipeline |
+| D25 | §4 Audio pipeline (servo gain retuned by **D64**) |
+| D26 | §4 Audio pipeline |
+| D27 | §4 Audio pipeline |
+| D28 | §4 Audio pipeline |
+| D29 | §4 Audio pipeline |
+| D30 | §4 Audio pipeline (folded into D26) |
+| D31 | §4 Audio pipeline / §10 |
+| D32 | §5 Codecs & loading |
+| D33 | §5 Codecs & loading (incl. negotiation + late-join amendments) |
+| D34 | §4 Audio pipeline |
+| D35 | §6 Per-node controls |
+| D36 | §6 Per-node controls |
+| D37 | §6 Per-node controls |
+| D38 | §6 Per-node controls |
+| D39 | §6 Per-node controls |
+| D40 | §6 Per-node controls |
+| D41 | §1 Identity (narrowed by **D44**, amended by **D47**) |
+| D42 | §5 Codecs & loading |
+| D43 | superseded by **D44** — the playback-record re-point was removed (group id = master id makes it moot) |
+| D44 | §2 Cluster & grouping |
+| D45 | §2 Cluster & grouping |
+| D46 | §9 Playback role split |
+| D47 | §1 Identity |
+| D48 | §8 Acoustic calibration |
+| D49 | §9 Playback role split |
+| D50 | §9 Playback role split |
+| D51 | §9 Playback role split |
+| D52 | §9 Playback role split |
+| D53 | §3 Clock & sync |
+| D54 | §9 Playback role split |
+| D55 | §9 Playback role split |
+| D56 | §9 Playback role split / §10 |
+| D57 | §9 Playback role split |
+| D58 | §9 Playback role split |
+| D59 | §9 Playback role split |
+| D60 | §9 Playback role split |
+| D61 | §9 Playback role split |
+| D62 | §9 Playback role split |
+| D63 | §7 Device latency (constant-subtraction reverted by **D64**; telemetry survives) |
+| D63a | §9 Playback role split |
+| D64 | §7 Device latency |
+| D65 | §7 Device latency |

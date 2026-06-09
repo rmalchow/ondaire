@@ -200,9 +200,37 @@ func (f *Follower) SetMaster(dst netip.AddrPort, gen uint32) {
 	}
 
 	// Don't wait for the next 1 Hz tick: a freshly (re-)pointed follower should
-	// sync ASAP — playout is gated on it.
+	// reach CONFIDENCE ASAP — playout is gated on it. A single probe only gives one
+	// sample (skewable by one bad reply); a short burst fills the best-RTT window in
+	// a few hundred ms so the first played frame is phase-accurate.
 	if !sameEndpoint {
-		go f.probe()
+		go f.burstProbe()
+	}
+}
+
+// coldStartBurst probes are fired back-to-back (then the 1 Hz loop takes over) on a
+// fresh (re-)point so the estimator reaches confidentSamples within a few hundred
+// ms rather than confidentSamples seconds at 1 Hz. Sending more than the bar lets a
+// couple of lost/late replies be tolerated.
+const (
+	coldStartBurst   = 8
+	coldStartSpacing = 40 * time.Millisecond
+)
+
+// burstProbe fires coldStartBurst probes spaced coldStartSpacing apart, then
+// returns (the 1 Hz loop continues steady-state probing). Own goroutine; stops
+// promptly on Close.
+func (f *Follower) burstProbe() {
+	for i := 0; i < coldStartBurst; i++ {
+		f.probe()
+		if i == coldStartBurst-1 {
+			return
+		}
+		select {
+		case <-f.done:
+			return
+		case <-time.After(coldStartSpacing):
+		}
 	}
 }
 
@@ -231,6 +259,10 @@ func (f *Follower) loop() {
 			return
 		case <-t.C:
 			f.probe()
+			st := f.Stats()
+			f.log.Debug("stats",
+				"synced", st.Synced, "offsetUs", st.OffsetNs/1000, "rttUs", st.RTTNs/1000,
+				"samples", st.Samples, "gen", st.Gen, "probes", st.Probes, "replies", st.Replies)
 		}
 	}
 }
@@ -291,12 +323,15 @@ func (f *Follower) handleReply(pkt []byte, from netip.AddrPort) {
 	f.est.add(newSample(t1, t2, t3, t4))
 	f.replies++
 
-	// First-sync transition (unsynced → synced): log offset + best RTT once.
+	// First-sync transition (unsynced → CONFIDENT): log offset + best RTT once.
+	// Gated on offset() (confidentSamples), matching the playout/pts gate, so
+	// "sync acquired" means the estimate is actually usable — not just present.
 	if !f.synced {
-		if off, rtt, ok := f.est.estimate(); ok {
+		if _, ok := f.est.offset(); ok {
+			off, rtt, _ := f.est.estimate()
 			f.synced = true
 			f.log.Info("clock sync acquired", "gen", f.gen, "master", f.dst.String(),
-				"offsetNs", off, "rttNs", rtt)
+				"offsetNs", off, "rttNs", rtt, "samples", f.est.len())
 		}
 	}
 }

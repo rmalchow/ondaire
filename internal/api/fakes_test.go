@@ -24,6 +24,8 @@ type fakeCluster struct {
 	setDelay    []int
 	setDevice   []string
 	setDisabled [][]string
+	assigned    [][2]id.ID
+	patched     []id.ID
 }
 
 type observeCall struct {
@@ -90,6 +92,20 @@ func (f *fakeCluster) SetDisabled(d []string) {
 	f.mu.Lock()
 	f.setDisabled = append(f.setDisabled, append([]string(nil), d...))
 	f.mu.Unlock()
+}
+
+func (f *fakeCluster) AssignPlaybackNode(node, target id.ID) bool {
+	f.mu.Lock()
+	f.assigned = append(f.assigned, [2]id.ID{node, target})
+	f.mu.Unlock()
+	return true
+}
+
+func (f *fakeCluster) PatchPlaybackNode(node id.ID, name *string, volume *float64, delayMs *int, following *id.ID) bool {
+	f.mu.Lock()
+	f.patched = append(f.patched, node)
+	f.mu.Unlock()
+	return true
 }
 
 func (f *fakeCluster) Observe(peer id.ID, ip netip.Addr) {

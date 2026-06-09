@@ -16,9 +16,9 @@
 </script>
 
 <section class="section">
-  <h2>Groups</h2>
+  <h2>Rooms</h2>
   {#if groups.length === 0}
-    <div class="empty">No groups yet.</div>
+    <div class="empty">No rooms yet.</div>
   {:else}
     {#each groups as group (group.id)}
       <GroupCard

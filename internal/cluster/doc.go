@@ -43,6 +43,13 @@ type NodeRecord struct {
 	Observed      map[id.ID]obsEntry       `json:"observed"`  // peerID -> {ip,lastSeen}
 	Version       uint64                   `json:"version"`
 	UpdatedAt     int64                    `json:"updatedAt"` // unix seconds, LWW timestamp
+
+	// PlaybackNode marks a non-gossiping, wire-driven playback node (D50/D59):
+	// this record is a PROXY injected by a discovering master from the node's mDNS
+	// advert, not self-owned. ControlPort is where the master sends control-plane
+	// commands (D58). Normal gossiping nodes leave these zero.
+	PlaybackNode bool `json:"playbackNode,omitempty"`
+	ControlPort  int  `json:"controlPort,omitempty"`
 }
 
 // obsEntry is one observed-IP record inside a NodeRecord (§3.1).

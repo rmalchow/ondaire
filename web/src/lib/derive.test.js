@@ -3,8 +3,7 @@ import {
   ZERO_ID,
   nodeById,
   nameOf,
-  isMaster,
-  masterCandidates,
+  isIdle,
   joinTargets,
   groupLabel,
   groupNameIsDerived,
@@ -18,11 +17,12 @@ const B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const C = "cccccccccccccccccccccccccccccccc";
 
 function snap() {
+  const caps = { capabilities: { playback: true } };
   return {
     nodes: [
-      { id: A, name: "alice", alive: true, following: ZERO_ID },
-      { id: B, name: "bob", alive: true, following: A },
-      { id: C, name: "carol", alive: true, following: ZERO_ID },
+      { id: A, name: "alice", alive: true, following: ZERO_ID, ...caps },
+      { id: B, name: "bob", alive: true, following: A, ...caps },
+      { id: C, name: "carol", alive: true, following: ZERO_ID, ...caps },
     ],
     groups: [],
   };
@@ -47,40 +47,30 @@ describe("nameOf", () => {
   });
 });
 
-describe("isMaster", () => {
-  it("true iff following === ZERO_ID", () => {
-    expect(isMaster({ following: ZERO_ID })).toBe(true);
-    expect(isMaster({ following: A })).toBe(false);
-    expect(isMaster(undefined)).toBe(false);
-  });
-});
-
-describe("masterCandidates", () => {
-  it("returns all member ids", () => {
-    expect(masterCandidates({ members: [A, B] })).toEqual([A, B]);
-    expect(masterCandidates({})).toEqual([]);
+describe("isIdle", () => {
+  it("true iff following === ZERO_ID (player plays nothing)", () => {
+    expect(isIdle({ following: ZERO_ID })).toBe(true);
+    expect(isIdle({ following: A })).toBe(false);
+    expect(isIdle(undefined)).toBe(false);
   });
 });
 
 describe("joinTargets", () => {
-  it("excludes self, current master, non-masters, dead nodes", () => {
+  it("any other alive node (a zone), minus self and current target", () => {
     const s = snap();
-    // bob follows alice: targets are other alive masters except alice (his master)
-    const bob = nodeById(s, B);
-    const t = joinTargets(s, bob).map((n) => n.id);
-    expect(t).toEqual([C]); // not self(B), not master(A), carol is master
+    const bob = nodeById(s, B); // bob's target is A → exclude self(B) + A
+    expect(joinTargets(s, bob).map((n) => n.id)).toEqual([C]);
   });
-  it("excludes dead masters", () => {
+  it("excludes dead nodes", () => {
     const s = snap();
     s.nodes[2].alive = false; // carol dead
     const bob = nodeById(s, B);
     expect(joinTargets(s, bob)).toEqual([]);
   });
-  it("alice (solo master) can join bob? bob is a follower → only carol", () => {
+  it("includes followers as zones now (every node masters its own group)", () => {
     const s = snap();
-    const alice = nodeById(s, A);
-    const t = joinTargets(s, alice).map((n) => n.id);
-    expect(t).toEqual([C]);
+    const alice = nodeById(s, A); // target ZERO → exclude only self(A)
+    expect(joinTargets(s, alice).map((n) => n.id)).toEqual([B, C]);
   });
 });
 
@@ -113,27 +103,33 @@ describe("selfNode", () => {
 });
 
 describe("deriveRole", () => {
-  it("solo: self masters a one-member group", () => {
-    const s = { nodes: [], groups: [{ master: A, members: [A] }] };
-    expect(deriveRole(s, A)).toBe("solo");
+  // self's role follows its own `following` (the player target), D49+.
+  const view = (following, groups) => ({
+    nodes: [{ id: A, following }],
+    groups: groups || [],
   });
-  it("master: self masters a multi-member group", () => {
-    const s = { nodes: [], groups: [{ master: A, members: [A, B] }] };
-    expect(deriveRole(s, A)).toBe("master");
+  it("idle when following Zero (player plays nothing)", () => {
+    expect(deriveRole(view(ZERO_ID), A)).toBe("idle");
   });
-  it("follower: self is a member but not the master", () => {
-    const s = { nodes: [], groups: [{ master: A, members: [A, B] }] };
+  it("solo when playing its own group alone", () => {
+    expect(deriveRole(view(A, [{ master: A, members: [A] }]), A)).toBe("solo");
+  });
+  it("master when its own group has other players", () => {
+    expect(deriveRole(view(A, [{ master: A, members: [A, B] }]), A)).toBe(
+      "master",
+    );
+  });
+  it("follower when playing another node's group", () => {
+    const s = {
+      nodes: [{ id: B, following: A }],
+      groups: [{ master: A, members: [A, B] }],
+    };
     expect(deriveRole(s, B)).toBe("follower");
   });
-  it("falls back when self isn't in any group", () => {
-    const s = { nodes: [], groups: [{ master: A, members: [A, B] }] };
-    expect(deriveRole(s, C, "solo")).toBe("solo");
-    expect(deriveRole(s, C, "master")).toBe("master"); // honours given fallback
-  });
-  it("falls back to 'solo' on empty/unknown inputs", () => {
-    expect(deriveRole(undefined, A)).toBe("solo");
-    expect(deriveRole({ groups: [] }, "")).toBe("solo");
-    expect(deriveRole({ groups: [] }, A)).toBe("solo");
+  it("falls back when self isn't resolvable", () => {
+    expect(deriveRole({ nodes: [], groups: [] }, C, "solo")).toBe("solo");
+    expect(deriveRole(undefined, A)).toBe("idle");
+    expect(deriveRole({ nodes: [] }, "")).toBe("idle");
   });
 });
 
@@ -149,6 +145,12 @@ describe("addTargets", () => {
     s.nodes[2].alive = false; // carol dead
     const group = { id: A, master: A, members: [A, B] };
     expect(addTargets(s, group)).toEqual([]);
+  });
+  it("excludes nodes that can't play (e.g. --role master, playback:false)", () => {
+    const s = snap();
+    s.nodes[2].capabilities = { playback: false }; // carol is a no-playback master
+    const group = { id: A, master: A, members: [A, B] };
+    expect(addTargets(s, group)).toEqual([]); // carol no longer offered as a player
   });
   it("empty for null inputs", () => {
     expect(addTargets(undefined, { members: [] })).toEqual([]);

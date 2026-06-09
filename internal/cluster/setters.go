@@ -4,6 +4,7 @@ import (
 	"net/netip"
 
 	"ensemble/internal/contracts"
+	"ensemble/internal/discovery"
 	"ensemble/internal/id"
 )
 
@@ -282,6 +283,146 @@ func (c *Cluster) Observe(peer id.ID, ip netip.Addr) {
 	snap := cloneNode(r)
 	c.mu.Unlock()
 	c.broadcastOwn(snap)
+}
+
+// UpsertPlaybackNode injects/updates the proxied record for a discovered,
+// non-gossiping playback node (D50/D59), from its mDNS advert. It is content-gated:
+// the version bumps only when the advertised identity (control port, address,
+// codecs) changes, so re-discovery on every mDNS hit does not churn. The
+// operator-set Following (assignment, D59) and Name are preserved across updates.
+//
+// Slice-A scope: the proxied record is LOCAL to this master (not gossiped) — every
+// master sees the same LAN mDNS, so they converge independently, and this sidesteps
+// the multi-master proxy-version conflict until cross-master assignment lands.
+// UpdatedAt is always refreshed so the record stays fresh against purge.
+func (c *Cluster) UpsertPlaybackNode(p discovery.Peer) {
+	if p.ID == c.self || p.ControlPort == 0 || !p.Addr.IsValid() {
+		return
+	}
+	cidr := p.Addr.String() + "/32"
+	if p.Addr.Is6() {
+		cidr = p.Addr.String() + "/128"
+	}
+
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	now := c.clock().Unix()
+	cur := c.doc.Nodes[p.ID]
+	rec := &NodeRecord{
+		ID:           p.ID,
+		PlaybackNode: true,
+		ControlPort:  p.ControlPort,
+		Addrs:        []string{cidr},
+		Name:         p.Name, // advertised name (the node's node.json) — first-discovery default
+		Caps:         contracts.Capabilities{Playback: true, Codecs: append([]string(nil), p.Caps.Codecs...)},
+	}
+	if cur != nil {
+		rec.Following = cur.Following // preserve operator assignment (D59)
+		rec.Name = cur.Name           // preserve a master-set label across re-discovery
+		rec.Volume = cur.Volume
+		rec.OutputDelayMs = cur.OutputDelayMs
+		rec.Version = cur.Version
+		if !playbackIdentityChanged(cur, rec) {
+			cur.UpdatedAt = now // freshen against purge; no version bump, no notify
+			c.mu.Unlock()
+			return
+		}
+	}
+	rec.Version++
+	rec.UpdatedAt = now
+	c.doc.Nodes[p.ID] = rec
+	c.mu.Unlock()
+
+	c.log.Info("playback node discovered", "id", p.ID, "control", p.ControlPort, "addr", p.Addr.String())
+	c.notify()
+}
+
+// AssignPlaybackNode sets (target != Zero) or clears (Zero) the group assignment of
+// a non-gossiping playback node (D59): it writes the proxied record's Following,
+// which the driver (drive) and DeriveGroups both consume. Returns false (no-op) if
+// the node is unknown, is NOT a playback node, or already has this assignment — a
+// gossiping node owns its own Following and must use the follow API instead. Like
+// the proxied record itself (Slice A), this stays local to the master.
+func (c *Cluster) AssignPlaybackNode(node, target id.ID) bool {
+	c.mu.Lock()
+	r := c.doc.Nodes[node]
+	if c.closed || r == nil || !r.PlaybackNode || r.Following == target {
+		c.mu.Unlock()
+		return false
+	}
+	r.Following = target
+	r.Version++
+	r.UpdatedAt = c.clock().Unix()
+	c.mu.Unlock()
+	c.log.Info("playback node assignment", "id", node, "target", target)
+	c.notify()
+	return true
+}
+
+// TouchPlaybackNode refreshes a proxied playback node's liveness (UpdatedAt) with no
+// version bump or notify — called when the master receives the node's STATUS (D60).
+// An actively-driven node sends STATUS ~1 Hz, so it stays alive even if its mDNS
+// re-announce lapses past the freshness TTL. No-op for unknown / non-playback ids.
+func (c *Cluster) TouchPlaybackNode(node id.ID) {
+	c.mu.Lock()
+	if r := c.doc.Nodes[node]; r != nil && r.PlaybackNode {
+		r.UpdatedAt = c.clock().Unix()
+	}
+	c.mu.Unlock()
+}
+
+// PatchPlaybackNode mutates a proxied (non-gossiping) playback node's record
+// master-side (D59): any of name / volume / output-delay / group assignment. A
+// playback node has no HTTP API (D56), so the master owns these fields; the control
+// driver pushes volume/delay (and ATTACH for the assignment) to the node over the
+// control plane. Returns false only when the node is unknown or not a playback node;
+// an in-range no-op still returns true. Stays local to the master (Slice A).
+func (c *Cluster) PatchPlaybackNode(node id.ID, name *string, volume *float64, delayMs *int, following *id.ID) bool {
+	c.mu.Lock()
+	r := c.doc.Nodes[node]
+	if c.closed || r == nil || !r.PlaybackNode {
+		c.mu.Unlock()
+		return false
+	}
+	changed := false
+	if name != nil && r.Name != *name {
+		r.Name = *name
+		changed = true
+	}
+	if volume != nil && r.Volume != *volume {
+		r.Volume = *volume
+		changed = true
+	}
+	if delayMs != nil && r.OutputDelayMs != *delayMs {
+		r.OutputDelayMs = *delayMs
+		changed = true
+	}
+	if following != nil && r.Following != *following {
+		r.Following = *following
+		changed = true
+	}
+	if changed {
+		r.Version++
+		r.UpdatedAt = c.clock().Unix()
+	}
+	c.mu.Unlock()
+	if changed {
+		c.log.Info("playback node patched", "id", node)
+		c.notify()
+	}
+	return true
+}
+
+// playbackIdentityChanged reports whether the advertised identity of a proxied
+// playback node differs (control port, address, codecs). Following/Name/Version are
+// proxy bookkeeping, not advertised identity, so they are excluded.
+func playbackIdentityChanged(a, b *NodeRecord) bool {
+	return a.ControlPort != b.ControlPort ||
+		!equalStrings(a.Addrs, b.Addrs) ||
+		!equalStrings(a.Caps.Codecs, b.Caps.Codecs)
 }
 
 func equalStrings(a, b []string) bool {

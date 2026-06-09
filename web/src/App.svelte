@@ -85,10 +85,11 @@
   </span>
   <span class="spacer"></span>
   {#if stale}<span class="muted small">stale</span>{/if}
+  <!-- Rams: the dot already communicates connection state (title on hover); the
+       adjacent text was redundant. -->
   <span class="dot {cluster.status}" title={cluster.status}></span>
-  <span class="muted small">{cluster.status}</span>
   {#if route === "nodes"}
-    <a class="iconlink" href="#/" title="Back to groups" aria-label="Back to groups">←</a>
+    <a class="iconlink" href="#/" title="Back to rooms" aria-label="Back to rooms">←</a>
   {:else}
     <a class="iconlink" href="#/nodes" title="Nodes" aria-label="Nodes">⚙</a>
   {/if}

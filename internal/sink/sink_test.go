@@ -274,6 +274,14 @@ func TestPlayoutBufferMsLead(t *testing.T) {
 	}
 }
 
+func TestPlayoutNoLatencyReporterIsZero(t *testing.T) {
+	clk := newFakeClock(true)
+	p := newTestPlayout(t, clk, &recBackend{}, nil)
+	if p.deviceLatencyNs != 0 {
+		t.Fatalf("deviceLatencyNs = %d, want 0 for a backend without LatencyReporter", p.deviceLatencyNs)
+	}
+}
+
 func TestPlayoutSetGainHalves(t *testing.T) {
 	clk := newFakeClock(true)
 	be := &recBackend{}
@@ -677,5 +685,38 @@ func TestPlayoutSetDelayOffsetNilRestart(t *testing.T) {
 	pushRun(p, clk, 1, []uint64{5, 6})
 	if !drainUntil(t, func() bool { return be.count() >= 2 }) {
 		t.Fatal("did not re-prime after delay change")
+	}
+}
+
+// D65: SetEqualizeDelay re-anchors on a real change, dedups an unchanged re-assert
+// (the master pushes it every heartbeat, and re-anchoring each time is audible), and
+// clamps negatives to zero (equalization only ever delays).
+func TestPlayoutSetEqualizeDelay(t *testing.T) {
+	clk := newFakeClock(true)
+	be := &recBackend{}
+	var restarts int
+	var rmu sync.Mutex
+	restart := func() { rmu.Lock(); restarts++; rmu.Unlock() }
+	p := newTestPlayout(t, clk, be, restart)
+	t.Cleanup(func() { p.Close() })
+	p.Reset(1)
+
+	get := func() int { rmu.Lock(); defer rmu.Unlock(); return restarts }
+
+	p.SetEqualizeDelay(int64(70 * time.Millisecond)) // change → re-anchor
+	if got := get(); got != 1 {
+		t.Fatalf("restarts after first set = %d, want 1", got)
+	}
+	p.SetEqualizeDelay(int64(70 * time.Millisecond)) // unchanged → dedup
+	if got := get(); got != 1 {
+		t.Fatalf("restarts after identical re-assert = %d, want 1 (must dedup)", got)
+	}
+	p.SetEqualizeDelay(-5_000_000) // negative clamps to 0 → a change from 70 → re-anchor
+	if got := get(); got != 2 {
+		t.Fatalf("restarts after clamp-to-zero = %d, want 2", got)
+	}
+	p.SetEqualizeDelay(0) // already 0 → dedup
+	if got := get(); got != 2 {
+		t.Fatalf("restarts after redundant zero = %d, want 2", got)
 	}
 }

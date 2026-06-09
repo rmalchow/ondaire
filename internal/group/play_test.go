@@ -23,12 +23,21 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool, msg string) {
 	t.Fatalf("timeout waiting for %s", msg)
 }
 
-func TestPlayRejectsFollower(t *testing.T) {
+// New model: a node ALWAYS masters its own group, so it can Play its own group
+// even while its player follows another master's group (crosswise).
+func TestPlayOwnGroupWhilePlayerElsewhere(t *testing.T) {
 	master, self := idN(1), idN(2)
 	r := newRig(self, 5, false)
 	r.cl.setSnap(masterSnap(master, defaultSettings(), self))
-	if err := r.e.Play("song.wav"); !errors.Is(err, ErrNotMaster) {
-		t.Fatalf("err = %v, want ErrNotMaster", err)
+	if err := r.e.Play("song.wav"); err != nil {
+		t.Fatalf("Play own group should succeed, got %v", err)
+	}
+	defer r.e.Close()
+	r.e.mu.Lock()
+	sess := r.e.sess
+	r.e.mu.Unlock()
+	if sess == nil || sess.groupID != self {
+		t.Fatalf("Play should source the node's OWN group (self); sess=%+v", sess)
 	}
 }
 

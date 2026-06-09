@@ -21,8 +21,10 @@ const (
 )
 
 // Packet types. 0x0x/0x1x are multiplexed on the member's STREAM_PORT UDP
-// socket (§8.4); 0x2x are the stream-control types on the master's
-// SOURCE_PORT (§8.7).
+// socket (§8.4); 0x2x are the data-plane stream-control types on the master's
+// SOURCE_PORT (§8.7); 0x3x/0x40 are the v2 control plane (D49–D58,
+// DUMB-CLIENT.md §6): master→playback commands on the playback node's
+// CONTROL_PORT, and STATUS back to the master's SOURCE_PORT.
 const (
 	TypeAudio    byte = 0x01 // audio frame:  header + PCM/Opus payload
 	TypeFEC      byte = 0x02 // XOR parity:   header + parity payload
@@ -33,6 +35,16 @@ const (
 	TypeBye      byte = 0x21 // sub→src "leaving, stop sending" (G)
 	TypeRestart  byte = 0x22 // sub→src "got lost, re-prime and resume" (G)
 	TypeReconfig byte = 0x23 // src→sub "gen/settings changed: resubscribe"; payload flag: stop (G)
+
+	// v2 control plane (master→playback on CONTROL_PORT; idempotent soft-state, D58).
+	TypeAttach    byte = 0x30 // master→pb "join this stream"; payload AttachPayload (control.go)
+	TypeDetach    byte = 0x31 // master→pb "leave, go idle"; no payload
+	TypeSetVol    byte = 0x32 // master→pb volume + mute; payload SetVolPayload
+	TypeSetDelay  byte = 0x33 // master→pb output-delay ms (signed); payload SetDelayPayload
+	TypeSetCap    byte = 0x34 // master→pb enable/disable a capability; payload SetCapPayload
+	TypeSetEq     byte = 0x35 // master→pb cross-room device-buffer equalization delay ms (unsigned, added); payload SetEqualizePayload (D65)
+	TypeStatus    byte = 0x40 // pb→master telemetry; payload StatusPayload
+	TypeStatusReq byte = 0x41 // master→pb liveness poll "send STATUS now"; no payload (D60)
 )
 
 // Control payload flags (0x2x, 1 byte).

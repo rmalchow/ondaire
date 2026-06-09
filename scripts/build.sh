@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build ensemble for linux/amd64 + linux/arm64 into bin/, plus a host-arch
+# Build ensemble for linux/amd64 + arm64 + armv6 into bin/, plus a host-arch
 # ./ensemble for local runs (dev2.sh / e2e.sh). Pure Go (CGO_ENABLED=0), so
 # cross-compiling needs no toolchain. The committed web/dist placeholder makes
 # go:embed compile without node; pass --ui to (re)build and embed the SPA.
-#   ./scripts/build.sh          -> bin/ensemble-linux-{amd64,arm64} + ./ensemble
+#   ./scripts/build.sh          -> bin/ensemble-linux-{amd64,arm64,armv6} + ./ensemble
 #   ./scripts/build.sh --ui     -> SPA build first, then the same
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -16,10 +16,14 @@ VER="${VERSION:-$(git describe --always --dirty 2>/dev/null || echo dev)}"
 LDFLAGS="-s -w -X main.version=$VER"
 
 mkdir -p bin
-for arch in amd64 arm64; do
-  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
-    go build -trimpath -ldflags "$LDFLAGS" -o "bin/ensemble-linux-$arch" ./cmd/ensemble
-  echo "built bin/ensemble-linux-$arch"
+# arch matrix: "<name>:<GOARCH>:<GOARM>" (GOARM blank for non-arm). armv6 targets the
+# Pi Zero W / Pi 1 (ARM1176, ARMv6+VFPv2) — GOARM=6 is mandatory there; a GOARM=7
+# binary SIGILLs. Pure Go + purego (>=0.10 supports linux/arm), so no C toolchain.
+for spec in "amd64:amd64:" "arm64:arm64:" "armv6:arm:6"; do
+  IFS=: read -r name goarch goarm <<<"$spec"
+  CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" GOARM="$goarm" \
+    go build -trimpath -ldflags "$LDFLAGS" -o "bin/ensemble-linux-$name" ./cmd/ensemble
+  echo "built bin/ensemble-linux-$name"
 done
 
 # Host-arch convenience binary at the repo root.

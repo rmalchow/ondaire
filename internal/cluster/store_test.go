@@ -5,8 +5,19 @@ import (
 	"strings"
 	"testing"
 
+	"ensemble/internal/contracts"
 	"ensemble/internal/id"
 )
+
+// findGroup returns the derived group mastered by `master`, or nil.
+func findGroup(groups []contracts.GroupView, master id.ID) *contracts.GroupView {
+	for i := range groups {
+		if groups[i].Master == master {
+			return &groups[i]
+		}
+	}
+	return nil
+}
 
 func TestSnapshotResolvesLiveness(t *testing.T) {
 	self := id.New()
@@ -45,7 +56,12 @@ func TestSnapshotDeepCopy(t *testing.T) {
 	}
 }
 
-func TestDeriveGroupsSolo(t *testing.T) {
+// New grouping model: every alive node is ALWAYS the master of its own group
+// (1:1); `following` only places the node's PLAYER. following==Zero ⇒ idle (no
+// group); following==self ⇒ play own group; following==other ⇒ crosswise. Members
+// of a group are its PLAYERS (the master is a member only if it follows itself).
+
+func TestDeriveGroupsIdleNodeIsEmptyOwnGroup(t *testing.T) {
 	self := id.New()
 	nodes := map[id.ID]*NodeRecord{self: {ID: self, Following: id.Zero}}
 	groups := DeriveGroups(nodes, nil, nil, nil, map[id.ID]bool{}, self)
@@ -53,79 +69,72 @@ func TestDeriveGroupsSolo(t *testing.T) {
 		t.Fatalf("want 1 group, got %d", len(groups))
 	}
 	g := groups[0]
-	if g.ID != self {
-		t.Fatalf("solo group id should equal node id")
+	if g.ID != self || g.Master != self {
+		t.Fatalf("group id/master should equal node id: %+v", g)
 	}
-	if g.Master != self || len(g.Members) != 1 {
-		t.Fatalf("solo group wrong: %+v", g)
+	if len(g.Members) != 0 {
+		t.Fatalf("an idle node is its own EMPTY group; got %d members", len(g.Members))
 	}
 }
 
-func TestDeriveGroupsFollowerJoins(t *testing.T) {
+func TestDeriveGroupsPlayersJoinMaster(t *testing.T) {
 	a := id.New()
 	b := id.New()
 	nodes := map[id.ID]*NodeRecord{
-		a: {ID: a, Following: id.Zero},
-		b: {ID: b, Following: a},
+		a: {ID: a, Following: a}, // a plays its own group
+		b: {ID: b, Following: a}, // b's player joins a's group
 	}
 	alive := map[id.ID]bool{a: true, b: true}
 	groups := DeriveGroups(nodes, nil, nil, nil, alive, a)
-	if len(groups) != 1 {
-		t.Fatalf("want 1 group, got %d", len(groups))
+	// Every alive node masters its own group → 2 groups (a has [a,b]; b empty).
+	if len(groups) != 2 {
+		t.Fatalf("want 2 groups (one per master), got %d", len(groups))
 	}
-	g := groups[0]
-	if g.Master != a {
-		t.Fatalf("master should be a")
+	ga := findGroup(groups, a)
+	if ga == nil || len(ga.Members) != 2 {
+		t.Fatalf("group a should have players [a,b]: %+v", ga)
 	}
-	if len(g.Members) != 2 {
-		t.Fatalf("want 2 members, got %d", len(g.Members))
-	}
-	if g.ID != a {
-		t.Fatal("group id should be the master id (D42)")
+	if gb := findGroup(groups, b); gb == nil || len(gb.Members) != 0 {
+		t.Fatalf("group b should be empty: %+v", gb)
 	}
 }
 
-func TestDeriveGroupsDeadMasterSolo(t *testing.T) {
-	a := id.New() // dead master
-	b := id.New() // follower of dead a
+func TestDeriveGroupsDeadTargetIdle(t *testing.T) {
+	a := id.New() // dead
+	b := id.New() // b's player targets dead a → idle
 	nodes := map[id.ID]*NodeRecord{
 		a: {ID: a, Following: id.Zero},
 		b: {ID: b, Following: a},
 	}
 	alive := map[id.ID]bool{b: true} // a is dead
 	groups := DeriveGroups(nodes, nil, nil, nil, alive, b)
-	// b projected as its own solo group; a is dead so not a group.
-	if len(groups) != 1 {
-		t.Fatalf("want 1 group (b solo), got %d", len(groups))
+	if len(groups) != 1 { // only b masters a group (a is dead)
+		t.Fatalf("want 1 group, got %d", len(groups))
 	}
-	if groups[0].Master != b || groups[0].ID != b {
-		t.Fatalf("b should be projected solo: %+v", groups[0])
+	g := groups[0]
+	if g.Master != b || len(g.Members) != 0 {
+		t.Fatalf("b's player targets a dead master → idle empty group: %+v", g)
 	}
 }
 
-func TestDeriveGroupsFollowingAFollowerSolo(t *testing.T) {
-	a := id.New()  // master
-	b := id.New()  // follows a
-	cc := id.New() // follows b (a follower) → should be projected solo
+func TestDeriveGroupsCrosswise(t *testing.T) {
+	a := id.New()
+	b := id.New()
 	nodes := map[id.ID]*NodeRecord{
-		a:  {ID: a, Following: id.Zero},
-		b:  {ID: b, Following: a},
-		cc: {ID: cc, Following: b},
+		a: {ID: a, Following: b}, // a's speakers play b's stream
+		b: {ID: b, Following: a}, // b's speakers play a's stream
 	}
-	alive := map[id.ID]bool{a: true, b: true, cc: true}
+	alive := map[id.ID]bool{a: true, b: true}
 	groups := DeriveGroups(nodes, nil, nil, nil, alive, a)
-	// {a,b} group, and cc solo.
-	var ab, solo bool
-	for _, g := range groups {
-		if g.Master == a && len(g.Members) == 2 {
-			ab = true
-		}
-		if g.Master == cc && len(g.Members) == 1 {
-			solo = true
-		}
+	if len(groups) != 2 {
+		t.Fatalf("want 2 groups, got %d", len(groups))
 	}
-	if !ab || !solo {
-		t.Fatalf("expected {a,b} group + cc solo; got %+v", groups)
+	ga, gb := findGroup(groups, a), findGroup(groups, b)
+	if ga == nil || len(ga.Members) != 1 || ga.Members[0] != b {
+		t.Fatalf("group a should have player b: %+v", ga)
+	}
+	if gb == nil || len(gb.Members) != 1 || gb.Members[0] != a {
+		t.Fatalf("group b should have player a: %+v", gb)
 	}
 }
 
@@ -144,60 +153,29 @@ func TestDeriveGroupsStableOrder(t *testing.T) {
 			t.Fatal("group order not deterministic")
 		}
 	}
-	// sorted ascending
 	if len(g1) == 2 && idLess(g1[1].ID, g1[0].ID) {
 		t.Fatal("groups not sorted by id")
 	}
 }
 
-func TestDeriveGroupsJoinsNamePlaybackSettings(t *testing.T) {
+// Records (name override, playback, settings) are keyed by the MASTER/group id.
+func TestDeriveGroupsRecordsKeyedByMaster(t *testing.T) {
 	a := id.New()
-	nodes := map[id.ID]*NodeRecord{a: {ID: a, Name: "alpha", Following: id.Zero}}
-	gid := a // solo: group id == master id == node id; member XOR == node id too
-	names := map[id.ID]*GroupNameRecord{gid: {Name: "Kitchen"}}
-	playback := map[id.ID]*PlaybackRecord{gid: {State: "playing", URI: "file:s.wav"}}
-	settings := map[id.ID]*GroupSettingsRecord{gid: {Codec: "opus", Transport: "tcp", BufferMs: 200}}
-	groups := DeriveGroups(nodes, names, playback, settings, map[id.ID]bool{a: true}, a)
-	g := groups[0]
-	if g.Name != "Kitchen" {
-		t.Fatalf("name = %q", g.Name)
-	}
-	if g.NameIsDerived {
-		t.Fatal("an explicit override must not be flagged derived")
-	}
-	if g.Playback.State != "playing" || g.Playback.URI != "file:s.wav" {
-		t.Fatalf("playback = %+v", g.Playback)
-	}
-	if g.Settings.Codec != "opus" || g.Settings.BufferMs != 200 {
-		t.Fatalf("settings = %+v", g.Settings)
-	}
-}
-
-// TestDeriveGroupsIDIsMasterPlaybackSettingsKeyed verifies D42: a MULTI-member
-// group is keyed by the master id for playback + settings, while the explicit
-// name OVERRIDE is keyed by the member-set XOR.
-func TestDeriveGroupsIDIsMasterPlaybackSettingsKeyed(t *testing.T) {
-	a := id.New() // master
-	b := id.New() // follower
+	b := id.New()
 	nodes := map[id.ID]*NodeRecord{
-		a: {ID: a, Name: "alpha", Following: id.Zero},
+		a: {ID: a, Name: "alpha", Following: a},
 		b: {ID: b, Name: "bravo", Following: a},
 	}
 	alive := map[id.ID]bool{a: true, b: true}
-	xor := id.XOR(a, b)
-	names := map[id.ID]*GroupNameRecord{xor: {Name: "Den"}}        // override keyed by XOR
+	names := map[id.ID]*GroupNameRecord{a: {Name: "Den"}}          // override keyed by master id
 	playback := map[id.ID]*PlaybackRecord{a: {State: "playing"}}   // keyed by master id
 	settings := map[id.ID]*GroupSettingsRecord{a: {Codec: "opus"}} // keyed by master id
-	groups := DeriveGroups(nodes, names, playback, settings, alive, a)
-	if len(groups) != 1 {
-		t.Fatalf("want 1 group, got %d", len(groups))
-	}
-	g := groups[0]
-	if g.ID != a {
-		t.Fatalf("group id must be master id, got %s", g.ID)
+	g := findGroup(DeriveGroups(nodes, names, playback, settings, alive, a), a)
+	if g == nil || g.ID != a {
+		t.Fatalf("no group a / wrong id: %+v", g)
 	}
 	if g.Name != "Den" || g.NameIsDerived {
-		t.Fatalf("override (XOR-keyed) name not resolved: %q derived=%v", g.Name, g.NameIsDerived)
+		t.Fatalf("master-keyed override name not resolved: %q derived=%v", g.Name, g.NameIsDerived)
 	}
 	if g.Playback.State != "playing" {
 		t.Fatalf("playback (master-keyed) not resolved: %+v", g.Playback)
@@ -207,57 +185,62 @@ func TestDeriveGroupsIDIsMasterPlaybackSettingsKeyed(t *testing.T) {
 	}
 }
 
-// TestDeriveGroupsDerivedLabel verifies the server-side derived label: sorted
-// member names joined with " + ", solo = node name, " +N more" past the cap,
-// short-id fallback for a member missing from the snapshot.
+// Derived label: sorted PLAYER names joined with " + "; an empty group falls back
+// to the master's own room name.
 func TestDeriveGroupsDerivedLabel(t *testing.T) {
 	a := id.New()
 	b := id.New()
 	nodes := map[id.ID]*NodeRecord{
-		a: {ID: a, Name: "kitchen", Following: id.Zero},
+		a: {ID: a, Name: "kitchen", Following: a},
 		b: {ID: b, Name: "bedroom", Following: a},
 	}
 	alive := map[id.ID]bool{a: true, b: true}
-	groups := DeriveGroups(nodes, nil, nil, nil, alive, a)
-	g := groups[0]
-	if g.Name != "bedroom + kitchen" { // names sorted, master-independent
+	g := findGroup(DeriveGroups(nodes, nil, nil, nil, alive, a), a)
+	if g.Name != "bedroom + kitchen" { // player names, sorted
 		t.Fatalf("derived label = %q", g.Name)
 	}
 	if !g.NameIsDerived {
 		t.Fatal("derived label must be flagged NameIsDerived")
 	}
 
-	// Solo derived label == node name.
-	solo := DeriveGroups(map[id.ID]*NodeRecord{a: {ID: a, Name: "kitchen", Following: id.Zero}},
-		nil, nil, nil, map[id.ID]bool{a: true}, a)
-	if solo[0].Name != "kitchen" || !solo[0].NameIsDerived {
-		t.Fatalf("solo derived label = %q derived=%v", solo[0].Name, solo[0].NameIsDerived)
+	// A node playing its own group alone → label = its name.
+	soloNodes := map[id.ID]*NodeRecord{a: {ID: a, Name: "kitchen", Following: a}}
+	solo := findGroup(DeriveGroups(soloNodes, nil, nil, nil, map[id.ID]bool{a: true}, a), a)
+	if solo.Name != "kitchen" || !solo.NameIsDerived {
+		t.Fatalf("solo label = %q derived=%v", solo.Name, solo.NameIsDerived)
 	}
 }
 
-// TestDeriveGroupsDerivedLabelCapAndFallback exercises the " +N more" truncation
-// and the short-id fallback for a member missing from the snapshot.
+// An empty group (no players) is labelled by the master's own room name.
+func TestDeriveGroupsEmptyGroupLabelledByMaster(t *testing.T) {
+	a := id.New()
+	nodes := map[id.ID]*NodeRecord{a: {ID: a, Name: "kitchen", Following: id.Zero}}
+	g := findGroup(DeriveGroups(nodes, nil, nil, nil, map[id.ID]bool{a: true}, a), a)
+	if len(g.Members) != 0 {
+		t.Fatalf("idle node = empty group, got %d members", len(g.Members))
+	}
+	if g.Name != "kitchen" || !g.NameIsDerived {
+		t.Fatalf("empty group should be labelled by the master's name: %q", g.Name)
+	}
+}
+
+// " +N more" truncation + short-id fallback for an unnamed player.
 func TestDeriveGroupsDerivedLabelCapAndFallback(t *testing.T) {
 	master := id.New()
-	nodes := map[id.ID]*NodeRecord{master: {ID: master, Name: "m", Following: id.Zero}}
-	followers := make([]id.ID, 0, 5)
+	nodes := map[id.ID]*NodeRecord{master: {ID: master, Name: "m", Following: master}}
 	for i := 0; i < 5; i++ {
 		f := id.New()
-		followers = append(followers, f)
 		nodes[f] = &NodeRecord{ID: f, Name: "", Following: master} // empty name → short-id fallback
 	}
-	// give names to a few so the label is deterministic-ish; leave the rest empty.
-	alive := map[id.ID]bool{master: true}
-	for _, f := range followers {
-		alive[f] = true
+	alive := map[id.ID]bool{}
+	for nid := range nodes {
+		alive[nid] = true
 	}
-	groups := DeriveGroups(nodes, nil, nil, nil, alive, master)
-	g := groups[0]
-	if len(g.Members) != 6 {
+	g := findGroup(DeriveGroups(nodes, nil, nil, nil, alive, master), master)
+	if len(g.Members) != 6 { // master self-follows + 5 players
 		t.Fatalf("want 6 members, got %d", len(g.Members))
 	}
-	// 6 names → first 3 shown + " +3 more".
-	if !strings.Contains(g.Name, "+3 more") {
+	if !strings.Contains(g.Name, "+3 more") { // 6 names → first 3 + " +3 more"
 		t.Fatalf("expected truncation in label, got %q", g.Name)
 	}
 	if !g.NameIsDerived {

@@ -112,7 +112,6 @@ func TestNewRegistersAllRoutes(t *testing.T) {
 		"POST /api/follow":         false,
 		"POST /api/unfollow":       false,
 		"POST /api/group/name":     false,
-		"POST /api/group/master":   false,
 		"POST /api/play":           false,
 		"POST /api/stop":           false,
 		"POST /api/pause":          false,

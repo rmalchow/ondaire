@@ -22,6 +22,14 @@ func newSample(t1, t2, t3, t4 int64) sample {
 const (
 	windowSize = 30 // "last 30" (§7)
 	bestN      = 5  // "5 best-RTT samples" (§7)
+	// confidentSamples gates "synced". Below it the best-RTT median is too easily
+	// skewed by ONE delayed reply (common on Wi-Fi) — a hundreds-of-ms offset error
+	// that starts playout out of phase, which the rate servo then cannot fix (it
+	// corrects rate, not a fixed phase offset), so nodes start audibly apart and
+	// only crawl into sync. The cold-start probe BURST reaches this bar in a few
+	// hundred ms, so requiring it costs little startup latency but guarantees a
+	// phase-accurate first frame. Median-of-5 tolerates up to two outliers.
+	confidentSamples = 5
 )
 
 // estimator keeps the last windowSize samples and reports the median offset of
@@ -44,10 +52,15 @@ func (e *estimator) add(s sample) {
 	e.ring[len(e.ring)-1] = s
 }
 
-// offset returns the current estimate and whether it is usable.
-// ok is false until at least one sample exists (the *unsynced* gate, §7).
-// With 1..bestN samples it medians whatever it has; with more, the bestN by RTT.
+// offset returns the current estimate and whether it is CONFIDENT enough to use
+// (this is the gate for playout + pts stamping, §7). ok is false until
+// confidentSamples exist, so the best-RTT median is populated and robust to a
+// single bad early reply — even though a raw estimate technically exists sooner
+// (see estimate(), used by stats/logging).
 func (e *estimator) offset() (offsetNanos int64, ok bool) {
+	if len(e.ring) < confidentSamples {
+		return 0, false
+	}
 	off, _, ok := e.estimate()
 	return off, ok
 }

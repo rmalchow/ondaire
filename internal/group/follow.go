@@ -1,49 +1,19 @@
 package group
 
-import (
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
-)
+import "ensemble/internal/id"
 
-// follow validates target and, if valid, records SetFollowing(target) (§5.1).
-// Re-pointing (already following someone) is allowed and overwrites.
+// follow sets this node's PLAYER target (D49+ crosswise): its speakers play the
+// stream of group(target). target == self ⇒ play its own group; target == Zero ⇒
+// idle (same as Unfollow); a dead/unknown target ⇒ idle until that master appears.
+// Any id is allowed — there is no "must be a master" rule now that every node masters
+// its own group (1:1) and `following` only places the player.
 func (e *Engine) follow(target id.ID) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
 		return ErrClosed
 	}
-	snap := e.p.Cluster.Snapshot()
-	if err := validateFollowTarget(snap, e.self, target); err != nil {
-		e.log.Warn("follow rejected", "target", target.String(), "err", err)
-		return err
-	}
 	e.setFollowing(target)
-	e.log.Info("following", "target", target.String(), "reason", "user")
-	return nil
-}
-
-// validateFollowTarget enforces §5.1: target must not be self, must be a known,
-// alive node, and must itself be a master (Following == Zero).
-func validateFollowTarget(snap contracts.Snapshot, self, target id.ID) error {
-	if target == self {
-		return ErrSelfFollow
-	}
-	var tn *contracts.NodeView
-	for i := range snap.Nodes {
-		if snap.Nodes[i].ID == target {
-			tn = &snap.Nodes[i]
-			break
-		}
-	}
-	if tn == nil {
-		return ErrTargetUnknown
-	}
-	if !tn.Alive {
-		return ErrTargetDead
-	}
-	if !tn.Following.IsZero() {
-		return ErrTargetFollower
-	}
+	e.log.Info("play target set", "target", target.String(), "reason", "user")
 	return nil
 }

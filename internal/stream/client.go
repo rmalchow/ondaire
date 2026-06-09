@@ -351,6 +351,11 @@ func (s *subscription) keepaliveLoop() {
 			} else {
 				s.helloUDP(TypeHello, false)
 			}
+			c := s.ctr.snapshot()
+			s.log.Debug("stats",
+				"delivered", c.Delivered, "recovered", c.Recovered, "lost", c.Lost,
+				"duplicate", c.Duplicate, "staleGen", c.StaleGen, "fecParity", c.FECParity,
+				"restarts", c.Restarts)
 		}
 	}
 }

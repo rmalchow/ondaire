@@ -161,15 +161,17 @@ func TestFollowPropagates(t *testing.T) {
 
 	b.SetFollowing(idA)
 
+	// New model: B following A places B's PLAYER in A's group (B is a member; A is
+	// a member of its own group only if it follows itself). So A's group gains B.
 	if !eventually(t, 5*time.Second, func() bool {
 		for _, g := range a.Snapshot().Groups {
-			if g.Master == idA && len(g.Members) == 2 {
+			if g.Master == idA && len(g.Members) == 1 && g.Members[0] == idB {
 				return true
 			}
 		}
 		return false
 	}) {
-		t.Fatal("A did not see derived {A,B} group after B follows A")
+		t.Fatal("A did not see B join its group after B follows A")
 	}
 }
 

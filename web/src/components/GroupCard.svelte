@@ -8,9 +8,9 @@
   } from "../lib/derive.js";
   import {
     renameGroup,
-    follow,
+    assignToGroup,
     setGroupSettings,
-    setVolume,
+    nodeSetVolume,
   } from "../lib/api.js";
   import EditableText from "./EditableText.svelte";
   import PlaybackBar from "./PlaybackBar.svelte";
@@ -26,8 +26,9 @@
   let derived = $derived(groupNameIsDerived(group));
   let derivedLabel = $derived(groupLabel(group));
   let override = $derived(derived ? "" : group.name || "");
+  // An empty group (no players — an idle zone) serializes members as null; guard it.
   let members = $derived(
-    group.members.map((id) => nodeById(snapshot, id)).filter(Boolean),
+    (group.members || []).map((id) => nodeById(snapshot, id)).filter(Boolean),
   );
   let settings = $derived(group.settings || {});
   let codec = $derived(settings.codec ?? "opus");
@@ -115,7 +116,7 @@
       const nv = clamp01(factor != null ? base * factor : target);
       if (gvLast.get(m.id) === nv) continue;
       gvLast.set(m.id, nv);
-      setVolume(m.id, nv).catch(() => gvLast.delete(m.id));
+      nodeSetVolume(m, nv).catch(() => gvLast.delete(m.id));
     }
   }
   function onGvInput(e) {
@@ -174,14 +175,17 @@
   // alive nodes not already in this group → "Add node…" select.
   let candidates = $derived(addTargets(snapshot, group));
 
-  // Adding node X folds it into this group: follow X onto this group's master.
-  // The resulting snapshot over WS updates the card (no optimistic UI).
+  // Adding node X points its player at this group's master. A gossiping node uses
+  // follow (proxy-aware); a non-gossiping playback node is patched master-side
+  // (assignToGroup routes by node.playbackNode). The WS snapshot updates the card.
   async function onAdd(e) {
     const nodeId = e.target.value;
     e.target.value = "";
     if (!nodeId) return;
+    const node = candidates.find((c) => c.id === nodeId);
+    if (!node) return;
     try {
-      await follow(nodeId, group.master);
+      await assignToGroup(node, group.master);
     } catch {
       // toast shown by api.js
     }
@@ -234,8 +238,8 @@
 
   {#if candidates.length > 0}
     <div class="row">
-      <select value="" onchange={onAdd} title="add an alive node to this group">
-        <option value="">Add node…</option>
+      <select value="" onchange={onAdd} title="add a player to this room">
+        <option value="">Add player…</option>
         {#each candidates as c (c.id)}
           <option value={c.id}>{c.name}</option>
         {/each}

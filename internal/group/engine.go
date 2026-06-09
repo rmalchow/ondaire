@@ -8,21 +8,17 @@ import (
 
 	"ensemble/internal/contracts"
 	"ensemble/internal/id"
+	"ensemble/internal/playback"
 )
 
 // Typed errors surfaced to the API (I), which maps them to HTTP responses.
 var (
-	ErrNotMaster      = errors.New("group: not the group master (use takeover)") // §9.1 hint
-	ErrTargetUnknown  = errors.New("group: follow/takeover target unknown")      // §5.1/§5.2
-	ErrTargetDead     = errors.New("group: follow target not alive")             // §5.1
-	ErrTargetFollower = errors.New("group: follow target is not a master")       // §5.1
-	ErrSelfFollow     = errors.New("group: cannot follow self")                  // §5.1
-	ErrNoOpus         = errors.New("group: opus codec not supported")            // §8.3/D33
-	ErrBadSettings    = errors.New("group: invalid group settings")              // §9.1
-	ErrNotSynced      = errors.New("group: clock not synced yet, retry")         // §7 transient
-	ErrNotPlaying     = errors.New("group: nothing is playing")                  // D39 pause
-	ErrNotPaused      = errors.New("group: not paused")                          // D39 resume
-	ErrClosed         = errors.New("group: engine closed")
+	ErrNoOpus      = errors.New("group: opus codec not supported") // §8.3/D33
+	ErrBadSettings = errors.New("group: invalid group settings")   // §9.1
+	ErrNotSynced   = errors.New("group: clock not synced yet, retry")
+	ErrNotPlaying  = errors.New("group: nothing is playing") // D39 pause
+	ErrNotPaused   = errors.New("group: not paused")         // D39 resume
+	ErrClosed      = errors.New("group: engine closed")
 )
 
 // Params bundles everything H needs, injected by main (K).
@@ -35,7 +31,6 @@ type Params struct {
 	Sink     contracts.Sink         // E: local playout (H calls Reset only)
 	Clock    contracts.Clock        // F: LocalToMaster for pts stamping (master)
 	ClockCtl ClockControl           // F: SetMaster re-point (member, §7/D17)
-	Follow   contracts.FollowClient // I: takeover HTTP fan-out (§5.2)
 	Caps     contracts.Capabilities // this node's own caps (codec gating, §8.3)
 	Log      *slog.Logger
 
@@ -46,7 +41,6 @@ type Params struct {
 	PersistFollowing func(id.ID)
 
 	// Knobs (defaults applied in New when zero):
-	Grace     time.Duration // self-heal grace, default 10 s (§5)
 	LeadMs    int           // source release lead, default contracts.DefaultLeadMs (§8.2)
 	Heartbeat time.Duration // playback position/SourceStats refresh, default 5 s (D28)
 
@@ -61,6 +55,11 @@ type Engine struct {
 	self id.ID
 	now  func() time.Time
 
+	// player is the local playout component (D61): the engine drives it in-process
+	// for this gossiping member. Built from the same Sub/Sink/ClockCtl deps K
+	// injects, so K's wiring is unchanged.
+	player playback.Player
+
 	mu sync.Mutex
 
 	// playback (master-only)
@@ -68,17 +67,15 @@ type Engine struct {
 	gen  uint32   // monotonic per-node session generation (§8.4); never reused
 
 	// reconcile / member-side tracking — what the local plumbing is pointed at
-	curMaster  id.ID     // master this node currently tracks (Zero = none)
-	curGen     uint32    // generation the subscriber+sink+clock are armed for
-	curPlaying bool      // stream subscription + sink are armed (session active)
-	haveCur    bool      // curMaster/curGen have been set at least once
-	healAt     time.Time // when stale `following` becomes eligible for reset (zero=none)
+	curMaster  id.ID  // master this node currently tracks (Zero = none)
+	curGen     uint32 // generation the subscriber+sink+clock are armed for
+	curPlaying bool   // stream subscription + sink are armed (session active)
+	haveCur    bool   // curMaster/curGen have been set at least once
 
 	lastBeat time.Time // last heartbeat SetPlayback (master, while playing)
 
-	// observed group composition (for logging membership/role/master changes)
-	prevRole    role
-	prevMaster  id.ID
+	// observed composition (for logging member + play-target changes)
+	prevTarget  id.ID // last play target (group(following) master); Zero = idle
 	prevMembers map[id.ID]bool
 	havePrev    bool
 
@@ -95,9 +92,6 @@ func New(p Params) *Engine {
 	if p.Log == nil {
 		p.Log = slog.Default()
 	}
-	if p.Grace == 0 {
-		p.Grace = 10 * time.Second
-	}
 	if p.LeadMs == 0 {
 		p.LeadMs = contracts.DefaultLeadMs
 	}
@@ -107,12 +101,22 @@ func New(p Params) *Engine {
 	if p.now == nil {
 		p.now = time.Now
 	}
+	self := p.Cluster.Self()
 	return &Engine{
 		p:    p,
 		log:  p.Log.With("comp", "group"),
-		self: p.Cluster.Self(),
+		self: self,
 		now:  p.now,
 		done: make(chan struct{}),
+		// The local player wraps the same trio the engine already holds (D61).
+		// Sub/ClockCtl are group interfaces with method sets identical to the
+		// playback ones, so they assign straight through.
+		player: playback.NewLocal(playback.Config{
+			Self:  self,
+			Clock: p.ClockCtl,
+			Sub:   p.Sub,
+			Sink:  p.Sink,
+		}),
 	}
 }
 
@@ -135,9 +139,9 @@ func (e *Engine) Close() error {
 	return nil
 }
 
-// setFollowing writes the replicated follow target (C) AND persists it to
-// node.json (D45), so the engine's two concerns stay in lockstep at every
-// follow/unfollow/self-heal/takeover site. The persist hook is nil-safe.
+// setFollowing writes the replicated player-target (C) AND persists it to
+// node.json (D45) so the node restores its target on restart. The two writes stay
+// in lockstep at every follow/unfollow site. The persist hook is nil-safe.
 func (e *Engine) setFollowing(target id.ID) {
 	e.p.Cluster.SetFollowing(target)
 	if e.p.PersistFollowing != nil {
@@ -146,11 +150,11 @@ func (e *Engine) setFollowing(target id.ID) {
 	}
 }
 
-// Follow makes THIS node follow target (§5.1): validates target is alive and a
-// master, then SetFollowing(target). Typed error on rejection.
+// Follow sets THIS node's player target (D49+): its speakers play group(target).
+// target == self ⇒ play own group; any id allowed (no master-only rule).
 func (e *Engine) Follow(target id.ID) error { return e.follow(target) }
 
-// Unfollow makes THIS node a solo master: SetFollowing(Zero) (§5.1).
+// Unfollow sets THIS node's player idle (Following = Zero): it plays nothing.
 func (e *Engine) Unfollow() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()

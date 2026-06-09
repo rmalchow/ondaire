@@ -2,11 +2,15 @@ package sink
 
 import "ensemble/internal/stream"
 
-// servoConfig holds the rate-servo parameters. The servo holds the output
-// DEVICE QUEUE at a setpoint with a proportional controller: that is the only
+// servoConfig holds the rate-servo parameters. The servo holds the output DEVICE
+// QUEUE at a calibrated setpoint with a proportional controller: that is the only
 // software-observable signal for DAC crystal drift (the playout scheduler is
-// master-clock-locked, so consumed-vs-master measures the scheduler, not the
-// DAC — the queue depth is where the DAC's true rate shows up).
+// master-clock-locked, so consumed-vs-master measures the scheduler, not the DAC —
+// the queue depth is where the DAC's true rate shows up). Kq is GENTLE (D64): the
+// Pi's snd_pcm_delay swings ±10 ms, and the old Kq=1.5 mapped that to >300 ppm, so a
+// single jitter sample railed the loop into the ±ClampPPM hunting that was the
+// audible "stumbling". A gentle gain maps ±10 ms to tens of ppm — corrections stay
+// small and smooth.
 type servoConfig struct {
 	WarmUp   int64   // ns to wait before calibrating (queue fill + EMA settle)
 	QueueTau int64   // device-queue smoothing time constant, ns
@@ -19,19 +23,17 @@ func defaultServoConfig() servoConfig {
 	return servoConfig{
 		WarmUp:   3_000_000_000, // 3 s: let the device queue fill and the EMA settle
 		QueueTau: 2_000_000_000, // 2 s: smooths the Pi's ±10ms snd_pcm_delay jitter
-		Kq:       1.5,           // loop time-constant ~13s (rate error integrates into
-		//                queue depth only slowly); the SlewPPM limit below is
-		//                the real noise filter, so a brisk Kq is safe.
-		ClampPPM: 300, // ±0.03% — covers any real crystal; inaudible
-		SlewPPM:  30,  // ppm/s — gentle, no audible rate steps
+		Kq:       0.08,          // GENTLE (D64): 480 samples (10 ms) → ~38 ppm, never rails
+		ClampPPM: 300,           // ±0.03% — covers any real crystal; inaudible
+		SlewPPM:  20,            // ppm/s — gentle, no audible rate steps
 	}
 }
 
-// rateServo turns a stream of (consumed, master, deviceDelay) observations into
-// a playback-rate correction in ppm. One per session; reset on generation
-// change. Pure: no goroutine, no clock, no locking (the Playout mutex guards
-// it). Without a DelayReporter backend (deviceDelay ok=false) it returns 0 —
-// DAC drift is then unobservable and accepted (the player owns its own clock).
+// rateServo turns a stream of (consumed, master, deviceDelay) observations into a
+// playback-rate correction in ppm. One per session; reset on generation change.
+// Pure: no goroutine, no clock, no locking (the Playout mutex guards it). Without a
+// DelayReporter backend (deviceDelay ok=false) it returns 0 — DAC drift is then
+// unobservable and accepted (the player owns its own clock).
 type rateServo struct {
 	cfg        servoConfig
 	have       bool    // first observation seen (EMA + clock seeded)
@@ -43,7 +45,7 @@ type rateServo struct {
 	setpoint   float64 // target device-queue depth, samples
 	outPPM     float64 // current correction, ppm (slew-limited, clamped)
 
-	// telemetry (read by the sink's 1 Hz debug line)
+	// telemetry (read by the sink's 1 Hz stats line)
 	queueErr float64 // ddEMA − setpoint, samples
 }
 
@@ -86,23 +88,16 @@ func (s *rateServo) observe(consumedSamples, masterNanos, deviceDelayNs int64, o
 		return s.outPPM
 	}
 
-	// Smooth the device-queue depth (EMA, time-constant QueueTau). The Pi's
-	// snd_pcm_delay swings ±10ms (~±480 samples) per read; only its slow trend
-	// carries the drift signal.
+	// Smooth the device-queue depth (EMA, time-constant QueueTau).
 	alpha := float64(dtNs) / float64(s.cfg.QueueTau)
 	if alpha > 1 {
 		alpha = 1
 	}
 	s.ddEMA += alpha * (dd - s.ddEMA)
 
-	// Calibrate the setpoint only once the device queue has SETTLED — not at a
-	// fixed time. The queue fills over several seconds at session start (prime
-	// burst + device buffer); calibrating mid-ramp captured a too-low setpoint
-	// and railed the servo for the whole session (and the sustained correction
-	// then shrank the resampler carry to underflow). We track a slow reference
-	// EMA; the queue is settled when the fast EMA has caught up to it. A hard
-	// cap forces calibration so a genuinely-drifting queue still gets a
-	// reference.
+	// Calibrate the setpoint once the queue has SETTLED (not at a fixed time): it
+	// fills over the first seconds; calibrating mid-ramp captures a wrong level. A
+	// hard cap forces it so a genuinely-drifting queue still gets a reference.
 	const settleTol = 480 // samples (~10 ms): fast≈slow ⇒ not ramping
 	srAlpha := float64(dtNs) / float64(6*s.cfg.QueueTau)
 	if srAlpha > 1 {
@@ -120,9 +115,9 @@ func (s *rateServo) observe(consumedSamples, masterNanos, deviceDelayNs int64, o
 		return s.outPPM // hold at 0 until calibrated
 	}
 
-	// Proportional control. Queue above setpoint ⇒ the DAC is draining slower
-	// than we fill ⇒ DAC slow ⇒ produce slower ⇒ negative ppm. In steady state
-	// the queue stops drifting and outPPM equals the DAC's drift correction.
+	// GENTLE proportional control. Queue above setpoint ⇒ DAC draining slower than we
+	// fill ⇒ produce slower ⇒ negative ppm. Kq is small so ±10 ms queue jitter maps to
+	// tens of ppm, never the ±300 rail (that railing was the audible "stumbling").
 	s.queueErr = s.ddEMA - s.setpoint
 	target := -s.cfg.Kq * s.queueErr
 	if target > s.cfg.ClampPPM {
@@ -145,6 +140,12 @@ func (s *rateServo) observe(consumedSamples, masterNanos, deviceDelayNs int64, o
 
 // ratePPM returns the last correction (for SinkStats.RatePPM).
 func (s *rateServo) ratePPM() float64 { return s.outPPM }
+
+// setpointNs is the calibrated device-queue setpoint in ns (0 until calibrated) —
+// telemetry so the per-node queue level and inter-node skew are visible (D64).
+func (s *rateServo) setpointNs() int64 {
+	return int64(s.setpoint * 1e9 / float64(stream.SampleRate))
+}
 
 // reset clears state for a new session.
 func (s *rateServo) reset() {

@@ -50,6 +50,17 @@ type DelayReporter interface {
 	DeviceDelay() (nanos int64, ok bool)
 }
 
+// LatencyReporter is an OPTIONAL Backend extension: the backend's CONFIGURED
+// output latency in nanoseconds — a known constant (e.g. ALSA's
+// ENSEMBLE_ALSA_LATENCY_MS), NOT the live queue depth. The playout subtracts it
+// from the deadline so the device is pre-rolled to its full buffer (xrun cushion)
+// and every node plays at a common master-time instant regardless of its device
+// latency (D63). alsa implements it; the pipe/exec/null backends do not (no DAC
+// buffer ⇒ treated as 0).
+type LatencyReporter interface {
+	ConfiguredLatencyNs() int64
+}
+
 // Flusher is an OPTIONAL Backend extension (type-asserted by the sink): drop
 // any audio queued inside the device/player when a playout session ends.
 // Without it, device layers that retain their buffer across an underrun
@@ -90,13 +101,16 @@ type Sink interface {
 
 // SinkStats is surfaced via /api/status and used by the e2e smoke test (K).
 type SinkStats struct {
-	Played   uint64  // frames written to the backend
-	Silence  uint64  // silent frames inserted for gaps
-	LateDrop uint64  // frames dropped for arriving past their deadline
-	StaleGen uint64  // frames dropped for an old generation
-	Synced   bool    // clock follower has a usable offset (gates playout)
-	RatePPM  float64 // current rate-servo correction (0 until settled)
-	Buffered int     // jitter-buffer depth, frames
+	Played        uint64  // frames written to the backend
+	Silence       uint64  // silent frames inserted for gaps
+	LateDrop      uint64  // frames dropped for arriving past their deadline
+	StaleGen      uint64  // frames dropped for an old generation
+	Synced        bool    // clock follower has a usable offset (gates playout)
+	RatePPM       float64 // current rate-servo correction (0 until settled)
+	Buffered      int     // jitter-buffer depth, frames
+	DeviceDelayNs int64   // last measured output (device) latency, ns; 0 if unreported (D63 telemetry)
+	PhaseErrNs    int64   // playout phase error vs the smoothed model, ns (D64 telemetry)
+	Calibrated    bool    // servo setpoint captured → DeviceDelayNs−PhaseErrNs is stable (D65)
 }
 
 // SourceStats is surfaced by a node running an audio source (§8.2/§9.1).
@@ -158,11 +172,13 @@ type NodeView struct {
 	StreamPort    int                `json:"streamPort"`
 	SourcePort    int                `json:"sourcePort"`
 	GossipPort    int                `json:"gossipPort"`
-	Capabilities  Capabilities       `json:"capabilities"` // EFFECTIVE caps: probed minus disabled (D40)
-	Disabled      []string           `json:"disabled"`     // operator-disabled features (D40); subset of {playback,opus,input}
-	Following     id.ID              `json:"following"`    // Zero == solo master
-	Observed      map[id.ID]Observed `json:"observed"`     // peerID -> last observation
-	Alive         bool               `json:"alive"`        // from memberlist liveness
+	Capabilities  Capabilities       `json:"capabilities"`           // EFFECTIVE caps: probed minus disabled (D40)
+	Disabled      []string           `json:"disabled"`               // operator-disabled features (D40); subset of {playback,opus,input}
+	PlaybackNode  bool               `json:"playbackNode,omitempty"` // D50: non-gossiping, wire-driven playback node
+	ControlPort   int                `json:"controlPort,omitempty"`  // CONTROL_PORT for master→playback commands (D58); 0 for normal nodes
+	Following     id.ID              `json:"following"`              // Zero == solo master
+	Observed      map[id.ID]Observed `json:"observed"`               // peerID -> last observation
+	Alive         bool               `json:"alive"`                  // from memberlist liveness
 	LastSeenUnix  int64              `json:"lastSeen"`
 	Stale         bool               `json:"stale"` // not updated recently (UI hint)
 	UpdatedAt     int64              `json:"updatedAt"`
@@ -234,8 +250,12 @@ type GroupSettings struct {
 const (
 	DefaultCodec     = "opus"
 	DefaultTransport = "udp"
-	DefaultBufferMs  = 150
-	DefaultLeadMs    = 50 // source release lead over the clock (§8.2)
+	// DefaultBufferMs is the end-to-end playout budget. It must EXCEED the backend's
+	// configured device latency (D63: the playout subtracts that latency from the
+	// deadline, so the jitter window = bufferMs − deviceLatency). With ALSA at ~200ms,
+	// 300ms leaves ~100ms of jitter headroom; play-to-sound stays under the 500ms bar.
+	DefaultBufferMs = 300
+	DefaultLeadMs   = 50 // source release lead over the clock (§8.2)
 )
 
 // FollowClient is the small HTTP client the group piece (H) uses to drive

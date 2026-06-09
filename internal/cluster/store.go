@@ -22,6 +22,19 @@ func (c *Cluster) Snapshot() contracts.Snapshot {
 	alive, seen := c.live.snapshot()
 	nowUnix := c.clock().Unix()
 
+	// D60: a non-gossiping playback node is not in memberlist; its liveness is mDNS
+	// freshness — its proxied record's UpdatedAt is refreshed on every mDNS hit
+	// (~30 s re-emit). Fresh within the TTL ⇒ alive. (STATUS recency folds in here
+	// too once the control driver lands.)
+	for nid, r := range doc.Nodes {
+		if r.PlaybackNode && nowUnix-r.UpdatedAt < playbackLivenessTTLSec {
+			alive[nid] = true
+			if seen[nid] == 0 {
+				seen[nid] = r.UpdatedAt
+			}
+		}
+	}
+
 	nodes := make([]contracts.NodeView, 0, len(doc.Nodes))
 	for nid, r := range doc.Nodes {
 		nv := nodeView(nid, r, alive, seen, nowUnix)
@@ -62,6 +75,8 @@ func nodeView(nid id.ID, r *NodeRecord, alive map[id.ID]bool, seen map[id.ID]int
 		GossipPort:    r.GossipPort,
 		Capabilities:  effectiveCaps(r.Caps, r.Disabled),
 		Disabled:      append([]string(nil), r.Disabled...),
+		PlaybackNode:  r.PlaybackNode,
+		ControlPort:   r.ControlPort,
 		Following:     r.Following,
 		Observed:      obs,
 		Alive:         alive[nid],
@@ -113,6 +128,11 @@ func without(in []string, v string) []string {
 	return out
 }
 
+// playbackLivenessTTLSec is how long a proxied playback node stays "alive" after
+// its last mDNS refresh (D60). Discovery re-emits an unchanged peer every ~30 s, so
+// 90 s tolerates two missed refreshes before the node is treated as gone.
+const playbackLivenessTTLSec = 90
+
 // DeriveGroups projects derived groups (§5) from a document snapshot and a
 // liveness view. Pure; no writes. Exported so the group engine (H) reuses the
 // exact same rule C uses for Snapshot. self is included as always-alive.
@@ -126,71 +146,61 @@ func DeriveGroups(
 ) []contracts.GroupView {
 	isAlive := func(n id.ID) bool { return n == self || alive[n] }
 
-	// A node is a master iff alive and (Following == Zero, or Following points
-	// at a dead/unknown node, or at a node that is itself following someone).
-	isMaster := func(n id.ID, r *NodeRecord) bool {
-		if !isAlive(n) {
-			return false
-		}
-		if r.Following.IsZero() {
-			return true
-		}
-		tgt, ok := nodes[r.Following]
-		if !ok || !isAlive(r.Following) {
-			return true // dead/unknown master → behaves as solo
-		}
-		if !tgt.Following.IsZero() {
-			return true // following a follower → behaves as solo
-		}
-		return false
+	// A master is any alive GOSSIPING node — master:group is strictly 1:1, group id
+	// == node id (D44). Playback nodes (and dead/unknown nodes) never master. Every
+	// node masters its OWN group, always; mastership is intrinsic, not derived.
+	isMaster := func(n id.ID) bool {
+		r, ok := nodes[n]
+		return ok && isAlive(n) && !r.PlaybackNode
 	}
 
-	// Build member sets keyed by master.
-	members := map[id.ID][]id.ID{}
+	// `following` is the PLAYER's target group (D49+): a node's player joins
+	// group(Following) iff Following points at a LIVE master. Following == Zero, or a
+	// dead / unknown / playback-node target ⇒ the player is IDLE (in no group, no
+	// fallback). Players are grouped by their target master.
+	players := map[id.ID][]id.ID{}
 	for nid, r := range nodes {
 		if !isAlive(nid) {
-			continue // dead nodes are not part of any derived group (§5)
-		}
-		if isMaster(nid, r) {
-			if _, ok := members[nid]; !ok {
-				members[nid] = []id.ID{nid}
-			} else {
-				// already seeded as a follower-master collision; ensure self present
-				members[nid] = appendUnique(members[nid], nid)
-			}
 			continue
 		}
-		// follower: attach to its master if that master is itself a master.
 		m := r.Following
-		mr, ok := nodes[m]
-		if !ok || !isAlive(m) || !isMaster(m, mr) {
-			// stale follow → projected solo
-			members[nid] = appendUnique(members[nid], nid)
-			continue
+		if m.IsZero() || !isMaster(m) {
+			continue // idle player — attaches to no group
 		}
-		members[m] = appendUnique(members[m], m, nid)
+		players[m] = append(players[m], nid)
 	}
 
-	groups := make([]contracts.GroupView, 0, len(members))
-	for master, mem := range members {
-		sort.Slice(mem, func(i, j int) bool { return idLess(mem[i], mem[j]) })
-		// D42: the group id is the MASTER's node id — playback + settings records
-		// are keyed by it, so membership churn no longer orphans them. The explicit
-		// name OVERRIDE map stays keyed by the member-set XOR (an override names a
-		// specific COMBINATION of rooms; survives master changes + re-forming).
-		gid := master
-		memberXOR := id.XOR(mem...)
-		gv := contracts.GroupView{
-			ID:       gid,
-			Master:   master,
-			Members:  mem,
-			Settings: resolveSettings(settings[gid]),
-			Playback: resolvePlayback(playback[gid]),
+	// One group per alive master node (even with zero players — an idle group is a
+	// valid, assignable zone). Members are the master's PLAYERS; the master is a
+	// member of its OWN group only when it follows itself (plays its own stream).
+	groups := make([]contracts.GroupView, 0, len(nodes))
+	for nid, r := range nodes {
+		if !isAlive(nid) || r.PlaybackNode {
+			continue
 		}
-		if nm := names[memberXOR]; nm != nil && nm.Name != "" {
-			gv.Name = nm.Name
+		mem := players[nid]
+		if mem == nil {
+			mem = []id.ID{} // an empty group serializes as [], not null (stable API contract)
+		}
+		sort.Slice(mem, func(i, j int) bool { return idLess(mem[i], mem[j]) })
+		gv := contracts.GroupView{
+			ID:       nid, // group id == master id (D44)
+			Master:   nid,
+			Members:  mem,
+			Settings: resolveSettings(settings[nid]),
+			Playback: resolvePlayback(playback[nid]),
+		}
+		// Name: explicit override (keyed by the master/group id — stable across
+		// player churn), else derived from the player NAMES. An empty group (no
+		// players) is labelled by the master's own room name.
+		switch {
+		case names[nid] != nil && names[nid].Name != "":
+			gv.Name = names[nid].Name
 			gv.NameIsDerived = false
-		} else {
+		case len(mem) == 0:
+			gv.Name = nodeLabel(nodes, nid)
+			gv.NameIsDerived = true
+		default:
 			gv.Name = derivedLabel(mem, nodes)
 			gv.NameIsDerived = true
 		}
@@ -198,6 +208,14 @@ func DeriveGroups(
 	}
 	sort.Slice(groups, func(i, j int) bool { return idLess(groups[i].ID, groups[j].ID) })
 	return groups
+}
+
+// nodeLabel is a node's display name, or its 8-char short id when unnamed.
+func nodeLabel(nodes map[id.ID]*NodeRecord, n id.ID) string {
+	if r, ok := nodes[n]; ok && r.Name != "" {
+		return r.Name
+	}
+	return n.String()[:8]
 }
 
 // derivedLabelMax caps how many member names a derived label spells out before
@@ -226,22 +244,6 @@ func derivedLabel(mem []id.ID, nodes map[id.ID]*NodeRecord) string {
 	}
 	shown := strings.Join(names[:derivedLabelMax], " + ")
 	return fmt.Sprintf("%s +%d more", shown, len(names)-derivedLabelMax)
-}
-
-func appendUnique(s []id.ID, vs ...id.ID) []id.ID {
-	for _, v := range vs {
-		found := false
-		for _, x := range s {
-			if x == v {
-				found = true
-				break
-			}
-		}
-		if !found {
-			s = append(s, v)
-		}
-	}
-	return s
 }
 
 func resolveSettings(r *GroupSettingsRecord) contracts.GroupSettings {

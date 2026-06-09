@@ -11,7 +11,6 @@ import {
   resume,
   follow,
   unfollow,
-  makeMaster,
   play,
   playOnNode,
   getMedia,
@@ -116,13 +115,6 @@ describe("membership", () => {
     await unfollow(REMOTE);
     expect(global.fetch.mock.calls[0][0]).toBe("/api/" + REMOTE + "/unfollow");
   });
-  it("makeMaster posts {node} to /group/master", async () => {
-    global.fetch = mockFetch(200, {});
-    await makeMaster(REMOTE, REMOTE);
-    const [path, opts] = global.fetch.mock.calls[0];
-    expect(path).toBe("/api/" + REMOTE + "/group/master");
-    expect(JSON.parse(opts.body)).toEqual({ node: REMOTE });
-  });
 });
 
 describe("media + play", () => {
@@ -141,65 +133,15 @@ describe("media + play", () => {
   });
 });
 
-describe("playOnNode (takeover-then-play)", () => {
-  const MASTER = "33333333333333333333333333333333";
-  const GID = "44444444444444444444444444444444";
-
-  // snapshot helper: REMOTE is a member of a group mastered by `master`.
-  const snapWithMaster = (master) => ({
-    nodes: [],
-    groups: [{ id: GID, master, members: [MASTER, REMOTE] }],
-  });
-
-  it("already master → plays directly, no make-master", async () => {
+describe("playOnNode (direct, no takeover)", () => {
+  it("plays directly on the target — every node masters its own group", async () => {
     global.fetch = mockFetch(200, {});
-    const getSnapshot = () => snapWithMaster(REMOTE);
-    await playOnNode(REMOTE, "file:x.flac", getSnapshot);
-    // exactly one fetch: the /play.
+    // Extra args (snapshot getter, opts) are accepted but ignored now.
+    await playOnNode(REMOTE, "file:x.flac", () => ({}), { name: "x" });
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const [path, opts] = global.fetch.mock.calls[0];
     expect(path).toBe("/api/" + REMOTE + "/play");
     expect(JSON.parse(opts.body)).toEqual({ uri: "file:x.flac" });
-  });
-
-  it("mismatch → make-master, poll until master==picked, then play", async () => {
-    global.fetch = mockFetch(200, {});
-    // first snapshot: REMOTE is a follower (MASTER masters). After takeover the
-    // poll returns a snapshot where REMOTE is the master.
-    let polls = 0;
-    const getSnapshot = () => {
-      // initial read sees the old master; subsequent polls see the new one.
-      if (polls++ === 0) return snapWithMaster(MASTER);
-      return snapWithMaster(REMOTE);
-    };
-    await playOnNode(REMOTE, "file:y.flac", getSnapshot, { pollMs: 1 });
-
-    // two fetches in order: make-master then play.
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    const [p0] = global.fetch.mock.calls[0];
-    const [p1, o1] = global.fetch.mock.calls[1];
-    expect(p0).toBe("/api/" + REMOTE + "/group/master");
-    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
-      node: REMOTE,
-    });
-    expect(p1).toBe("/api/" + REMOTE + "/play");
-    expect(JSON.parse(o1.body)).toEqual({ uri: "file:y.flac" });
-  });
-
-  it("timeout → make-master only, no play, throws", async () => {
-    global.fetch = mockFetch(200, {});
-    // the picked node never becomes master.
-    const getSnapshot = () => snapWithMaster(MASTER);
-    await expect(
-      playOnNode(REMOTE, "file:z.flac", getSnapshot, {
-        pollMs: 1,
-        timeoutMs: 5,
-      }),
-    ).rejects.toMatchObject({ message: "takeover timed out" });
-    // make-master was issued; play was NOT.
-    const paths = global.fetch.mock.calls.map((c) => c[0]);
-    expect(paths).toContain("/api/" + REMOTE + "/group/master");
-    expect(paths).not.toContain("/api/" + REMOTE + "/play");
   });
 });
 

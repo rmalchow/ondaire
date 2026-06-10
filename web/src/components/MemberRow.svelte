@@ -45,24 +45,33 @@
 </div>
 
 <style>
-  /* Fixed-width leading column so every row's volume slider starts at the
-     same x, regardless of name length or master/this-node badges. */
+  /* Leading column: prefers 16rem (so sliders line up across rows when there's
+     room) but SHRINKS when the card is narrow — the name ellipsises first and the
+     badges clip out, so the remove button never wraps to a second line. */
   .member-id {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    width: 16rem;
-    min-width: 16rem;
+    flex: 0 1 16rem;
+    min-width: 0;
     overflow: hidden;
   }
   .mname {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* badges keep their size and simply clip out of the shrinking column */
+  .member-id :global(.badge),
+  .member-id :global(.chip) {
+    flex: 0 0 auto;
+  }
 
-  /* Leave control: icon-only, compact, no text width (Fix 2). */
+  /* Leave control: icon-only, compact, pinned right (never shrinks/wraps). */
   .icon-btn {
+    flex: 0 0 auto;
     line-height: 1;
     padding: 4px 7px;
   }

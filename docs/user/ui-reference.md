@@ -26,10 +26,15 @@ card title is the group's label: an explicit name, or a derived one like
 **`study: pi01 + pi02`** (master, then its players). A solo node is its own group.
 
 **Now-playing bar** (when something is playing):
-- **Cover art + title + artist · album** of the current track (from Spotify, or the
-  file name for local files). Line-in shows no track info.
+- **Cover art + title + artist · album** of the current track (from Spotify, or
+  read from the file's MP3/FLAC tags for local files — falling back to the file
+  name when a track is untagged). Line-in shows no track info.
 - The elapsed **position**, a **state pill** (`playing` / `paused` / `idle`), and
-  **⏸ pause/▶ resume** + **■ stop** controls for the whole group.
+  **⏸ pause/▶ resume**, **⏭ next**, and **■ stop** controls for the whole group.
+  **⏭ next** is active only while playing *and* the queue has more tracks (see
+  [Queue](#the-queue)).
+- When the room has tracks queued, the count appears under the bar as a compact
+  **`N in queue`**; **select the room** to expand the full queue list.
 
 **Volumes:**
 - **Group volume** scales every member proportionally (shown for multi-member
@@ -58,10 +63,16 @@ Selecting a room reveals three things under the member list:
    this room. Each chip shows where that node currently is (`idle`, or another
    group); tap it to pull the node into this room.
 2. **Media** — browse the master's library. Folders are navigable (tap to enter,
-   `..`/breadcrumbs to go back) and the list scrolls internally. **Play here**
-   starts a track playing to the whole group — if the chosen node wasn't the
-   group's master, mastership moves to it first. (There's also support for
-   `http(s)://` streams and the node's line-in where enabled.)
+   `..`/breadcrumbs to go back) and the list scrolls internally. Each row has two
+   actions on the right:
+   <img src="images/media-actions.png" width="380" alt="Media rows: a green-outlined + on each folder and file, and a filled-green play triangle on files" />
+   - **▶** (filled green, files only) — **play now**: starts this track at once.
+     Whatever was playing is replaced; any tracks already queued behind it stay.
+   - **+** (green outline, files *and* folders) — **add to the end of the queue**.
+     On a folder it adds every track under it, recursively, in order.
+
+   (There's also support for `http(s)://` streams and the node's line-in where
+   enabled.)
 3. **Advanced settings** (twirl-down, collapsed by default) — per-group **codec**
    (`pcm` / `opus`), **transport** (`udp` / `tcp`), and **buffer** (ms). On flaky
    Wi-Fi prefer **opus** (smaller packets). See the
@@ -70,6 +81,38 @@ Selecting a room reveals three things under the member list:
 
 Rename a group by clicking its title; the name is tied to that *set of rooms* and
 returns whenever they regroup.
+
+---
+
+## The queue
+
+<img src="images/queue.png" width="380" alt="A playing room's now-playing bar with a Next button, above an 'Up next' panel listing six queued tracks, each with a remove button" />
+
+Local files play through a **gapless queue** — queued tracks stream as one
+continuous piece of audio, with no pause between them. You build and steer the
+queue from the [media browser](#room-controls-a-selected-room) and the now-playing
+bar:
+
+- **Start playing** — **▶** on a file (or **+** on the first file/folder into an
+  empty queue) begins playback immediately.
+- **Queue up** — **+** appends a file, or a whole folder's tracks (recursively),
+  to the end. They play in turn, gaplessly.
+- **Jump in now** — **▶** on another file drops the current track and plays the new
+  one straight away, keeping the rest of the queue intact.
+- **Skip** — **⏭ next** on the now-playing bar advances to the next track (active
+  only while playing with something queued).
+- **Reorder by removing** — in the expanded list, **−** drops an upcoming track.
+
+The queue belongs to the room (its master), so everyone controlling that room —
+from any node's web app — sees and edits the same queue live. Track names come
+from each file's **MP3/FLAC tags** (title · artist), falling back to the file name
+when a track is untagged.
+
+> **Where it shows.** A selected room expands the full **Up next** list (it scrolls
+> internally, ~10 tracks visible). Other room cards stay compact, showing just
+> **`N in queue`** under the now-playing bar so the overview doesn't fill with
+> track lists. Starting a stream URL or line-in clears the queue (it's a
+> local-files feature).
 
 ---
 

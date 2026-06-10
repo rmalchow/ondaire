@@ -95,7 +95,15 @@ export const content = {
         kicker: "In-line control",
         title: "Add players, pick music",
         body:
-          "Select a room to reveal its roster and the master’s library. Drop in a speaker, browse folders, and hit Play here — no menus to dig through.",
+          "Select a room to reveal its roster and the master’s library. Drop in a speaker, browse folders, and press play — no menus to dig through.",
+      },
+      {
+        src: "assets/img/queue.png",
+        alt: "A playing room with a Next button above an ‘Up next’ list of six queued tracks, each removable.",
+        kicker: "Shared queue",
+        title: "Everyone adds what’s next",
+        body:
+          "Queue up a track — or a whole folder — and it plays gaplessly, back to back. The queue belongs to the room, not to one phone: anyone in the house can add what they want to hear, skip ahead, or pull a track. Titles come straight from your files’ tags.",
       },
       {
         src: "assets/img/spotify-endpoints.png",

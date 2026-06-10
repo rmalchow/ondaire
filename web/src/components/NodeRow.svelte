@@ -246,7 +246,12 @@
     flex-direction: column;
     gap: 6px;
     padding-top: 12px;
+    padding-bottom: 14px;
     border-top: 1px solid var(--border);
+  }
+  /* the last section needs no trailing pad — the card already has its own */
+  .node-section:last-child {
+    padding-bottom: 0;
   }
   .node-section-h {
     margin: 0;

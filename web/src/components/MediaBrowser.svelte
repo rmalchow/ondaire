@@ -75,12 +75,21 @@
   function queueFile(f) {
     if (nodeId) enqueue(nodeId, ["file:" + f.path]).catch(() => {});
   }
-  // [+] on a folder row: append every file under it (recursive, sorted).
+  // [+] on a folder row: append every file under it (recursive, sorted). A big
+  // folder gets enqueued in two steps so playback can start at once: the first
+  // batch lands immediately, the rest follows in the background (chained after
+  // the head so the queue order is preserved).
+  const QUEUE_HEAD = 10;
   function queueFolder(folder) {
     const uris = filesUnder(files, joinDir(dir, folder.name)).map(
       (f) => "file:" + f.path,
     );
-    if (nodeId && uris.length) enqueue(nodeId, uris).catch(() => {});
+    if (!nodeId || !uris.length) return;
+    const head = uris.slice(0, QUEUE_HEAD);
+    const rest = uris.slice(QUEUE_HEAD);
+    enqueue(nodeId, head)
+      .then(() => (rest.length ? enqueue(nodeId, rest) : null))
+      .catch(() => {});
   }
   function playUrl() {
     if (urlValid) playHere(url.trim());

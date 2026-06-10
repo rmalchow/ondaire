@@ -316,10 +316,12 @@
   }
   .q-idx {
     flex: 0 0 auto;
+    align-self: flex-start;
     width: 1.8em;
     text-align: right;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
+    line-height: 1.2;
   }
   .q-meta {
     flex: 1 1 auto;

@@ -82,7 +82,7 @@
   {#each endpoints as ep, i (ep.id)}
     <div class="ep">
       <div class="ep-head">
-        <span class="muted small">{baseName}:</span>
+        <span class="ep-name">{baseName}:</span>
         <EditableText value={ep.name} onsave={(v) => renameEndpoint(i, v)} placeholder="endpoint name" />
         <span class="spacer"></span>
         <button class="btn btn-danger ep-remove" title="remove endpoint" onclick={() => removeEndpoint(i)}>
@@ -133,6 +133,8 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    /* the editable part after the colon matches the prefix / default name size */
+    font-size: 14px;
   }
   .ep-head .spacer {
     flex: 1;

@@ -72,8 +72,10 @@
 </script>
 
 <div class="spotify-endpoints">
-  <div class="ep default">
-    <span class="ep-name">{baseName}</span>
+  <div class="ep">
+    <div class="ep-head">
+      <span class="ep-name">{baseName}</span>
+    </div>
     <span class="muted small">default · plays this node's current group</span>
   </div>
 
@@ -123,11 +125,6 @@
     gap: 6px;
     padding: 8px 0;
     border-bottom: 1px solid var(--border);
-  }
-  .ep.default {
-    flex-direction: row;
-    align-items: baseline;
-    gap: 8px;
   }
   .ep-name {
     font-size: 14px;

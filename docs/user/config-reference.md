@@ -49,7 +49,8 @@ docker run --network host -e ENSEMBLE_LOG=debug \
 ```
 
 > `ensemble run …` is accepted as an alias for `ensemble …`, and `-v` is shorthand
-> for `ENSEMBLE_LOG=debug`.
+> for `ENSEMBLE_LOG=debug`. For what the banner and log lines mean — including the
+> per-second clock & playback fields — see [Debugging](debugging.md).
 
 ---
 

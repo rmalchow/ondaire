@@ -17,7 +17,8 @@ This guide gets you from zero to music:
 4. **[Running ensemble](running.md)** — every way to start a node and keep it running (foreground, `nohup`, systemd, Docker, Compose).
 5. **[What can it play?](#what-can-it-play)** — local files, Spotify/podcasts, radio, line-in.
 6. **[Spotify Connect](spotify.md)** — play Spotify & podcasts to any group (bundled in Docker; one binary to add natively).
-7. **Reference** — the [UI Reference](ui-reference.md) (every screen and control) and the [Configuration Reference](config-reference.md) (every knob, explained).
+7. **[Debugging](debugging.md)** — read the startup banner, the events ensemble logs, and the per-second clock & playback fields.
+8. **Reference** — the [UI Reference](ui-reference.md) (every screen and control) and the [Configuration Reference](config-reference.md) (every knob, explained).
 
 ---
 

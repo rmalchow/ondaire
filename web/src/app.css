@@ -245,9 +245,9 @@ input[type="range"] {
   gap: 10px;
   padding: 6px 0;
   border-top: 1px solid var(--border);
-  /* single line: the name column shrinks/ellipsises (badges clip out) before the
-     remove button is ever pushed to a second row. */
-  flex-wrap: nowrap;
+  /* MemberRow controls the wrapping via item order + flex-basis: source stats get
+     their own line (wide), the volume slider wraps below (narrow). */
+  flex-wrap: wrap;
 }
 .member:first-child {
   border-top: none;

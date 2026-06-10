@@ -26,26 +26,29 @@
     onchange={(v) => nodeSetVolume(member, v)}
   />
 
-  <!-- Rams: silence is not a signal — show counts only when they mean something. -->
-  {#if showStats && (src.clients ?? 0) > 0}
-    <span class="chip">{src.clients} listeners</span>
-  {/if}
-  {#if showStats && (src.restarts ?? 0) > 0}
-    <span class="chip">{src.restarts} reconnects</span>
-  {/if}
-
   <button
     class="btn icon-btn"
     onclick={() => leaveGroup(member)}
     title="remove from room"
     aria-label="remove from room">✕</button
   >
+
+  <!-- Source stats (master, playing): own line below on wide, hidden when narrow.
+       Rams: silence is not a signal — show counts only when they mean something. -->
+  {#if showStats && ((src.clients ?? 0) > 0 || (src.restarts ?? 0) > 0)}
+    <span class="member-stats">
+      {#if (src.clients ?? 0) > 0}<span class="chip">{src.clients} listeners</span>{/if}
+      {#if (src.restarts ?? 0) > 0}<span class="chip">{src.restarts} reconnects</span>{/if}
+    </span>
+  {/if}
 </div>
 
 <style>
-  /* Leading column: prefers 16rem (so sliders line up across rows when there's
-     room) but shrinks on a narrow card — the name ellipsises. */
+  /* Line 1: name (col 1) | volume (col 2) | remove (col 3, right). Source stats
+     get their OWN line below (col 4, full width). Leading column prefers 16rem so
+     sliders line up across rows, but shrinks — the name ellipsises. */
   .member-id {
+    order: 1;
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -65,28 +68,35 @@
     flex: 0 0 auto;
   }
 
-  /* volume fills the middle of a wide row */
+  /* volume fills the middle of the first line */
   .member :global(.vol) {
+    order: 2;
     flex: 1 1 auto;
     min-width: 6rem;
   }
 
-  /* Leave control: icon-only, compact, pinned to the right of the name line. */
+  /* Leave control: icon-only, compact, pinned to the right of the first line. */
   .icon-btn {
+    order: 3;
     flex: 0 0 auto;
     margin-left: auto;
     line-height: 1;
     padding: 4px 7px;
   }
 
-  /* Narrow cards: name + remove button on the first line (badges hidden), the
-     volume slider wraps to the next line. */
+  /* Source stats on their own line below (full-width forces the wrap). */
+  .member-stats {
+    order: 4;
+    flex: 1 1 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* Narrow cards: name + remove on line 1 (badges hidden), volume on line 2,
+     source stats hidden entirely. */
   @media (max-width: 560px) {
-    .member {
-      flex-wrap: wrap;
-    }
     .member-id {
-      order: 1;
       flex: 1 1 auto;
     }
     .member-id :global(.badge),
@@ -100,8 +110,8 @@
       order: 3;
       flex: 1 1 100%;
     }
-    .member > :global(.chip) {
-      order: 3;
+    .member-stats {
+      display: none;
     }
   }
 </style>

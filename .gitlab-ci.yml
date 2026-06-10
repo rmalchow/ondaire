@@ -136,7 +136,7 @@ docker:
   # over the default unix socket. binfmt + a docker-container buildx builder give
   # the multi-platform manifest.
   variables:
-    IMAGE: "$CI_REGISTRY_IMAGE"
+    IMAGE: "harbor.rand0m.me/public/ensemble"
     PLATFORMS: "linux/amd64,linux/arm64"
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/

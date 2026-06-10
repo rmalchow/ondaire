@@ -1,8 +1,12 @@
-# Ensemble MASTER image — built ON TOP of the upstream go-librespot image, so
-# Spotify Connect comes for free (binary already on PATH, audio libs present);
-# we only add the ensemble binary. Multi-arch (amd64 + arm64) follows
-# go-librespot's published platforms. go-librespot 0.7.3 is the version the
-# Spotify bridge (internal/spotify) is verified against.
+# Ensemble MASTER image — REUSES the prebuilt binary from the CI `build` stage
+# (already version-stamped via -X main.version and with the SPA embedded) on top
+# of the upstream go-librespot image, so Spotify Connect comes for free. Multi-arch
+# (amd64 + arm64) follows go-librespot's published platforms.
+#
+# The build context must contain bin/ with the per-arch binaries
+# (ensemble-linux-amd64, ensemble-linux-arm64) produced by the build job. See
+# .gitlab-ci.yml (the docker job `needs:` the build job's artifacts) and
+# ../QUICKSTART.md.
 #
 #   docker run --rm --network host \
 #     -v /srv/music:/media:ro -v ensemble-data:/data \
@@ -11,48 +15,22 @@
 # --network host is required in practice: mDNS discovery, the gossip/stream/
 # source ports, and Spotify Connect's zeroconf all need real LAN reachability,
 # and ports bind-or-increment when taken — so there is nothing to publish/EXPOSE.
-# See ../QUICKSTART.md for full setup.
 
-# ---- stage 1: build the embedded UI --------------------------------------
-FROM node:24-alpine AS frontend
-WORKDIR /src/web
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
-COPY web/ ./
-RUN npm run build          # emits /src/web/dist
-
-# ---- stage 2: cross-compile the binary (CGO off → no emulation) ----------
-# Runs on the BUILD platform and cross-compiles to $TARGETARCH; a pure-Go static
-# binary runs as-is on the alpine base.
-FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
+# Select the prebuilt binary for the target arch on the BUILD platform (native,
+# no emulation): the binary is pure-Go/static (CGO off) so it runs as-is on alpine.
+FROM --platform=$BUILDPLATFORM alpine:3.21 AS pick
 ARG TARGETARCH
-ENV CGO_ENABLED=0 GOOS=linux
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-# Real SPA over the committed placeholder so //go:embed all:dist picks it up.
-COPY --from=frontend /src/web/dist ./web/dist
-ARG VERSION=docker
-RUN GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-        -o /out/ensemble ./cmd/ensemble
+COPY bin/ /bin-in/
+RUN cp "/bin-in/ensemble-linux-${TARGETARCH}" /ensemble && chmod +x /ensemble
 
-# ---- stage 3: runtime = upstream go-librespot (alpine) + ensemble --------
+# Runtime = upstream go-librespot (alpine; go-librespot on PATH + audio libs) plus
+# libopus (master stream-encode) + certs (TLS media sources) + the ensemble binary.
 FROM ghcr.io/devgianlu/go-librespot:v0.7.3
-# The base already has go-librespot at /usr/bin/go-librespot (on PATH, found by
-# ensemble's bridge) plus alsa-lib/avahi. Add only what ensemble needs: libopus
-# (master stream-encode, dlopen'd) and certs (TLS media sources). One apk layer;
-# everything else is COPY, so the multi-arch build stays trivial.
 RUN apk add --no-cache opus ca-certificates
+COPY --from=pick /ensemble /usr/local/bin/ensemble
 
-COPY --from=builder /out/ensemble /usr/local/bin/ensemble
-
-# Master-only. Media on /media (mount read-only), mutable state on /data.
-# Ports are intentionally NOT pinned here: the master uses its built-in defaults
-# (http 8080, stream 9090, source 9200, gossip 7946) which bind-or-increment if
-# taken — so nothing is EXPOSEd (host networking only). Pass -e ENSEMBLE_HTTP_PORT
-# (etc.) to PIN a port: a pinned port binds exactly or the container exits with a
-# clear error instead of silently drifting.
+# Master-only. Media on /media (mount read-only), mutable state on /data. Ports use
+# the built-in defaults (bind-or-increment); pass -e ENSEMBLE_*_PORT to pin one.
 ENV ENSEMBLE_ROLE=master \
     ENSEMBLE_MEDIA_DIR=/media \
     ENSEMBLE_DATA_DIR=/data

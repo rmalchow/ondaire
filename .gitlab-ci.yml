@@ -121,16 +121,23 @@ build-release:
       dotenv: build.env
     expire_in: never
 
-# 3c) Multi-arch (amd64 + arm64) Docker image of an ensemble MASTER, Spotify
-# built in. The Dockerfile (docker/Dockerfile) is self-contained — it builds the
-# SPA and cross-compiles the binary in its own stages — so this job needs no
-# artifacts. Pushes :dev on the default branch, and :<tag>/:latest on a release
-# tag. Requires a registry-auth file in the CONFIG_JSON file variable and an
-# $IMAGE repo (defaults to this project's registry). buildx + QEMU run on dind.
+# 3c) Multi-arch (amd64 + arm64) Docker image of an ensemble MASTER, Spotify built
+# in. REUSES the per-arch binaries from the build stage (already version-stamped +
+# SPA-embedded) rather than recompiling — the Dockerfile just drops the right one
+# onto the go-librespot base. Pushes :dev on the default branch, and :<tag>/:latest
+# on a release tag. Needs a registry-auth file in the CONFIG_JSON file variable.
 docker:
   stage: build
   image: docker:28-cli
-  needs: []
+  # Reuse the build job's bin/ artifacts (build on branches, build-release on
+  # tags) — whichever ran in this pipeline; both publish the same bin/ paths.
+  needs:
+    - job: build
+      optional: true
+      artifacts: true
+    - job: build-release
+      optional: true
+      artifacts: true
   # No dind service / DOCKER_HOST: the runner bind-mounts the host's
   # /var/run/docker.sock, so the docker CLI talks straight to the host daemon
   # over the default unix socket. binfmt + a docker-container buildx builder give
@@ -151,13 +158,13 @@ docker:
     - docker buildx rm ensemble-builder >/dev/null 2>&1 || true
     - docker buildx create --use --name ensemble-builder
   script:
-    # main → "dev"; release tag → the tag itself (also moves :latest).
+    # main → "dev"; release tag → the tag itself (also moves :latest). The binary
+    # carries its own -X main.version stamp from the build job, so no build-arg.
     - VER="${CI_COMMIT_TAG:-dev}"
     - TAGS="-t $IMAGE:$VER"; if [ -n "$CI_COMMIT_TAG" ]; then TAGS="$TAGS -t $IMAGE:latest"; fi
     - docker buildx build
       --platform "$PLATFORMS"
       -f docker/Dockerfile
-      --build-arg VERSION="$VER"
       $TAGS
       --push
       .

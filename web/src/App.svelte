@@ -18,6 +18,18 @@
     cluster.receivedAt > 0 && Date.now() - cluster.receivedAt > 10000,
   );
 
+  // Connection health folded into one signal for the node-name pill: green when
+  // open + fresh, red when the socket is closed, amber in between (connecting /
+  // reconnecting / stale data).
+  let statusLevel = $derived(
+    cluster.status === "closed"
+      ? "bad"
+      : cluster.status === "open" && !stale
+        ? "good"
+        : "warn",
+  );
+  let statusTitle = $derived(stale ? cluster.status + " · stale" : cluster.status);
+
   // Two pages via hash routing (bulletproof under the embedded SPA — no server
   // route needed): "" → overview (groups + media), "nodes" → the node list.
   let route = $state(parseHash());
@@ -65,23 +77,19 @@
 </script>
 
 <header class="app-header">
-  <div class="brand">
-    <span class="brand-mark">
-      <img class="wordmark" src={wordmark} alt="ensemble" />
-      <span class="brand-dot"></span>
-    </span>
-    <span class="self">{self.name || "…"}</span>
-  </div>
+  <span class="brand-mark">
+    <img class="wordmark" src={wordmark} alt="ensemble" />
+    <span class="brand-dot"></span>
+  </span>
   <span class="spacer"></span>
-  {#if stale}<span class="muted small">stale</span>{/if}
-  <!-- Rams: the dot already communicates connection state (title on hover); the
-       adjacent text was redundant. -->
-  <span class="dot {cluster.status}" title={cluster.status}></span>
-  {#if route === "nodes"}
-    <a class="iconlink" href="#/" title="Back to rooms" aria-label="Back to rooms">←</a>
-  {:else}
-    <a class="iconlink" href="#/nodes" title="Nodes" aria-label="Nodes">⚙</a>
-  {/if}
+  <div class="header-right">
+    {#if route === "nodes"}
+      <a class="iconlink" href="#/" title="Back to rooms" aria-label="Back to rooms">←</a>
+    {:else}
+      <a class="iconlink" href="#/nodes" title="Nodes" aria-label="Nodes">⚙</a>
+    {/if}
+    <span class="status-pill {statusLevel}" title={statusTitle}>{self.name || "…"}</span>
+  </div>
 </header>
 
 <Toast />

@@ -272,8 +272,12 @@
     cursor: pointer;
   }
   .group-card.selected {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent);
+    /* feathered selection: a translucent accent border + a soft, slightly-spread
+       glow instead of a hard 1px ring — hides the corner aliasing on the curve. */
+    border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
+      0 0 22px -6px color-mix(in srgb, var(--accent) 45%, transparent);
   }
 
   /* headline: "[master]: [players]" — the room's self-describing label. Node

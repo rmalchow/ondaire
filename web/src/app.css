@@ -51,18 +51,13 @@ a {
 /* header */
 .app-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   padding: 10px 0 16px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 16px;
 }
-/* brand: the Fraunces wordmark + accent dot, with the node name stacked under it */
-.app-header .brand {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
+/* brand: the Fraunces wordmark + a single accent dot */
 .app-header .brand-mark {
   display: flex;
   align-items: center;
@@ -83,9 +78,54 @@ a {
 .app-header .spacer {
   flex: 1;
 }
-.app-header .self {
-  color: var(--muted);
-  font-size: 13px;
+/* right column: nav link on top, the node-name status pill on its own line below */
+.app-header .header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+/* node name in a pill whose color reflects the live connection (green/amber/red) */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--fg);
+}
+.status-pill::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.status-pill.good {
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+}
+.status-pill.good::before {
+  background: var(--ok);
+}
+.status-pill.warn {
+  border-color: color-mix(in srgb, #f59e0b 50%, transparent);
+}
+.status-pill.warn::before {
+  background: #f59e0b;
+}
+.status-pill.bad {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+.status-pill.bad::before {
+  background: var(--danger);
 }
 .app-header .iconlink {
   display: inline-flex;

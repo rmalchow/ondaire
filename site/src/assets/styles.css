@@ -381,6 +381,47 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
   background: var(--line-2);
 }
 
+/* ── tech / under the hood ──────────────────────────────────────────── */
+.sec-intro {
+  color: var(--muted);
+  margin: 16px 0 0;
+  font-size: clamp(16px, 2vw, 18px);
+}
+.tech-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+.tech {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 28px;
+  background: linear-gradient(180deg, var(--panel), var(--bg-2));
+}
+.tech .tag {
+  margin-bottom: 16px;
+  display: inline-block;
+}
+.tech-problem {
+  margin: 0 0 16px;
+  color: var(--ink);
+  font-size: 16px;
+}
+.tech-solution {
+  margin: 0;
+  position: relative;
+  padding-left: 24px;
+  color: var(--muted);
+  font-size: 15.5px;
+}
+.tech-arrow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ── cta band ───────────────────────────────────────────────────────── */
 .cta {
   text-align: center;
@@ -446,6 +487,7 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
   .hero-shot { order: -1; }
   .frame img { max-width: 260px; }
   .feat-grid { grid-template-columns: 1fr; }
+  .tech-grid { grid-template-columns: 1fr; }
   .screen, .screen.flip .screen-shot { grid-template-columns: 1fr; order: 0; }
   .screen-shot { order: -1 !important; }
   .steps { grid-template-columns: 1fr; }

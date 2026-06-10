@@ -63,6 +63,17 @@ const steps = C.how.steps
   )
   .join("");
 
+const techItems = C.tech.items
+  .map(
+    (t) => `
+      <article class="tech">
+        <span class="tag">${esc(t.tag)}</span>
+        <p class="tech-problem">${esc(t.problem)}</p>
+        <p class="tech-solution"><span class="tech-arrow" aria-hidden="true">→</span>${esc(t.solution)}</p>
+      </article>`
+  )
+  .join("");
+
 const footLinks = C.footer.links
   .map((l) => `<a href="${esc(l.href)}" rel="noopener">${esc(l.label)}</a>`)
   .join("");
@@ -134,6 +145,15 @@ const page = `<!doctype html>
       <h2>${esc(C.how.title)}</h2>
     </header>
     <ol class="steps">${steps}</ol>
+  </section>
+
+  <section id="tech" class="tech-sec">
+    <header class="sec-head">
+      <span class="eyebrow">${esc(C.tech.eyebrow)}</span>
+      <h2>${esc(C.tech.title)}</h2>
+      <p class="sec-intro">${esc(C.tech.intro)}</p>
+    </header>
+    <div class="tech-grid">${techItems}</div>
   </section>
 
   <section class="cta">

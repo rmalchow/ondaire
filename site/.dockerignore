@@ -1,0 +1,5 @@
+# The image runs `node build.mjs` from source; build output + deps aren't needed.
+dist/
+node_modules/
+Dockerfile
+.dockerignore

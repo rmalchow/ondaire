@@ -316,7 +316,7 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
   display: grid;
   grid-template-columns: 0.9fr 1.1fr;
   gap: clamp(28px, 6vw, 72px);
-  align-items: center;
+  align-items: start;
 }
 .screen.flip .screen-shot { order: 2; }
 .screen-shot { margin: 0; }

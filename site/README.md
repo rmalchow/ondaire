@@ -23,6 +23,18 @@ npm run serve           # builds, then serves ./dist on http://localhost:8000
 
 Deploy: copy the contents of `./dist/` to your web root. That's it.
 
+### Or run it as a container
+
+A `Dockerfile` builds the site and serves it with nginx:
+
+```sh
+docker build -t ensemble-site -f site/Dockerfile site
+docker run --rm -p 8080:80 ensemble-site     # → http://localhost:8080
+```
+
+CI builds and pushes a multi-arch image (`docker-site` job) on the default branch
+and on release tags.
+
 ## Editing
 
 - **Words** — everything on the page lives in [`content.mjs`](content.mjs)

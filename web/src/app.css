@@ -4,7 +4,7 @@
   --panel-2: #222b37;
   --fg: #e6edf3;
   --muted: #8b97a7;
-  --accent: #4ea1ff;
+  --accent: #35e3b3;
   --danger: #ff6b6b;
   --ok: #4ade80;
   --badge: #2d3a4d;
@@ -57,9 +57,28 @@ a {
   border-bottom: 1px solid var(--border);
   margin-bottom: 16px;
 }
-.app-header .title {
-  font-size: 20px;
-  font-weight: 700;
+/* brand: the Fraunces wordmark + accent dot, with the node name stacked under it */
+.app-header .brand {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.app-header .brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.app-header .wordmark {
+  display: block;
+  height: 22px;
+  width: auto;
+}
+.app-header .brand-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
 }
 .app-header .spacer {
   flex: 1;

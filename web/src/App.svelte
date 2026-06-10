@@ -5,6 +5,7 @@
   import Groups from "./sections/Groups.svelte";
   import Nodes from "./sections/Nodes.svelte";
   import Toast from "./components/Toast.svelte";
+  import wordmark from "./assets/wordmark.png";
 
   // self {id, name}; id/name seeded once from GET /api/status.
   let self = $state({ id: "", name: "", role: "" });
@@ -62,14 +63,13 @@
 </script>
 
 <header class="app-header">
-  <span class="title">ensemble</span>
-  <span class="self">
-    {#if self.name}
-      {self.name}
-    {:else}
-      …
-    {/if}
-  </span>
+  <div class="brand">
+    <span class="brand-mark">
+      <img class="wordmark" src={wordmark} alt="ensemble" />
+      <span class="brand-dot"></span>
+    </span>
+    <span class="self">{self.name || "…"}</span>
+  </div>
   <span class="spacer"></span>
   {#if stale}<span class="muted small">stale</span>{/if}
   <!-- Rams: the dot already communicates connection state (title on hover); the

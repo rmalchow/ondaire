@@ -173,6 +173,39 @@ docker:
   tags:
     - shared
 
+# 3d) Multi-arch image of the marketing site (site/) served by nginx. Self-
+# contained: the generator runs in the build stage, only the static output ships.
+# Pushes :dev on the default branch, :<tag>/:latest on a release tag.
+docker-site:
+  stage: build
+  image: docker:28-cli
+  needs: []
+  variables:
+    IMAGE: "harbor.rand0m.me/public/ensemble-site"
+    PLATFORMS: "linux/amd64,linux/arm64"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - mkdir -p ~/.docker
+    - cp "${CONFIG_JSON}" ~/.docker/config.json
+    - docker run --privileged --rm tonistiigi/binfmt --install all
+    - docker buildx rm site-builder >/dev/null 2>&1 || true
+    - docker buildx create --name site-builder
+  script:
+    - VER="${CI_COMMIT_TAG:-dev}"
+    - TAGS="-t $IMAGE:$VER"; if [ -n "$CI_COMMIT_TAG" ]; then TAGS="$TAGS -t $IMAGE:latest"; fi
+    - docker buildx build --builder site-builder
+      --platform "$PLATFORMS"
+      -f site/Dockerfile
+      $TAGS
+      --push
+      site
+  after_script:
+    - docker buildx rm site-builder >/dev/null 2>&1 || true
+  tags:
+    - shared
+
 # The Android companion app lives in its own repo (share/ensemble-android) and
 # builds/releases its APK there.
 

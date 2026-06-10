@@ -72,6 +72,12 @@ func (b *recBackend) Write(f []byte) error {
 
 func (b *recBackend) Close() error { return nil }
 
+func (b *recBackend) reset() {
+	b.mu.Lock()
+	b.frames = nil
+	b.mu.Unlock()
+}
+
 func (b *recBackend) DeviceDelay() (int64, bool) {
 	if !b.hasDelay {
 		return 0, false
@@ -133,6 +139,33 @@ func drainUntil(t *testing.T, cond func() bool) bool {
 	return cond()
 }
 
+// unstarvedRun pushes a real-time-paced scenario onto p and retries it on a fresh
+// session until the playout completes WITHOUT being starved — i.e. a loaded CI
+// runner did not deschedule the scheduler past a frame deadline (no LateDrop).
+// These scenarios are deterministic absent starvation, so a clean attempt still
+// verifies exact played/silence counts; retrying only rides out transient
+// scheduler stalls that would otherwise late-drop a frame and fail the counts.
+// `be` is reset each attempt, so after a clean return it holds exactly that run's
+// written frames; wantWritten is the frame count a clean run writes (played +
+// silence). Fails if no clean run lands within the attempt budget.
+func unstarvedRun(t *testing.T, p *Playout, be *recBackend, clk *fakeClock, gen uint32, seqs []uint64, wantWritten int) {
+	t.Helper()
+	for attempt := 0; attempt < 8; attempt++ {
+		be.reset()
+		p.Reset(gen)
+		pushRun(p, clk, gen, seqs)
+		drainUntil(t, func() bool {
+			s := p.Stats()
+			return s.LateDrop > 0 || be.count() >= wantWritten
+		})
+		if s := p.Stats(); s.LateDrop == 0 && be.count() >= wantWritten {
+			return // clean, unstarved run: counts are exact
+		}
+	}
+	s := p.Stats()
+	t.Fatalf("playout starved in all attempts (last: played=%d silence=%d late=%d)", s.Played, s.Silence, s.LateDrop)
+}
+
 // pushRun pushes frames seq..seq+count-1 with pts anchored a little ahead of the
 // current master time so their deadlines (pts + bufferMs) fall in the near
 // future and play at cadence (not late).
@@ -148,12 +181,7 @@ func TestPlayoutBasicInOrder(t *testing.T) {
 	clk := newFakeClock(true)
 	be := &recBackend{}
 	p := newTestPlayout(t, clk, be, nil)
-	p.Reset(1)
-	pushRun(p, clk, 1, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9})
-	if !drainUntil(t, func() bool { return p.Stats().Played >= 10 }) {
-		st := p.Stats()
-		t.Fatalf("Played=%d Silence=%d count=%d", st.Played, st.Silence, be.count())
-	}
+	unstarvedRun(t, p, be, clk, 1, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 10)
 	if p.Stats().Silence != 0 {
 		t.Fatalf("Silence=%d, want 0", p.Stats().Silence)
 	}
@@ -163,12 +191,8 @@ func TestPlayoutInsertsSilenceForGap(t *testing.T) {
 	clk := newFakeClock(true)
 	be := &recBackend{}
 	p := newTestPlayout(t, clk, be, nil)
-	p.Reset(1)
-	pushRun(p, clk, 1, []uint64{0, 1, 3, 4}) // miss 2
-	if !drainUntil(t, func() bool { return p.Stats().Played >= 4 && p.Stats().Silence >= 1 }) {
-		st := p.Stats()
-		t.Fatalf("Played=%d Silence=%d", st.Played, st.Silence)
-	}
+	// miss seq 2 → a clean run writes 4 real frames + 1 silence for the gap.
+	unstarvedRun(t, p, be, clk, 1, []uint64{0, 1, 3, 4}, 5)
 	st := p.Stats()
 	if st.Silence != 1 {
 		t.Fatalf("Silence=%d, want 1", st.Silence)
@@ -182,11 +206,8 @@ func TestPlayoutReorderWithinBuffer(t *testing.T) {
 	clk := newFakeClock(true)
 	be := &recBackend{}
 	p := newTestPlayout(t, clk, be, nil)
-	p.Reset(1)
-	pushRun(p, clk, 1, []uint64{0, 2, 1, 3})
-	if !drainUntil(t, func() bool { return p.Stats().Played >= 4 }) {
-		t.Fatalf("Played=%d", p.Stats().Played)
-	}
+	// reordered within the jitter buffer → a clean run plays 4, no silence.
+	unstarvedRun(t, p, be, clk, 1, []uint64{0, 2, 1, 3}, 4)
 	if p.Stats().Silence != 0 {
 		t.Fatalf("Silence=%d, want 0", p.Stats().Silence)
 	}

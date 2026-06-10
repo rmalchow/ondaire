@@ -233,25 +233,22 @@
 </div>
 
 <style>
-  /* vertical rhythm between the stacked rows inside a node card */
   .noderow {
     flex-direction: column;
     align-items: stretch;
-    gap: 8px;
+    /* sections own their own spacing around the divider (gap would add to it). */
+    gap: 0;
   }
-  /* each labeled section is set off by a rule above it + vertical padding, so the
-     card reads as distinct groups (addresses / features / spotify / settings). */
+  /* each labeled section is set off by a rule (addresses / features / spotify /
+     settings). Every divider has the SAME space above (margin) and below
+     (padding): 12px above the line, 16px below. */
   .node-section {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    padding-top: 12px;
-    padding-bottom: 14px;
+    margin-top: 12px;
+    padding-top: 16px;
     border-top: 1px solid var(--border);
-  }
-  /* the last section needs no trailing pad — the card already has its own */
-  .node-section:last-child {
-    padding-bottom: 0;
   }
   .node-section-h {
     margin: 0;

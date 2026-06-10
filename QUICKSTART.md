@@ -21,7 +21,7 @@ docker run -d --name ensemble-master \
   --network host \
   -v /srv/music:/media:ro \
   -v ensemble-data:/data \
-  registry.gitlab.rand0m.me/share/ensemble:latest --name living-room
+  harbor.rand0m.me/public/ensemble:latest --name living-room
 ```
 
 Open `http://<host-ip>:8080`, drop a playback node on the same LAN, and they
@@ -69,7 +69,7 @@ mode with explicit mappings and wire the cluster manually with `--join`:
 ```yaml
 services:
   ensemble:
-    image: registry.gitlab.rand0m.me/share/ensemble:latest
+    image: harbor.rand0m.me/public/ensemble:latest
     command: ["--no-mdns", "--name", "living-room"]
     ports:
       - "8080:8080"          # UI + API
@@ -112,7 +112,7 @@ docker run -d --name ensemble-master \
   --network host \
   -v /srv/music:/media:ro \
   -v ensemble-data:/data \
-  registry.gitlab.rand0m.me/share/ensemble:latest --name house
+  harbor.rand0m.me/public/ensemble:latest --name house
 ```
 
 Then bring up playback nodes on your speakers (native binary, not this image) —
@@ -142,7 +142,7 @@ docker run -d --name ensemble-master \
   --network host \
   -v /srv/music:/media:ro \
   -v ensemble-data:/data \
-  registry.gitlab.rand0m.me/share/ensemble:latest --name living-room
+  harbor.rand0m.me/public/ensemble:latest --name living-room
 ```
 
 Then, on your phone:
@@ -173,10 +173,10 @@ so any node's UI shows them all.
 ```sh
 # host A
 docker run -d --network host -v /srv/music:/media:ro -v ensemble-a:/data \
-  registry.gitlab.rand0m.me/share/ensemble:latest --name downstairs
+  harbor.rand0m.me/public/ensemble:latest --name downstairs
 # host B
 docker run -d --network host -v /srv/jazz:/media:ro -v ensemble-b:/data \
-  registry.gitlab.rand0m.me/share/ensemble:latest --name studio
+  harbor.rand0m.me/public/ensemble:latest --name studio
 ```
 
 ---

@@ -5,7 +5,7 @@
 services:
   ensemble:
     # Pull the published image, or build locally (uncomment `build:`).
-    image: registry.gitlab.rand0m.me/share/ensemble:latest
+    image: harbor.rand0m.me/public/ensemble:latest
     # build:
     #   context: ..
     #   dockerfile: docker/Dockerfile

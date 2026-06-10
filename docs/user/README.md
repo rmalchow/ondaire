@@ -1,130 +1,158 @@
 # Ensemble — User Guide
 
-Ensemble turns the speakers around your home into synchronized, groupable rooms
-you control from a phone or browser. This guide walks through the web UI — where
-everything is and how to use it.
+**Ensemble turns the speakers scattered around your home, office, or studio into
+synchronized, groupable "rooms" you steer from any phone or browser.** Put music
+in one place, run one small program on each device with a speaker, and they find
+each other and play in perfect sync — no cloud, no accounts, no config files.
 
-> **One app, every node.** Every ensemble node serves the *same* web app and
-> proxies to the others, so it doesn't matter which node's address you open
-> (`http://<any-node-ip>:8080`). There are two pages: the **Rooms** overview
-> (landing page) and the **Nodes** page (the **⚙ gear**, top-right). The dot next
-> to the gear is the live-connection indicator.
+<p align="center">
+  <img src="images/overview.png" width="320" alt="The ensemble web app on a phone: a playing room group with cover art, now-playing track, group volume and per-speaker volumes" />
+</p>
 
----
+This guide gets you from zero to music:
 
-## The Rooms page (overview)
-
-<img src="images/overview.png" width="380" alt="Rooms overview on a phone: a playing group with now-playing bar, group volume, and per-member volumes" />
-
-Each card is a **room group** — one master node plus any players following it. The
-card title is the group's label: an explicit name, or a derived one like
-**`study: pi01 + pi02`** (master, then its players). A solo node is its own group.
-
-**Now-playing bar** (when something is playing):
-- **Cover art + title + artist · album** of the current track (from Spotify, or the
-  file name for local files). Line-in shows no track info.
-- The elapsed **position**, a **state pill** (`playing` / `paused` / `idle`), and
-  **⏸ pause/▶ resume** + **■ stop** controls for the whole group.
-
-**Volumes:**
-- **Group volume** scales every member proportionally (shown for multi-member
-  groups).
-- Each **member row** has the node's own live volume slider, and a **✕** to remove
-  it from the room. The master is marked with a **master** badge; the node you
-  opened the app on is marked **this node**. On the master, source stats (e.g.
-  *2 listeners*) appear on their own line.
-
-**Select a room** (tap/click its card) to reveal its operational controls — see
-below. The selected card is outlined.
-
-> On a narrow phone screen the rows reflow: the now-playing bar stacks into two
-> rows, each member's volume slider drops below its name, and the badges/stats are
-> hidden to keep things readable.
+1. **[The mental model](#the-mental-model)** — the handful of ideas everything is built on.
+2. **[Three homes, one app](#three-homes-one-app)** — real setups that show what ensemble is *for*.
+3. **[Pick your setup](#pick-your-setup)** — install instructions for each kind of device.
+4. **[What can it play?](#what-can-it-play)** — local files, Spotify/podcasts, radio, line-in.
+5. **Reference** — the [UI Reference](ui-reference.md) (every screen and control) and the [Configuration Reference](config-reference.md) (every knob, explained).
 
 ---
 
-## Room controls (a selected room)
+## The mental model
 
-<img src="images/room-expanded.png" width="380" alt="A selected room showing the add-player roster, the media browser with folders, and Advanced settings" />
+Five ideas and you understand the whole system:
 
-Selecting a room reveals three things under the member list:
+- **A node** is one device running the ensemble program — a Raspberry Pi, a NAS, a
+  desktop, a laptop. Every node runs the *identical* binary.
+- **Every node serves the same web app** at `http://<that-node>:8080` and proxies
+  to all the others. Open *any* node's address and you can control the whole house.
+- **A node has roles.** A **master** owns the music library and streams audio; a
+  **player** receives a stream and pushes it out a speaker. Most nodes are both.
+  A headless NAS is a master with no speakers; a tiny Pi in the bathroom is a
+  player. (See [roles](config-reference.md#3-roles).)
+- **A room (group)** is one master plus the players following it. By default every
+  node is a group of one. Tell a player to follow a master and they merge into a
+  room that plays in lock-step. Group and ungroup freely from the UI.
+- **Sources are what's playing**: a file from the master's library, a Spotify
+  Connect session, an internet-radio URL, or a line-in capture.
 
-1. **Add players** — a row of chips, one per playback-capable node not already in
-   this room. Each chip shows where that node currently is (`idle`, or another
-   group); tap it to pull the node into this room.
-2. **Media** — browse the master's library. Folders are navigable (tap to enter,
-   `..`/breadcrumbs to go back) and the list scrolls internally. **Play here**
-   starts a track playing to the whole group — if the chosen node wasn't the
-   group's master, mastership moves to it first. (There's also support for
-   `http(s)://` streams and the node's line-in where enabled.)
-3. **Advanced settings** (twirl-down, collapsed by default) — per-group **codec**
-   (`pcm` / `opus`), **transport** (`udp` / `tcp`), and **buffer** (ms). On flaky
-   Wi-Fi prefer **opus** (smaller packets).
-
-Rename a group by clicking its title; the name is tied to that *set of rooms* and
-returns whenever they regroup.
-
----
-
-## The Nodes page (⚙ gear)
-
-<img src="images/nodes.png" width="380" alt="Nodes page: per-node cards with addresses, features, spotify endpoints, and settings sections" />
-
-Every known node gets a card, organized into labeled sections. The header shows
-the node name (click to rename), its short ID, and live/last-seen status.
-
-- **Addresses** — the node's network addresses and the ports it bound.
-- **Features** — the operator-toggleable capabilities, each a tri-state chip:
-  **● green = on**, **○ amber = off** (click to toggle), **✕ dimmed = unavailable**
-  on that host. Nodes running go-librespot also show a green **`spotify`** badge.
-- **Formats** — the media formats/codecs the node can decode (read-only).
-- **Spotify endpoints** — Spotify Connect devices (see next section).
-- **Settings** — playback knobs:
-
-<img src="images/node-settings.png" width="360" alt="A node's settings: vol and hw delay sliders aligned, plus a test tone button" />
-
-  - **vol** — the node's output volume.
-  - **hw delay** — nudges this node's output earlier/later (0–150 ms) to align
-    rooms perfectly; hovering the label explains it compensates fixed device
-    latency.
-  - **output device** — the ALSA device picker (on hosts that have one).
-  - **♪ test tone** — plays a short tone so you can identify/check a speaker.
+That's it. Discovery, sync, and failover all happen automatically — you spend your
+time grouping rooms and picking music, not configuring software.
 
 ---
 
-## Spotify endpoints
+## Three homes, one app
 
-<img src="images/spotify-endpoints.png" width="420" alt="Spotify endpoints editor: the default device plus a custom 'all' preset with player chips" />
+Ensemble looks different in every home. Three sketches, which we'll return to as
+running examples throughout the guide:
 
-On a node that runs go-librespot, the **Spotify endpoints** section manages the
-Spotify Connect devices it advertises:
+### 🎧 The shared studio
+*You and two colleagues share a workspace and (mercifully) the same taste in
+music.* You want **one soundtrack across the whole floor** that **any** of you can
+skip or turn down from your own laptop — without a Bluetooth speaker that only
+pairs with one phone at a time. Each desk computer is a node; you group them into
+one room and whoever's nearest the keyboard is the DJ.
+→ mostly [desktops & laptops](scenarios/desktop.md), often with a
+[NAS](scenarios/nas-master.md) holding the shared library.
 
-- **Default device** — `ensemble <node>` (read-only). Playing to it from the
-  Spotify app plays to whatever group that node currently masters — the original
-  behavior.
-- **Presets** — add named endpoints (e.g. **`all`**). Each advertises its own
-  Connect device, **`ensemble <node>: <name>`**, and carries a row of **player
-  chips** (the playback-capable nodes); tap a chip to toggle a player in/out
-  (**green = included**). When you pick that device in the Spotify app, the node
-  **regroups to exactly those players, then plays**. Only the part after the colon
-  is editable; **✕** removes the preset.
+### 👨‍👩‍👧‍👦 The family with two kids
+*Bedtime audiobooks in the kids' rooms; jazz in the kitchen while you cook.* The
+whole point is **different content in different zones at the same time** — and the
+flexibility to merge them ("everyone in the living room for the movie"). A cheap
+Pi behind each set of speakers, a NAS in the cupboard with the family library,
+and Spotify for the grown-ups.
+→ [Raspberry Pi players](scenarios/raspberry-pi.md) per room, a
+[NAS master](scenarios/nas-master.md), and [Spotify](scenarios/nas-master.md#spotify-connect--podcasts).
 
-All endpoints are discoverable in the Spotify app at once, but **only one plays at
-a time** per node — picking another preset (or the default) preempts the current
-one and regroups. Renaming the node updates every device name automatically.
+### 🏠 The three-flatmate flatshare
+*Everyone wakes up at a different time — and on Sunday you cook dinner together.*
+On weekday mornings each room is its **own** group: three alarms, three podcasts,
+no collisions. Come evening you tap two rooms into **one** group and the same
+playlist follows you from kitchen to table.
+→ a [player](scenarios/raspberry-pi.md) (or [desktop](scenarios/desktop.md)) per
+room, grouped and ungrouped on demand from the [UI](ui-reference.md).
 
-> Adding/removing presets and renaming take effect immediately (the matching
-> go-librespot bridge starts/stops/re-advertises), so the device list in your
-> Spotify app updates within a few seconds.
+The hardware overlaps more than it differs. The rest of the guide is about
+choosing the right *kind* of node for each spot and wiring it up.
 
 ---
 
-## Tips
+## Pick your setup
 
-- **Which node do I open?** Any of them — the app is identical everywhere and
-  proxies to the rest.
-- **Grouping** is just "who follows whom": adding a player to a room makes it
-  follow that room's master; removing it (**✕**) sets it solo. Stopping playback
-  leaves the grouping intact.
-- **Alignment** — if one room is slightly ahead/behind, nudge its **hw delay** on
-  the Nodes page.
+Most homes mix two or three of these. Start with whichever you have hardware for
+today — you can always add nodes later, and they'll discover each other on their
+own.
+
+### 🗄️ Headless NAS / server — the always-on brain
+A box with **no speakers**: your NAS, a mini-PC, an old server. It holds the music
+library and does the streaming, but never makes a sound itself. **Why:** keep all
+your music in one place and keep it playing even when every laptop in the house is
+asleep — the library and the "brain" live on the one device that's always on. This
+is also the home for **Spotify Connect**. Runs beautifully in **Docker**.
+→ **[Set up a NAS / server master](scenarios/nas-master.md)**
+
+### 🍓 Raspberry Pi — a permanent speaker in every room
+A cheap Pi (even a Pi Zero 2) wired to **active speakers** or an amp, tucked behind
+the kitchen counter or on the bathroom shelf. **Why:** a dedicated, always-ready
+speaker in every room for the price of a Pi — no computer to boot, no phone to
+pair. This is the workhorse of the family and flatshare setups.
+→ **[Set up a Raspberry Pi player](scenarios/raspberry-pi.md)**
+
+### 💻 Desktop / laptop — the speakers you already own
+The computer already on your desk, using **its existing sound card and speakers**.
+**Why:** zero new hardware. It's both a player *and* a perfectly good master (it
+can host the library too), which makes it the natural starting point — especially
+in the shared studio, where every desk is already a node.
+→ **[Set up a desktop or laptop](scenarios/desktop.md)**
+
+### 🔌 ESP32 + class-D amp — a speaker node with no computer at all
+A tiny custom board (ESP32 + DAC + a small class-D amplifier) that *is* the
+speaker — no operating system, no SD card, just power and a pair of speaker
+terminals. **Why:** the smallest, cheapest, lowest-power way to put a synchronized
+speaker somewhere a Pi would be overkill. **Status: under active development** —
+the hardware and firmware are being built now; this page is a preview of the
+design and how it will join a cluster.
+→ **[About the ESP32 speaker node (in development)](scenarios/esp32.md)**
+
+> **Just want to try it on one machine first?** Download a build, run `./ensemble`,
+> open `http://localhost:8080`, and drop a few audio files in `./data/media`. Then
+> run it on a second machine on the same network and watch them find each other.
+> The [desktop guide](scenarios/desktop.md) covers this in full.
+
+---
+
+## What can it play?
+
+A room's **master** opens one **source** and streams it to the whole group. Four
+kinds:
+
+- **🎵 Local files** — `wav`, `mp3`, `flac` in the master's library folder, browsed
+  as folders right in the UI. This is the family's audiobook collection on the NAS.
+  Set up per scenario; details in the [NAS guide](scenarios/nas-master.md#the-music-library).
+- **🟢 Spotify & podcasts (Spotify Connect)** — a node running **go-librespot**
+  shows up as a device in your Spotify app; pick it and the whole group plays your
+  Spotify music *or podcasts*. Premium required. **Where to get go-librespot and
+  how ensemble finds it** is covered in
+  [Spotify Connect & podcasts](scenarios/nas-master.md#spotify-connect--podcasts).
+- **📻 Internet radio** — paste an `http(s)://…` stream URL in the media browser.
+- **🎚️ Line-in** — capture a sound card's input (a turntable, a TV) on nodes where
+  the **input** feature is enabled, and stream *that* to the group.
+
+You mix and match freely: the kids' Pi can play a local audiobook while the
+kitchen plays Spotify, all from the same app.
+
+---
+
+## Reference
+
+- **[UI Reference](ui-reference.md)** — a screen-by-screen tour of the web app:
+  the Rooms page, room controls, the Nodes page, and the Spotify endpoints editor,
+  with screenshots of every control.
+- **[Configuration Reference](config-reference.md)** — every flag, environment
+  variable, and persisted setting, with verbose explanations: ports and
+  bind-or-increment, roles, output backends, the data/media directories, per-node
+  volume/delay/device, and per-group codec/transport/buffer.
+
+For developers and the deeper protocol/architecture docs, see the
+[repository docs](../README.md).

@@ -12,11 +12,13 @@
   } from "../lib/api.js";
   import EditableText from "./EditableText.svelte";
   import VolumeSlider from "./VolumeSlider.svelte";
+  import SpotifyEndpoints from "./SpotifyEndpoints.svelte";
 
-  let { node, self } = $props();
+  let { node, self, snapshot } = $props();
 
   let isSelf = $derived(node.id === self.id);
   let caps = $derived(node.capabilities || {});
+  let canSpotify = $derived((caps.sources ?? []).includes("spotify"));
   let portList = $derived(ports(node));
 
   // Output-delay slider (D36), wired exactly like VolumeSlider: the held draft
@@ -160,6 +162,10 @@
       </button>
     {/each}
   </div>
+
+  {#if canSpotify}
+    <SpotifyEndpoints {node} {snapshot} />
+  {/if}
 
   {#if (caps.codecs ?? []).filter((c) => c !== "opus").length || (caps.formats ?? []).length}
     <div class="row wrap format-row">

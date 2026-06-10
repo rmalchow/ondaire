@@ -19,7 +19,7 @@
     <div class="empty">No nodes yet.</div>
   {:else}
     {#each nodes as node (node.id)}
-      <NodeRow {node} {self} />
+      <NodeRow {node} {self} {snapshot} />
     {/each}
   {/if}
 </section>

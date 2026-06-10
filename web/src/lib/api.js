@@ -97,6 +97,10 @@ export function testTone(nodeId) {
 export function setDisabled(nodeId, disabled) {
   return toasted(req("PATCH", base(nodeId) + "/node", { disabled }));
 }
+// D57: replace the node's Spotify Connect presets (each {id,name,players[]}).
+export function setSpotifyEndpoints(nodeId, spotifyEndpoints) {
+  return toasted(req("PATCH", base(nodeId) + "/node", { spotifyEndpoints }));
+}
 
 // --- group membership (issued ON the acting node) ---
 export function follow(nodeId, targetId) {

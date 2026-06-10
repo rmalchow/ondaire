@@ -78,11 +78,11 @@ a {
 .app-header .spacer {
   flex: 1;
 }
-/* right column: nav link on top, the node-name status pill on its own line below */
+/* right side: nav link and the node-name status pill side by side in one row */
 .app-header .header-right {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  flex-direction: row;
+  align-items: center;
   gap: 8px;
 }
 /* node name in a pill whose color reflects the live connection (green/amber/red) */

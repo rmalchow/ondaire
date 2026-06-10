@@ -72,16 +72,17 @@ type GroupNameRecord struct {
 
 // PlaybackRecord — per-group playback status (§4, written by group master).
 type PlaybackRecord struct {
-	State       string                `json:"state"` // "idle" | "playing"
-	URI         string                `json:"uri"`
-	StartedUnix int64                 `json:"startedAt"`
-	PositionSec float64               `json:"positionSec"`
-	Codec       string                `json:"codec"`
-	Transport   string                `json:"transport"`
-	Source      contracts.SourceStats `json:"source"`
-	Version     uint64                `json:"version"`
-	UpdatedAt   int64                 `json:"updatedAt"`
-	Writer      id.ID                 `json:"writer"`
+	State       string                   `json:"state"` // "idle" | "playing"
+	URI         string                   `json:"uri"`
+	StartedUnix int64                    `json:"startedAt"`
+	PositionSec float64                  `json:"positionSec"`
+	Codec       string                   `json:"codec"`
+	Transport   string                   `json:"transport"`
+	Source      contracts.SourceStats    `json:"source"`
+	Metadata    *contracts.TrackMetadata `json:"metadata,omitempty"` // now-playing track info (D57); nil when none
+	Version     uint64                   `json:"version"`
+	UpdatedAt   int64                    `json:"updatedAt"`
+	Writer      id.ID                    `json:"writer"`
 }
 
 // GroupSettingsRecord — per-group codec/transport/bufferMs (§8.3/§8.4, LWW).

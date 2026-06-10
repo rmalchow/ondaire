@@ -185,6 +185,7 @@ func (c *Cluster) SetPlayback(group id.ID, pb contracts.Playback) {
 		Codec:       pb.Codec,
 		Transport:   pb.Transport,
 		Source:      pb.Source,
+		Metadata:    pb.Metadata,
 		Version:     ver + 1,
 		UpdatedAt:   c.clock().Unix(),
 		Writer:      c.self,

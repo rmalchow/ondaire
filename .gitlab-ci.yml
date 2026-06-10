@@ -131,15 +131,11 @@ docker:
   stage: build
   image: docker:28-cli
   needs: []
-  services:
-    - docker:28-dind
+  # No dind service / DOCKER_HOST: the runner bind-mounts the host's
+  # /var/run/docker.sock, so the docker CLI talks straight to the host daemon
+  # over the default unix socket. binfmt + a docker-container buildx builder give
+  # the multi-platform manifest.
   variables:
-    # Plain-TCP dind (no TLS): avoids the shared /certs volume, whose absence on
-    # some runners makes the docker client fail with "open /certs/client/ca.pem:
-    # no such file". The dind socket is only reachable on the runner's private
-    # job network, so unencrypted is acceptable here.
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
     IMAGE: "$CI_REGISTRY_IMAGE"
     PLATFORMS: "linux/amd64,linux/arm64"
   rules:
@@ -148,11 +144,11 @@ docker:
   before_script:
     - mkdir -p ~/.docker
     - cp "${CONFIG_JSON}" ~/.docker/config.json
-    # Wait for the dind daemon to accept connections before the first command.
-    - for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
-    # Register QEMU so the arm64 runtime-stage apk add runs under emulation, and
-    # spin up a buildx builder that can emit a multi-platform manifest.
+    # Register QEMU so the arm64 runtime-stage apk add runs under emulation.
     - docker run --privileged --rm tonistiigi/binfmt --install all
+    # Fresh docker-container builder (the default "docker" driver can't emit a
+    # multi-platform manifest). Idempotent across the shared host daemon.
+    - docker buildx rm ensemble-builder >/dev/null 2>&1 || true
     - docker buildx create --use --name ensemble-builder
   script:
     # main → "dev"; release tag → the tag itself (also moves :latest).
@@ -165,6 +161,8 @@ docker:
       $TAGS
       --push
       .
+  after_script:
+    - docker buildx rm ensemble-builder >/dev/null 2>&1 || true
   tags:
     - shared
 

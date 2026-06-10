@@ -55,11 +55,12 @@ type PortsResp struct {
 // All three fields are OPTIONAL; at least one must be present. Pointers
 // distinguish "absent" (leave unchanged) from a sent zero value.
 type NodePatchReq struct {
-	Name          *string   `json:"name,omitempty"`
-	Volume        *float64  `json:"volume,omitempty"`        // 0.0–1.0 (D35)
-	OutputDelayMs *int      `json:"outputDelayMs,omitempty"` // ±500 ms (D36)
-	OutputDevice  *string   `json:"outputDevice,omitempty"`  // ALSA device id (D37)
-	Disabled      *[]string `json:"disabled,omitempty"`      // subset of {playback,opus,input} (D40)
+	Name             *string                      `json:"name,omitempty"`
+	Volume           *float64                     `json:"volume,omitempty"`           // 0.0–1.0 (D35)
+	OutputDelayMs    *int                         `json:"outputDelayMs,omitempty"`    // ±500 ms (D36)
+	OutputDevice     *string                      `json:"outputDevice,omitempty"`     // ALSA device id (D37)
+	Disabled         *[]string                    `json:"disabled,omitempty"`         // subset of {playback,opus,input} (D40)
+	SpotifyEndpoints *[]contracts.SpotifyEndpoint `json:"spotifyEndpoints,omitempty"` // Spotify Connect presets (D57)
 }
 
 // --- GET /api/media (§6) ---------------------------------------------------

@@ -1,0 +1,321 @@
+package spotify
+
+import (
+	"context"
+	"log/slog"
+	"path/filepath"
+	"sync"
+
+	"ensemble/internal/audio"
+	"ensemble/internal/contracts"
+	"ensemble/internal/id"
+)
+
+// Engine is the slice of the group engine the manager drives (D57). Implemented
+// by *group.Engine via main's adapter; structurally satisfied here so the spotify
+// package needn't import group.
+type Engine interface {
+	Play(uri string) error
+	Stop() error
+	RefreshPlayback()
+}
+
+// Cluster is the slice of the cluster the manager reads + writes to regroup a
+// preset's players. Implemented by *cluster.Cluster.
+type Cluster interface {
+	Self() id.ID
+	Snapshot() contracts.Snapshot
+	AssignPlaybackNode(node, target id.ID) bool
+}
+
+// Manager owns every go-librespot bridge on this node (D57): the implicit default
+// endpoint ("ensemble <node>") plus one bridge per configured preset ("ensemble
+// <node>: <name>"). All bridges run concurrently (every Connect device is
+// discoverable), but only ONE endpoint plays at a time — the active one drives the
+// node's group membership and the engine's single session, preempting any other.
+type Manager struct {
+	bin     string
+	dataDir string
+	apiBase int
+	engine  Engine
+	cluster Cluster
+	log     *slog.Logger
+
+	mu        sync.Mutex
+	ctx       context.Context
+	started   bool
+	nodeName  string
+	bridges   map[string]*managed // by endpoint id; "" == default
+	usedPorts map[int]bool
+	active    string // endpoint id currently playing
+	hasActive bool
+}
+
+type managed struct {
+	ep     contracts.SpotifyEndpoint // zero value for the default endpoint
+	bridge *Bridge
+	port   int
+}
+
+// NewManager builds the manager (no processes yet — call Start). bin is the
+// resolved go-librespot path; dataDir is the node data dir (the default endpoint's
+// go-librespot auth lives directly under it, presets under dataDir/spotify/<id>).
+func NewManager(bin, dataDir, nodeName string, engine Engine, cluster Cluster, log *slog.Logger) *Manager {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Manager{
+		bin:       bin,
+		dataDir:   dataDir,
+		apiBase:   DefaultAPIPort,
+		engine:    engine,
+		cluster:   cluster,
+		log:       log.With("comp", "spotify-mgr"),
+		nodeName:  nodeName,
+		bridges:   map[string]*managed{},
+		usedPorts: map[int]bool{},
+	}
+}
+
+// Start launches the default endpoint plus the given presets. Non-blocking.
+func (m *Manager) Start(ctx context.Context, endpoints []contracts.SpotifyEndpoint) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ctx = ctx
+	m.started = true
+	// Default endpoint first — same behavior as before this feature.
+	if _, ok := m.bridges[""]; !ok {
+		m.startLocked("", contracts.SpotifyEndpoint{})
+	}
+	m.reconcilePresetsLocked(endpoints)
+}
+
+// Reconcile updates the running presets to match endpoints (add/remove/rename;
+// player-set changes apply on the next play, no restart). Safe before Start (it
+// just records intent until Start runs).
+func (m *Manager) Reconcile(endpoints []contracts.SpotifyEndpoint) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.started {
+		return
+	}
+	m.reconcilePresetsLocked(endpoints)
+}
+
+// reconcilePresetsLocked diffs the desired preset set against running bridges.
+// The default endpoint ("") is never touched here.
+func (m *Manager) reconcilePresetsLocked(endpoints []contracts.SpotifyEndpoint) {
+	want := map[string]contracts.SpotifyEndpoint{}
+	for _, ep := range endpoints {
+		if ep.ID == "" {
+			continue // defensive: normalized configs always carry an id
+		}
+		want[ep.ID] = ep
+	}
+	// Stop bridges no longer wanted.
+	for eid, mg := range m.bridges {
+		if eid == "" {
+			continue
+		}
+		if _, ok := want[eid]; !ok {
+			m.stopLocked(eid)
+			_ = mg
+		}
+	}
+	// Add new / rename changed / update player set.
+	for eid, ep := range want {
+		if mg, ok := m.bridges[eid]; ok {
+			if mg.ep.Name != ep.Name {
+				go m.renameBridge(mg.bridge, m.deviceName(eid, ep.Name))
+			}
+			mg.ep = ep // player-set change takes effect on the next play
+			continue
+		}
+		m.startLocked(eid, ep)
+	}
+}
+
+// startLocked creates, registers and runs one bridge. Caller holds mu.
+func (m *Manager) startLocked(eid string, ep contracts.SpotifyEndpoint) {
+	port := m.allocPortLocked()
+	stateDir := m.dataDir
+	if eid != "" {
+		stateDir = filepath.Join(m.dataDir, "spotify", eid)
+	}
+	b, err := New(Config{
+		BinPath:    m.bin,
+		DeviceName: m.deviceName(eid, ep.Name),
+		StateDir:   stateDir,
+		APIPort:    port,
+		Log:        m.log,
+		OnPlay:     func() { m.onPlay(eid) },
+		OnStop:     func() { m.onStop(eid) },
+		OnMetadata: func() { m.onMetadata(eid) },
+	})
+	if err != nil {
+		m.log.Warn("spotify endpoint disabled", "endpoint", eid, "err", err)
+		m.usedPorts[port] = false
+		return
+	}
+	audio.RegisterSpotifyEndpoint(eid, b.Attach, b.Latest)
+	if err := b.Run(m.ctx); err != nil {
+		m.log.Warn("spotify endpoint start failed", "endpoint", eid, "err", err)
+		audio.UnregisterSpotifyEndpoint(eid)
+		m.usedPorts[port] = false
+		return
+	}
+	m.bridges[eid] = &managed{ep: ep, bridge: b, port: port}
+}
+
+// stopLocked tears down one bridge. Caller holds mu.
+func (m *Manager) stopLocked(eid string) {
+	mg, ok := m.bridges[eid]
+	if !ok {
+		return
+	}
+	audio.UnregisterSpotifyEndpoint(eid)
+	_ = mg.bridge.Close()
+	delete(m.bridges, eid)
+	delete(m.usedPorts, mg.port)
+	if m.hasActive && m.active == eid {
+		m.hasActive = false
+	}
+}
+
+// Rename updates the node name → renames every Connect device live (no restart).
+func (m *Manager) Rename(nodeName string) {
+	m.mu.Lock()
+	m.nodeName = nodeName
+	type job struct {
+		b    *Bridge
+		name string
+	}
+	jobs := make([]job, 0, len(m.bridges))
+	for eid, mg := range m.bridges {
+		jobs = append(jobs, job{mg.bridge, m.deviceName(eid, mg.ep.Name)})
+	}
+	m.mu.Unlock()
+	for _, j := range jobs {
+		m.renameBridge(j.b, j.name)
+	}
+}
+
+func (m *Manager) renameBridge(b *Bridge, name string) {
+	if err := b.SetDeviceName(name); err != nil {
+		m.log.Warn("spotify device rename failed", "name", name, "err", err)
+	}
+}
+
+// Close stops every bridge. Idempotent.
+func (m *Manager) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for eid := range m.bridges {
+		audio.UnregisterSpotifyEndpoint(eid)
+		_ = m.bridges[eid].bridge.Close()
+	}
+	m.bridges = map[string]*managed{}
+	m.usedPorts = map[int]bool{}
+	m.hasActive = false
+	m.started = false
+	return nil
+}
+
+// ---- orchestration callbacks (fired from each bridge's event goroutine) -------
+
+func (m *Manager) onPlay(eid string) {
+	m.mu.Lock()
+	mg, ok := m.bridges[eid]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	players := append([]id.ID(nil), mg.ep.Players...)
+	m.active = eid
+	m.hasActive = true
+	m.mu.Unlock()
+
+	// The default endpoint preserves the legacy behavior: play to whatever group
+	// this node already masters, no regrouping. A preset regroups to its players.
+	if eid != "" {
+		m.setGroupMembers(players)
+		_ = m.engine.Play("spotify:" + eid)
+		return
+	}
+	_ = m.engine.Play("spotify:")
+}
+
+func (m *Manager) onStop(eid string) {
+	m.mu.Lock()
+	stop := m.hasActive && m.active == eid
+	if stop {
+		m.hasActive = false
+	}
+	m.mu.Unlock()
+	if stop {
+		_ = m.engine.Stop() // membership left intact ("stay grouped")
+	}
+}
+
+func (m *Manager) onMetadata(eid string) {
+	m.mu.Lock()
+	refresh := m.hasActive && m.active == eid
+	m.mu.Unlock()
+	if refresh {
+		m.engine.RefreshPlayback()
+	}
+}
+
+// setGroupMembers sets this master's playback-node membership EXACTLY to players:
+// the listed playback nodes join this node's group; any playback node currently in
+// it that isn't listed leaves. Gossiping nodes self-own their membership and are
+// left untouched (the UI picker leads with playback nodes).
+func (m *Manager) setGroupMembers(players []id.ID) {
+	self := m.cluster.Self()
+	snap := m.cluster.Snapshot()
+	want := make(map[id.ID]bool, len(players))
+	for _, p := range players {
+		want[p] = true
+	}
+	// Join wanted playback nodes.
+	for _, p := range players {
+		if nv, ok := nodeByID(snap, p); ok && nv.PlaybackNode {
+			m.cluster.AssignPlaybackNode(p, self)
+		}
+	}
+	// Unjoin playback nodes in our group that aren't wanted.
+	for _, nv := range snap.Nodes {
+		if nv.PlaybackNode && nv.Following == self && !want[nv.ID] {
+			m.cluster.AssignPlaybackNode(nv.ID, id.Zero)
+		}
+	}
+}
+
+// deviceName builds the advertised Connect device name. Caller holds mu (reads
+// m.nodeName) for the non-Rename callers; Rename reads it under its own lock.
+func (m *Manager) deviceName(eid, name string) string {
+	base := "ensemble " + m.nodeName
+	if eid == "" {
+		return base
+	}
+	return base + ": " + name
+}
+
+// allocPortLocked returns the lowest free localhost API port at/after apiBase.
+func (m *Manager) allocPortLocked() int {
+	for p := m.apiBase; ; p++ {
+		if !m.usedPorts[p] {
+			m.usedPorts[p] = true
+			return p
+		}
+	}
+}
+
+func nodeByID(snap contracts.Snapshot, nid id.ID) (contracts.NodeView, bool) {
+	for _, n := range snap.Nodes {
+		if n.ID == nid {
+			return n, true
+		}
+	}
+	return contracts.NodeView{}, false
+}

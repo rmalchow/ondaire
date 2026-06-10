@@ -25,6 +25,8 @@ type Cluster interface {
 	SetOutputDevice(device string)
 	// SetDisabled sets THIS node's operator-disabled feature list (D40).
 	SetDisabled(disabled []string)
+	// SetSpotifyEndpoints replicates THIS node's Spotify Connect presets (D57).
+	SetSpotifyEndpoints(eps []contracts.SpotifyEndpoint)
 	// AssignPlaybackNode assigns (target != Zero) or clears a non-gossiping
 	// playback node's group, master-side (D59). Returns false if the node is
 	// unknown or not a playback node.
@@ -84,6 +86,17 @@ type NodeConfig interface {
 	SetOutputDelayMs(ms int) error       // D36
 	SetOutputDevice(d string) error      // D37
 	SetDisabled(disabled []string) error // D40
+	// SetSpotifyEndpoints persists the presets and returns the NORMALIZED list
+	// (stable ids, deduped players) for the caller to replicate + reconcile (D57).
+	SetSpotifyEndpoints(eps []contracts.SpotifyEndpoint) ([]contracts.SpotifyEndpoint, error)
+}
+
+// Spotify is the live-apply side of PATCH /api/node for Spotify Connect presets
+// (D57): the bridge manager. nil when no go-librespot is present (the handler
+// then persists + replicates only). *spotify.Manager satisfies it.
+type Spotify interface {
+	Reconcile(eps []contracts.SpotifyEndpoint) // start/stop/rename preset bridges
+	Rename(nodeName string)                    // live-rename every Connect device
 }
 
 // SinkControl is the live-apply side of PATCH /api/node for volume/output-delay

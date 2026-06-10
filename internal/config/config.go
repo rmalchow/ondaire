@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"ensemble/internal/contracts"
 	"ensemble/internal/id"
 )
 
@@ -57,6 +58,11 @@ type Config struct {
 	OutputDevice  string   // selected ALSA output device id; default "default" (D37)
 	Disabled      []string // operator-disabled features; subset of {playback,opus,input} (D40)
 	Following     id.ID    // last-known follow target; id.Zero == solo (D45)
+
+	// SpotifyEndpoints are the node's extra Spotify Connect presets (D57): the
+	// manager starts one go-librespot bridge per entry. The default endpoint is
+	// implicit (not stored). From node.json; mutated via SetSpotifyEndpoints.
+	SpotifyEndpoints []contracts.SpotifyEndpoint
 
 	// Resolved, absolute directories (§2).
 	DataDir  string // e.g. /abs/data; contains node.json
@@ -195,6 +201,7 @@ func Load(opts Options) (*Config, error) {
 	cfg.OutputDelayMs = nf.OutputDelayMs
 	cfg.OutputDevice = nf.OutputDevice
 	cfg.Disabled = nf.Disabled
+	cfg.SpotifyEndpoints = nf.SpotifyEndpoints
 	// nf.Following is already normalized to "" or valid 32-hex by the store, so
 	// this Parse only fails on the empty (solo) case → id.Zero (D45).
 	if nf.Following != "" {
@@ -215,6 +222,19 @@ func (c *Config) Rename(name string) error {
 	}
 	c.NodeName = nf.Name
 	return nil
+}
+
+// SetSpotifyEndpoints persists the Spotify Connect presets (D57) and atomically
+// rewrites node.json, updating c.SpotifyEndpoints with the normalized result on
+// success only. Replicating (cluster.SetSpotifyEndpoints) + reconciling the
+// bridge manager is the caller's job.
+func (c *Config) SetSpotifyEndpoints(eps []contracts.SpotifyEndpoint) ([]contracts.SpotifyEndpoint, error) {
+	nf, err := c.store.SetSpotifyEndpoints(c.NodeID, eps)
+	if err != nil {
+		return nil, err
+	}
+	c.SpotifyEndpoints = nf.SpotifyEndpoints
+	return c.SpotifyEndpoints, nil
 }
 
 // SetVolume persists the playback gain (D35) and atomically rewrites node.json,

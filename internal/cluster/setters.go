@@ -43,6 +43,23 @@ func (c *Cluster) SetName(name string) {
 	c.broadcastOwn(snap)
 }
 
+// SetSpotifyEndpoints replaces this node's Spotify Connect presets (D57) and
+// gossips the change. The caller (api) supplies the already-normalized list from
+// the config store, so C stores it verbatim (deep-cloned so the doc never aliases
+// the caller's slices).
+func (c *Cluster) SetSpotifyEndpoints(eps []contracts.SpotifyEndpoint) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	r := c.bumpOwn()
+	r.SpotifyEndpoints = cloneEndpoints(eps)
+	snap := cloneNode(r)
+	c.mu.Unlock()
+	c.broadcastOwn(snap)
+}
+
 // SetVolume sets this node's playback gain (D35). Caller clamps; C stores
 // verbatim. No-op when unchanged.
 func (c *Cluster) SetVolume(v float64) {

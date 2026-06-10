@@ -409,6 +409,19 @@ func run(ctx context.Context, opt options) (rerr error) {
 		},
 	})
 
+	// 12b. Spotify bridge manager (D57): owns the default Connect device plus one
+	//      go-librespot bridge per configured preset. Constructed now (no processes)
+	//      so the API can reconcile/rename it; started during ACTIVATE below. nil
+	//      when no go-librespot binary is present.
+	var spotMgr *spotify.Manager
+	if bin := audio.FindSpotifyBinary(); bin != "" {
+		spotMgr = spotify.NewManager(bin, cfg.DataDir, cfg.NodeName, engine, cl, base)
+	}
+	var spotifyCtl api.Spotify
+	if spotMgr != nil {
+		spotifyCtl = spotMgr // typed-nil guard: a nil *Manager must stay a nil interface
+	}
+
 	// 13. API server (I) on the bound HTTP listener. Group is wired via an adapter
 	//     that forwards ctx and maps group errors to api sentinels.
 	distFS, err := fs.Sub(web.DistFS, "dist")
@@ -420,6 +433,7 @@ func run(ctx context.Context, opt options) (rerr error) {
 		Group:             &groupAdapter{e: engine, cl: cl},
 		Media:             api.NewMediaLister(cfg.MediaDir),
 		NodeCfg:           cfg,
+		Spotify:           spotifyCtl,
 		Stats:             statusStats(theSink, clockFol, engine),
 		Sink:              func() api.SinkControl { return theSink },
 		ApplyOutputDevice: applyOutputDevice(backendName, output, theSink, base),
@@ -468,33 +482,13 @@ func run(ctx context.Context, opt options) (rerr error) {
 	go engine.Run(ctx)
 	stack.push("engine", func(context.Context) error { return engine.Close() })
 
-	// Spotify bridge (D57): if go-librespot/librespot is present — working dir
-	// first, then $PATH — own one Connect device named "ensemble <node>" and
-	// auto-switch THIS node's group to the spotify: source when the phone starts
-	// playing (idle on stop). Phones pick the room via the per-node device name —
-	// the phone is the controller. Pipe audio flows through the bridge into the
-	// spotify: source via SetSpotifyAttach.
-	if bin := audio.FindSpotifyBinary(); bin != "" {
-		sb, err := spotify.New(spotify.Config{
-			BinPath:    bin,
-			DeviceName: "ensemble " + cfg.NodeName,
-			StateDir:   cfg.DataDir,
-			Log:        base,
-			OnPlay:     func() { _ = engine.Play("spotify:") },
-			OnStop:     func() { _ = engine.Stop() },
-			OnMetadata: func() { engine.RefreshPlayback() },
-		})
-		if err != nil {
-			log.Warn("spotify bridge disabled", "err", err)
-		} else {
-			audio.SetSpotifyAttach(sb.Attach)
-			audio.SetSpotifyMeta(sb.Latest)
-			if err := sb.Run(ctx); err != nil {
-				log.Warn("spotify bridge start failed", "err", err)
-			} else {
-				stack.push("spotify", func(context.Context) error { return sb.Close() })
-			}
-		}
+	// Spotify bridge manager (D57): start the default Connect device ("ensemble
+	// <node>", the legacy auto-switch behavior) plus one go-librespot bridge per
+	// configured preset ("ensemble <node>: <name>"). All bridges advertise at once;
+	// playing to one regroups its players + preempts any other (mutually exclusive).
+	if spotMgr != nil {
+		spotMgr.Start(ctx, cfg.SpotifyEndpoints)
+		stack.push("spotify", func(context.Context) error { return spotMgr.Close() })
 	}
 
 	// Master-side control driver (D59/D62): drives the non-gossiping playback nodes

@@ -22,6 +22,7 @@ type Config struct {
 	Group   Group
 	Media   Media
 	NodeCfg NodeConfig         // config A: persist PATCH /api/node fields
+	Spotify Spotify            // D57 bridge manager (live-apply presets/rename); nil when no go-librespot
 	Stats   func() StatusStats // closure over sink (E), clock (F), source (G) stats
 	Sink    func() SinkControl // closure → the live sink (E); may return nil
 	// ApplyOutputDevice reopens the output backend for the new device and swaps it

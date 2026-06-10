@@ -19,13 +19,14 @@ type fakeCluster struct {
 	dial     map[id.ID][]netip.Addr
 	observed []observeCall
 
-	setName     []string
-	setVolume   []float64
-	setDelay    []int
-	setDevice   []string
-	setDisabled [][]string
-	assigned    [][2]id.ID
-	patched     []id.ID
+	setName             []string
+	setVolume           []float64
+	setDelay            []int
+	setDevice           []string
+	setDisabled         [][]string
+	setSpotifyEndpoints [][]contracts.SpotifyEndpoint
+	assigned            [][2]id.ID
+	patched             []id.ID
 }
 
 type observeCall struct {
@@ -91,6 +92,12 @@ func (f *fakeCluster) SetOutputDevice(d string) {
 func (f *fakeCluster) SetDisabled(d []string) {
 	f.mu.Lock()
 	f.setDisabled = append(f.setDisabled, append([]string(nil), d...))
+	f.mu.Unlock()
+}
+
+func (f *fakeCluster) SetSpotifyEndpoints(eps []contracts.SpotifyEndpoint) {
+	f.mu.Lock()
+	f.setSpotifyEndpoints = append(f.setSpotifyEndpoints, eps)
 	f.mu.Unlock()
 }
 
@@ -231,11 +238,14 @@ type fakeNodeConfig struct {
 	delayErr    error
 	deviceErr   error
 	disabledErr error
+	spotifyErr  error
 	names       []string
 	vols        []float64
 	delays      []int
 	devices     []string
 	disabled    [][]string
+
+	spotifyEndpoints [][]contracts.SpotifyEndpoint
 }
 
 func (n *fakeNodeConfig) Rename(name string) error {
@@ -271,6 +281,13 @@ func (n *fakeNodeConfig) SetDisabled(d []string) error {
 	n.disabled = append(n.disabled, append([]string(nil), d...))
 	n.mu.Unlock()
 	return n.disabledErr
+}
+
+func (n *fakeNodeConfig) SetSpotifyEndpoints(eps []contracts.SpotifyEndpoint) ([]contracts.SpotifyEndpoint, error) {
+	n.mu.Lock()
+	n.spotifyEndpoints = append(n.spotifyEndpoints, eps)
+	n.mu.Unlock()
+	return eps, n.spotifyErr
 }
 
 // fakeSink implements SinkControl.

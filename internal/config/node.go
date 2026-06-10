@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"ensemble/internal/contracts"
 	"ensemble/internal/id"
 )
 
@@ -61,6 +62,8 @@ type NodeFile struct {
 	OutputDevice  string   `json:"outputDevice"`  // selected ALSA device id, default "default" (D37)
 	Disabled      []string `json:"disabled"`      // operator-disabled features (D40): subset of {playback,opus,input}
 	Following     string   `json:"following"`     // last-known follow target as 32-hex (D45); "" == solo
+
+	SpotifyEndpoints []contracts.SpotifyEndpoint `json:"spotifyEndpoints,omitempty"` // extra Spotify Connect presets (D57)
 }
 
 // rawNodeFile is the presence-aware decode shape: pointer fields tell "absent"
@@ -74,6 +77,8 @@ type rawNodeFile struct {
 	OutputDevice  *string   `json:"outputDevice"`
 	Disabled      *[]string `json:"disabled"`
 	Following     *string   `json:"following"`
+
+	SpotifyEndpoints []contracts.SpotifyEndpoint `json:"spotifyEndpoints"`
 }
 
 // Store owns a single node.json file. One Store per node. Methods are safe for
@@ -142,6 +147,7 @@ func (s *Store) LoadOrCreate(initialName string) (NodeFile, error) {
 	if raw.Following != nil {
 		nf.Following = *raw.Following
 	}
+	nf.SpotifyEndpoints = normalizeEndpoints(raw.SpotifyEndpoints)
 	nf.Volume = clampVolume(nf.Volume)
 	nf.OutputDelayMs = clampDelayMs(nf.OutputDelayMs)
 	nf.OutputDevice = normalizeDevice(nf.OutputDevice)
@@ -230,6 +236,16 @@ func (s *Store) SetFollowing(nodeID, target id.ID) (NodeFile, error) {
 	})
 }
 
+// SetSpotifyEndpoints writes the Spotify Connect presets (D57) while preserving
+// the other fields, via the same atomic replace. The id argument MUST equal the
+// persisted id (ErrIDImmutable on mismatch). The list is normalized (trimmed
+// names, stable unique ids, deduped players) before write.
+func (s *Store) SetSpotifyEndpoints(nodeID id.ID, eps []contracts.SpotifyEndpoint) (NodeFile, error) {
+	return s.writeAtomic(nodeID, func(nf *NodeFile) {
+		nf.SpotifyEndpoints = normalizeEndpoints(eps)
+	})
+}
+
 // writeAtomic re-reads the current NodeFile, asserts the id matches, applies the
 // single-field mutate, and atomically replaces node.json. On any error the old
 // file is untouched.
@@ -247,10 +263,71 @@ func (s *Store) writeAtomic(nodeID id.ID, mutate func(*NodeFile)) (NodeFile, err
 	cur.OutputDevice = normalizeDevice(cur.OutputDevice)
 	cur.Disabled = normalizeDisabled(cur.Disabled)
 	cur.Following = normalizeFollowing(cur.Following)
+	cur.SpotifyEndpoints = normalizeEndpoints(cur.SpotifyEndpoints)
 	if err := s.write(cur); err != nil {
 		return NodeFile{}, err
 	}
 	return cur, nil
+}
+
+// normalizeEndpoints trims names, drops nameless endpoints, assigns a stable
+// unique slug id (derived from the name when absent), and dedupes players
+// (dropping the zero id). Order is preserved.
+func normalizeEndpoints(eps []contracts.SpotifyEndpoint) []contracts.SpotifyEndpoint {
+	if len(eps) == 0 {
+		return nil
+	}
+	usedID := map[string]bool{}
+	out := make([]contracts.SpotifyEndpoint, 0, len(eps))
+	for _, ep := range eps {
+		name := strings.TrimSpace(ep.Name)
+		if name == "" {
+			continue
+		}
+		eid := slugify(ep.ID)
+		if eid == "" {
+			eid = slugify(name)
+		}
+		if eid == "" {
+			eid = "ep"
+		}
+		base := eid
+		for n := 2; usedID[eid]; n++ {
+			eid = fmt.Sprintf("%s-%d", base, n)
+		}
+		usedID[eid] = true
+
+		seen := map[id.ID]bool{}
+		players := make([]id.ID, 0, len(ep.Players))
+		for _, p := range ep.Players {
+			if p.IsZero() || seen[p] {
+				continue
+			}
+			seen[p] = true
+			players = append(players, p)
+		}
+		out = append(out, contracts.SpotifyEndpoint{ID: eid, Name: name, Players: players})
+	}
+	return out
+}
+
+// slugify lowercases and keeps [a-z0-9-], collapsing other runs to single "-".
+func slugify(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			dash = false
+		default:
+			if !dash && b.Len() > 0 {
+				b.WriteByte('-')
+				dash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // write serializes nf to node.json atomically: a temp file in the same

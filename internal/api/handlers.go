@@ -117,7 +117,7 @@ func (s *Server) handlePatchNode(c echo.Context) error {
 		return failCode(c, http.StatusBadRequest, "bad_request", "")
 	}
 	if req.Name == nil && req.Volume == nil && req.OutputDelayMs == nil &&
-		req.OutputDevice == nil && req.Disabled == nil {
+		req.OutputDevice == nil && req.Disabled == nil && req.SpotifyEndpoints == nil {
 		return failCode(c, http.StatusBadRequest, "empty_patch", "")
 	}
 
@@ -146,6 +146,16 @@ func (s *Server) handlePatchNode(c echo.Context) error {
 			}
 		}
 	}
+	if req.SpotifyEndpoints != nil {
+		if len(*req.SpotifyEndpoints) > 16 {
+			return failCode(c, http.StatusBadRequest, "too_many_endpoints", "")
+		}
+		for _, ep := range *req.SpotifyEndpoints {
+			if len(strings.TrimSpace(ep.Name)) > 64 || len(ep.Players) > 64 {
+				return failCode(c, http.StatusBadRequest, "bad_endpoint", "")
+			}
+		}
+	}
 
 	if req.Name != nil {
 		if err := s.cfg.NodeCfg.Rename(*req.Name); err != nil {
@@ -153,6 +163,9 @@ func (s *Server) handlePatchNode(c echo.Context) error {
 			return failCode(c, http.StatusInternalServerError, "internal_error", "")
 		}
 		s.cfg.Cluster.SetName(*req.Name)
+		if s.cfg.Spotify != nil {
+			s.cfg.Spotify.Rename(*req.Name) // live-rename every Connect device (D57)
+		}
 		s.log.Info("node mutation", append(auditAttrs(c, "rename"), "name", *req.Name)...)
 	}
 	if req.Volume != nil {
@@ -200,6 +213,18 @@ func (s *Server) handlePatchNode(c echo.Context) error {
 			s.cfg.ApplyDisabled(dis)
 		}
 		s.log.Info("node mutation", append(auditAttrs(c, "disabled"), "disabled", dis)...)
+	}
+	if req.SpotifyEndpoints != nil {
+		norm, err := s.cfg.NodeCfg.SetSpotifyEndpoints(*req.SpotifyEndpoints)
+		if err != nil {
+			s.log.Warn("spotify endpoints persist failed", "err", err)
+			return failCode(c, http.StatusInternalServerError, "internal_error", "")
+		}
+		s.cfg.Cluster.SetSpotifyEndpoints(norm)
+		if s.cfg.Spotify != nil {
+			s.cfg.Spotify.Reconcile(norm)
+		}
+		s.log.Info("node mutation", append(auditAttrs(c, "spotifyEndpoints"), "count", len(norm))...)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

@@ -183,6 +183,18 @@ type NodeView struct {
 	Stale         bool               `json:"stale"` // not updated recently (UI hint)
 	UpdatedAt     int64              `json:"updatedAt"`
 	Version       uint64             `json:"version"`
+
+	SpotifyEndpoints []SpotifyEndpoint `json:"spotifyEndpoints,omitempty"` // extra Spotify Connect presets (D57); default endpoint is implicit
+}
+
+// SpotifyEndpoint is a saved Spotify Connect preset on a node (D57): a named
+// extra Connect device ("ensemble <node>: <name>") that, when played to, groups
+// the listed players and plays to them. The first/default endpoint ("ensemble
+// <node>") is implicit (current behavior) and not stored here.
+type SpotifyEndpoint struct {
+	ID      string  `json:"id"`      // stable per-node slug; carried in the spotify:<id> URI
+	Name    string  `json:"name"`    // display name + Connect device suffix
+	Players []id.ID `json:"players"` // playback nodes grouped while this endpoint plays
 }
 
 // Capabilities mirror §1.

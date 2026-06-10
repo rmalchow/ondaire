@@ -50,6 +50,10 @@ type NodeRecord struct {
 	// commands (D58). Normal gossiping nodes leave these zero.
 	PlaybackNode bool `json:"playbackNode,omitempty"`
 	ControlPort  int  `json:"controlPort,omitempty"`
+
+	// SpotifyEndpoints are the node's extra Spotify Connect presets (D57),
+	// self-owned + replicated so any node's UI can render/edit them.
+	SpotifyEndpoints []contracts.SpotifyEndpoint `json:"spotifyEndpoints,omitempty"`
 }
 
 // obsEntry is one observed-IP record inside a NodeRecord (§3.1).
@@ -212,6 +216,20 @@ func (d *Document) mergeAllTracked(self id.ID, remote *Document) (changed, looku
 }
 
 // cloneNode deep-copies a NodeRecord (its Addrs slice and Observed map).
+// cloneEndpoints deep-copies the Spotify presets (each carries a Players slice)
+// so a replicated/snapshotted record never aliases the owner's backing arrays.
+func cloneEndpoints(eps []contracts.SpotifyEndpoint) []contracts.SpotifyEndpoint {
+	if eps == nil {
+		return nil
+	}
+	out := make([]contracts.SpotifyEndpoint, len(eps))
+	for i, ep := range eps {
+		ep.Players = append([]id.ID(nil), ep.Players...)
+		out[i] = ep
+	}
+	return out
+}
+
 func cloneNode(r *NodeRecord) *NodeRecord {
 	cp := *r
 	if r.Addrs != nil {
@@ -226,6 +244,7 @@ func cloneNode(r *NodeRecord) *NodeRecord {
 	if r.Disabled != nil {
 		cp.Disabled = append([]string(nil), r.Disabled...)
 	}
+	cp.SpotifyEndpoints = cloneEndpoints(r.SpotifyEndpoints)
 	if r.Caps.Codecs != nil {
 		cp.Caps.Codecs = append([]string(nil), r.Caps.Codecs...)
 	}

@@ -73,15 +73,16 @@ type obsThrottle struct {
 // Config wires the cluster. All ports/addrs are the ACTUALLY-bound values from
 // netx (K passes them after bind-or-increment, §2).
 type Config struct {
-	Self          id.ID
-	Name          string
-	Volume        float64
-	OutputDelayMs int
-	OutputDevice  string                   // selected ALSA device id (D37)
-	OutputDevices []contracts.OutputDevice // enumerated devices on this node (D37)
-	InputDevices  []contracts.InputDevice  // enumerated capture devices on this node (D48)
-	Caps          contracts.Capabilities   // PROBED caps (D40: effective = caps − disabled)
-	Disabled      []string                 // operator-disabled features (D40)
+	Self             id.ID
+	Name             string
+	Volume           float64
+	OutputDelayMs    int
+	OutputDevice     string                      // selected ALSA device id (D37)
+	OutputDevices    []contracts.OutputDevice    // enumerated devices on this node (D37)
+	InputDevices     []contracts.InputDevice     // enumerated capture devices on this node (D48)
+	Caps             contracts.Capabilities      // PROBED caps (D40: effective = caps − disabled)
+	Disabled         []string                    // operator-disabled features (D40)
+	SpotifyEndpoints []contracts.SpotifyEndpoint // extra Spotify Connect presets (D57)
 
 	// InitialFollowing seeds this node's own record's Following at boot (D45):
 	// the last-known follow target persisted in node.json. Gossiped from the
@@ -151,24 +152,25 @@ func New(cfg Config) (*Cluster, error) {
 	nowUnix := now().Unix()
 	doc := newDocument()
 	doc.Nodes[cfg.Self] = &NodeRecord{
-		ID:            cfg.Self,
-		Name:          cfg.Name,
-		Volume:        cfg.Volume,
-		OutputDelayMs: cfg.OutputDelayMs,
-		OutputDevice:  cfg.OutputDevice,
-		OutputDevices: append([]contracts.OutputDevice(nil), cfg.OutputDevices...),
-		InputDevices:  append([]contracts.InputDevice(nil), cfg.InputDevices...),
-		Addrs:         append([]string(nil), cfg.Addrs...),
-		HTTPPort:      cfg.HTTPPort,
-		StreamPort:    cfg.StreamPort,
-		SourcePort:    cfg.SourcePort,
-		GossipPort:    cfg.GossipPort,
-		Caps:          cfg.Caps,
-		Disabled:      append([]string(nil), cfg.Disabled...),
-		Following:     cfg.InitialFollowing,
-		Observed:      map[id.ID]obsEntry{},
-		Version:       1,
-		UpdatedAt:     nowUnix,
+		ID:               cfg.Self,
+		Name:             cfg.Name,
+		Volume:           cfg.Volume,
+		OutputDelayMs:    cfg.OutputDelayMs,
+		OutputDevice:     cfg.OutputDevice,
+		OutputDevices:    append([]contracts.OutputDevice(nil), cfg.OutputDevices...),
+		InputDevices:     append([]contracts.InputDevice(nil), cfg.InputDevices...),
+		Addrs:            append([]string(nil), cfg.Addrs...),
+		HTTPPort:         cfg.HTTPPort,
+		StreamPort:       cfg.StreamPort,
+		SourcePort:       cfg.SourcePort,
+		GossipPort:       cfg.GossipPort,
+		Caps:             cfg.Caps,
+		Disabled:         append([]string(nil), cfg.Disabled...),
+		Following:        cfg.InitialFollowing,
+		SpotifyEndpoints: cloneEndpoints(cfg.SpotifyEndpoints),
+		Observed:         map[id.ID]obsEntry{},
+		Version:          1,
+		UpdatedAt:        nowUnix,
 	}
 
 	// D41: load the persisted group names + settings lookup tables into the doc

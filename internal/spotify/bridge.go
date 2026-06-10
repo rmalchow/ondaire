@@ -109,6 +109,10 @@ func New(cfg Config) (*Bridge, error) {
 	if cfg.APIPort == 0 {
 		cfg.APIPort = DefaultAPIPort
 	}
+	// Per-instance StateDir (the manager gives each bridge its own) may not exist.
+	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
+		return nil, fmt.Errorf("spotify: state dir: %w", err)
+	}
 	fifo := filepath.Join(cfg.StateDir, "spotify.fifo")
 	// A stale FIFO (or plain file) from a prior run is replaced.
 	_ = os.Remove(fifo)

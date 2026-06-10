@@ -239,18 +239,29 @@ func (m *Manager) onPlay(eid string) {
 		return
 	}
 	players := append([]id.ID(nil), mg.ep.Players...)
+	switching := m.hasActive && m.active != eid
 	m.active = eid
 	m.hasActive = true
 	m.mu.Unlock()
 
 	// The default endpoint preserves the legacy behavior: play to whatever group
-	// this node already masters, no regrouping. A preset regroups to its players.
-	if eid != "" {
-		m.setGroupMembers(players)
-		_ = m.engine.Play("spotify:" + eid)
+	// this node already masters, no regrouping. engine.Play stops any running
+	// session itself, so the default path is a plain (re)start.
+	if eid == "" {
+		_ = m.engine.Play("spotify:")
 		return
 	}
-	_ = m.engine.Play("spotify:")
+
+	// Preset: do a CLEAN HANDOFF when switching from another endpoint. Stop +
+	// disconnect the running stream FIRST (so its subscribers BYE immediately),
+	// THEN regroup to this preset's players, THEN start attached to the new
+	// stream. Regrouping between stop and start prevents the old and new streams
+	// from briefly overlapping on shared/moved speakers ("two streams fighting").
+	if switching {
+		_ = m.engine.Stop()
+	}
+	m.setGroupMembers(players)
+	_ = m.engine.Play("spotify:" + eid)
 }
 
 func (m *Manager) onStop(eid string) {

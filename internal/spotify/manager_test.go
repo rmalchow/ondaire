@@ -15,15 +15,23 @@ type fakeEngine struct {
 	refresh   int
 	follows   []id.ID
 	unfollows int
+	ops       []string // ordered log of "play:<uri>" / "stop"
 }
 
 func (f *fakeEngine) Play(uri string) error {
 	f.mu.Lock()
 	f.plays = append(f.plays, uri)
+	f.ops = append(f.ops, "play:"+uri)
 	f.mu.Unlock()
 	return nil
 }
-func (f *fakeEngine) Stop() error      { f.mu.Lock(); f.stops++; f.mu.Unlock(); return nil }
+func (f *fakeEngine) Stop() error {
+	f.mu.Lock()
+	f.stops++
+	f.ops = append(f.ops, "stop")
+	f.mu.Unlock()
+	return nil
+}
 func (f *fakeEngine) RefreshPlayback() { f.mu.Lock(); f.refresh++; f.mu.Unlock() }
 func (f *fakeEngine) Follow(t id.ID) error {
 	f.mu.Lock()
@@ -150,24 +158,33 @@ func TestOnPlayDefaultNoRegroup(t *testing.T) {
 	}
 }
 
-// Starting endpoint B preempts A: a later OnStop from A (the deselected device)
-// must NOT stop B's playback.
-func TestOnStopOnlyStopsActiveEndpoint(t *testing.T) {
-	cl := &fakeCl{self: mkID(1)}
+// Switching A→B is a clean handoff: stop the running stream, regroup, then start
+// the new one — in that order. A later stale OnStop from the deselected A must NOT
+// stop B.
+func TestSwitchEndpointCleanHandoff(t *testing.T) {
+	self, p := mkID(1), mkID(2)
+	cl := &fakeCl{self: self, snap: contracts.Snapshot{Nodes: []contracts.NodeView{{ID: p, PlaybackNode: true}}}}
 	eng := &fakeEngine{}
 	m := newTestMgr(eng, cl)
-	m.bridges["a"] = &managed{ep: contracts.SpotifyEndpoint{ID: "a"}}
-	m.bridges["b"] = &managed{ep: contracts.SpotifyEndpoint{ID: "b"}}
+	m.bridges["a"] = &managed{ep: contracts.SpotifyEndpoint{ID: "a", Players: []id.ID{p}}}
+	m.bridges["b"] = &managed{ep: contracts.SpotifyEndpoint{ID: "b", Players: []id.ID{p}}}
 
-	m.onPlay("a")
-	m.onPlay("b") // preempts a (active = b)
-	m.onStop("a") // stale stop from the deselected device
-	if eng.stops != 0 {
-		t.Fatalf("stop fired %d times for the inactive endpoint, want 0", eng.stops)
+	m.onPlay("a") // nothing active → just play a
+	m.onPlay("b") // switch: stop a, regroup, play b
+
+	// Order: play a, then on switch stop BEFORE play b.
+	want := []string{"play:spotify:a", "stop", "play:spotify:b"}
+	if got := eng.ops; len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("handoff order = %v, want %v", got, want)
 	}
-	m.onStop("b")
+
+	m.onStop("a") // stale stop from the deselected device → ignored
 	if eng.stops != 1 {
-		t.Fatalf("stop fired %d times for the active endpoint, want 1", eng.stops)
+		t.Fatalf("stale onStop stopped the active endpoint: stops=%d, want 1", eng.stops)
+	}
+	m.onStop("b") // active → stop
+	if eng.stops != 2 {
+		t.Fatalf("active onStop did not stop: stops=%d, want 2", eng.stops)
 	}
 }
 

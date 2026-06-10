@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/netip"
@@ -197,19 +198,20 @@ func run(ctx context.Context, opt options) (rerr error) {
 		}
 	}()
 
-	// 2. Port binds — bind-or-increment; capture the ACTUAL bound port each (§2).
-	streamTCP, streamUDP, streamPort, err := netx.BindTCPUDP(opt.Host, cfg.StreamPort, netx.DefaultTries)
+	// 2. Port binds — pinned (flag/env) ports bind EXACTLY or fail; unset ports
+	//    bind-or-increment (§2). Capture the ACTUAL bound port each.
+	streamTCP, streamUDP, streamPort, err := netx.BindTCPUDP(opt.Host, cfg.StreamPort, bindTries(cfg.ExplicitPorts.Stream))
 	if err != nil {
-		return fmt.Errorf("bind stream port (base %d): %w", cfg.StreamPort, err)
+		return portBindErr("stream", cfg.StreamPort, cfg.ExplicitPorts.Stream, err)
 	}
 	stack.push("stream listeners", func(context.Context) error {
 		_ = streamTCP.Close()
 		return nil
 	})
 
-	srcTCP, srcUDP, sourcePort, err := netx.BindTCPUDP(opt.Host, cfg.SourcePort, netx.DefaultTries)
+	srcTCP, srcUDP, sourcePort, err := netx.BindTCPUDP(opt.Host, cfg.SourcePort, bindTries(cfg.ExplicitPorts.Source))
 	if err != nil {
-		return fmt.Errorf("bind source port (base %d): %w", cfg.SourcePort, err)
+		return portBindErr("source", cfg.SourcePort, cfg.ExplicitPorts.Source, err)
 	}
 	stack.push("source sockets", func(context.Context) error {
 		_ = srcTCP.Close()
@@ -217,18 +219,18 @@ func run(ctx context.Context, opt options) (rerr error) {
 		return nil
 	})
 
-	httpLn, httpPort, err := netx.BindTCP(opt.Host, cfg.HTTPPort, netx.DefaultTries)
+	httpLn, httpPort, err := netx.BindTCP(opt.Host, cfg.HTTPPort, bindTries(cfg.ExplicitPorts.HTTP))
 	if err != nil {
-		return fmt.Errorf("bind http port (base %d): %w", cfg.HTTPPort, err)
+		return portBindErr("http", cfg.HTTPPort, cfg.ExplicitPorts.HTTP, err)
 	}
 	stack.push("http listener", func(context.Context) error {
 		_ = httpLn.Close()
 		return nil
 	})
 
-	gossipPort, gossipReleased, err := probeGossipPort(opt.Host, cfg.GossipPort, netx.DefaultTries)
+	gossipPort, gossipReleased, err := probeGossipPort(opt.Host, cfg.GossipPort, bindTries(cfg.ExplicitPorts.Gossip))
 	if err != nil {
-		return fmt.Errorf("probe gossip port (base %d): %w", cfg.GossipPort, err)
+		return portBindErr("gossip", cfg.GossipPort, cfg.ExplicitPorts.Gossip, err)
 	}
 
 	// PORTS (§2): one consistent line per actually-bound port at startup.
@@ -534,6 +536,19 @@ func run(ctx context.Context, opt options) (rerr error) {
 	go func() { apiErr <- apiSrv.Start() }()
 	stack.push("api", func(sc context.Context) error { return apiSrv.Shutdown(sc) })
 
+	printBanner(os.Stderr, fmt.Sprintf("ensemble %s — ready", version), [][2]string{
+		{"node", fmt.Sprintf("%s  (%s)", cfg.NodeName, cfg.NodeID.String())},
+		{"roles", cfg.Role.String()},
+		{"bind", host},
+		{"ports", fmt.Sprintf("http=%d  stream=%d  source=%d  gossip=%d  (tcp+udp; bind-or-increment)", httpPort, streamPort, sourcePort, gossipPort)},
+		{"paths", fmt.Sprintf("data=%s  media=%s", cfg.DataDir, cfg.MediaDir)},
+		{"output", backendName},
+		{"codecs", strings.Join(caps.Codecs, ", ")},
+		{"sources", strings.Join(caps.Sources, ", ")},
+		{"backends", strings.Join(caps.Backends, ", ")},
+		{"spotify", spotifyBannerValue(cfg.NodeName)},
+	})
+
 	log.Info("ready",
 		"version", version,
 		"id", cfg.NodeID.String(), "name", cfg.NodeName,
@@ -583,16 +598,16 @@ func runPlayback(ctx context.Context, opt options, cfg *config.Config, base *slo
 
 	// Sockets: STREAM_PORT (mux: clock probes + UDP audio) and CONTROL_PORT
 	// (master→playback commands). No HTTP, source, or gossip ports.
-	streamTCP, streamUDP, streamPort, err := netx.BindTCPUDP(opt.Host, cfg.StreamPort, netx.DefaultTries)
+	streamTCP, streamUDP, streamPort, err := netx.BindTCPUDP(opt.Host, cfg.StreamPort, bindTries(cfg.ExplicitPorts.Stream))
 	if err != nil {
-		return fmt.Errorf("bind stream port (base %d): %w", cfg.StreamPort, err)
+		return portBindErr("stream", cfg.StreamPort, cfg.ExplicitPorts.Stream, err)
 	}
 	_ = streamTCP.Close() // a playback node dials the master's source for TCP; it never listens
 	stack.push("stream socket", func(context.Context) error { _ = streamUDP.Close(); return nil })
 
-	ctrlTCP, ctrlUDP, controlPort, err := netx.BindTCPUDP(opt.Host, cfg.ControlPort, netx.DefaultTries)
+	ctrlTCP, ctrlUDP, controlPort, err := netx.BindTCPUDP(opt.Host, cfg.ControlPort, bindTries(cfg.ExplicitPorts.Control))
 	if err != nil {
-		return fmt.Errorf("bind control port (base %d): %w", cfg.ControlPort, err)
+		return portBindErr("control", cfg.ControlPort, cfg.ExplicitPorts.Control, err)
 	}
 	_ = ctrlTCP.Close() // control is UDP soft-state (D58)
 	stack.push("control socket", func(context.Context) error { _ = ctrlUDP.Close(); return nil })
@@ -670,6 +685,21 @@ func runPlayback(ctx context.Context, opt options, cfg *config.Config, base *slo
 		disc.Run()
 		stack.push("discovery", func(context.Context) error { return disc.Close() })
 	}
+
+	pbHost := opt.Host
+	if pbHost == "" {
+		pbHost = "0.0.0.0"
+	}
+	printBanner(os.Stderr, fmt.Sprintf("ensemble %s — ready", version), [][2]string{
+		{"node", fmt.Sprintf("%s  (%s)", cfg.NodeName, cfg.NodeID.String())},
+		{"roles", "playback"},
+		{"bind", pbHost},
+		{"ports", fmt.Sprintf("control=%d  stream=%d  (tcp+udp; bind-or-increment)", controlPort, streamPort)},
+		{"paths", fmt.Sprintf("data=%s", cfg.DataDir)},
+		{"output", backendName},
+		{"codecs", strings.Join(caps.Codecs, ", ")},
+		{"backends", strings.Join(caps.Backends, ", ")},
+	})
 
 	log.Info("ready",
 		"version", version, "id", cfg.NodeID.String(), "name", cfg.NodeName,
@@ -774,6 +804,52 @@ func capabilities(opt options) contracts.Capabilities {
 		Sources:  audio.Schemes(),
 		Formats:  []string{"wav", "mp3", "flac"},
 	}
+}
+
+// printBanner writes a clear, bordered startup summary to w — the at-a-glance
+// "what am I, where, and what can I do" headline, complementing the structured
+// "ready" log. Each row is a (label, value) pair; values are never truncated
+// (clarity over a perfectly aligned right edge). Always shown, regardless of
+// log level — it is the headline, not a log line.
+func printBanner(w io.Writer, title string, rows [][2]string) {
+	const rule = "═══════════════════════════════════════════════════════════════"
+	const thin = "───────────────────────────────────────────────────────────────"
+	fmt.Fprintf(w, "\n%s\n  %s\n%s\n", rule, title, thin)
+	for _, r := range rows {
+		fmt.Fprintf(w, "  %-9s %s\n", r[0], r[1])
+	}
+	fmt.Fprintf(w, "%s\n\n", rule)
+}
+
+// bindTries returns the bind attempt count for a port: 1 (bind exactly or fail)
+// when the operator pinned it via flag/env, else DefaultTries (bind-or-increment,
+// §2). Pinning a port and finding it taken is an explicit-config error worth
+// surfacing, not silently drifting to the next number.
+func bindTries(explicit bool) int {
+	if explicit {
+		return 1
+	}
+	return netx.DefaultTries
+}
+
+// portBindErr wraps a bind failure with operator-facing context: a pinned port
+// explains the no-increment policy; an unset port notes the exhausted base.
+func portBindErr(service string, base int, explicit bool, err error) error {
+	if explicit {
+		return fmt.Errorf("bind %s port %d (pinned via flag/env; not auto-incremented): %w", service, base, err)
+	}
+	return fmt.Errorf("bind %s port (base %d): %w", service, base, err)
+}
+
+// spotifyBannerValue describes the Spotify bridge for the banner: the resolved
+// go-librespot/librespot path and the Connect device name it advertises, or a
+// clear "not found" when no binary is present (Spotify disabled).
+func spotifyBannerValue(nodeName string) string {
+	bin := audio.FindSpotifyBinary()
+	if bin == "" {
+		return "not found (Spotify Connect disabled)"
+	}
+	return fmt.Sprintf("%s  (Connect device: %q)", bin, "ensemble "+nodeName)
 }
 
 // deviceIDs renders the enumerated output-device ids for the startup line (D37).

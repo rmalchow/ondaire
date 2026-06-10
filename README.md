@@ -149,8 +149,11 @@ Flags (each has an `ENSEMBLE_*` env equivalent); all are optional:
 | `--gossip-port` | `7946` | cluster gossip (tcp+udp) |
 | `--host <addr>` | all interfaces | bind address |
 
-Ports are **bind-or-increment**: if one is taken the node tries the next, and
-advertises whatever it actually bound.
+Ports are **bind-or-increment** *when left at the default*: if one is taken the
+node tries the next and advertises whatever it actually bound. A port you **set
+explicitly** (flag or `ENSEMBLE_*_PORT` env) is **pinned** — it binds that exact
+number or the node exits with a clear error, so a misconfiguration surfaces
+immediately instead of silently drifting.
 
 Env-only knobs:
 

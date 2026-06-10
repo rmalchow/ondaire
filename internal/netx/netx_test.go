@@ -121,8 +121,9 @@ func TestBindTCPUDPExhausted(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected exhaustion error")
 	}
-	if !strings.Contains(err.Error(), "no free") {
-		t.Fatalf("error missing range hint: %v", err)
+	// tries=1 (a pinned port) reports the exact port unavailable, not a range.
+	if !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("error missing single-port hint: %v", err)
 	}
 }
 

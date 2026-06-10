@@ -54,6 +54,12 @@ The ports a master binds (all overridable, all default to the spec values):
 | `9200` | `ENSEMBLE_SOURCE_PORT` | audio source: subscriptions + control (tcp+udp) |
 | `7946` | `ENSEMBLE_GOSSIP_PORT` | cluster gossip (tcp+udp) |
 
+The image does **not** pin these (it leaves them at the defaults, which bind-or-
+increment). If you **set** an `ENSEMBLE_*_PORT` yourself, that port is **pinned**:
+it binds exactly or the container exits with a clear error — so a clash surfaces
+immediately rather than the master silently drifting to the next number. The
+startup banner prints the **actual** bound ports either way.
+
 ### Bridge-mode fallback (no discovery, no Spotify Connect)
 
 If you genuinely can't use host networking (and accept that playback nodes won't

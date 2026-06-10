@@ -47,16 +47,15 @@ RUN apk add --no-cache opus ca-certificates
 
 COPY --from=builder /out/ensemble /usr/local/bin/ensemble
 
-# Master-only. Media on /media (mount read-only), mutable state on /data. Every
-# port the master binds is overridable here (all default to the spec values) and
-# bind-or-increments if taken, so nothing is EXPOSEd (host networking only).
+# Master-only. Media on /media (mount read-only), mutable state on /data.
+# Ports are intentionally NOT pinned here: the master uses its built-in defaults
+# (http 8080, stream 9090, source 9200, gossip 7946) which bind-or-increment if
+# taken — so nothing is EXPOSEd (host networking only). Pass -e ENSEMBLE_HTTP_PORT
+# (etc.) to PIN a port: a pinned port binds exactly or the container exits with a
+# clear error instead of silently drifting.
 ENV ENSEMBLE_ROLE=master \
     ENSEMBLE_MEDIA_DIR=/media \
-    ENSEMBLE_DATA_DIR=/data \
-    ENSEMBLE_HTTP_PORT=8080 \
-    ENSEMBLE_STREAM_PORT=9090 \
-    ENSEMBLE_SOURCE_PORT=9200 \
-    ENSEMBLE_GOSSIP_PORT=7946
+    ENSEMBLE_DATA_DIR=/data
 VOLUME ["/media", "/data"]
 
 # Override the base entrypoint — ensemble launches go-librespot itself. Clear the

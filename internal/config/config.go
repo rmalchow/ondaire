@@ -73,6 +73,12 @@ type Config struct {
 	ControlPort int // playback CONTROL_PORT: master→playback commands (D58)
 	GossipPort  int
 
+	// ExplicitPorts marks which base ports were pinned via flag/env (vs left at
+	// the default). A pinned port binds EXACTLY or fails; an unset port bind-or-
+	// increments (§2). This lets a host-networking/Docker operator pin a port and
+	// learn immediately if it's taken, instead of silently drifting to the next.
+	ExplicitPorts PortFlags
+
 	// Sink backend override (§8.5). "" => auto-detect ("auto"); selects a NAMED
 	// backend: "auto" | "exec" | "null" | "file:<path>" | "alsa" (where built).
 	// The sink piece (E) interprets the value; config only carries it verbatim.
@@ -135,19 +141,19 @@ func Load(opts Options) (*Config, error) {
 	cfg := &Config{}
 
 	var err error
-	if cfg.HTTPPort, err = resolvePort(*fHTTP, getenv(EnvHTTPPort), DefaultHTTPPort, EnvHTTPPort); err != nil {
+	if cfg.HTTPPort, cfg.ExplicitPorts.HTTP, err = resolvePort(*fHTTP, getenv(EnvHTTPPort), DefaultHTTPPort, EnvHTTPPort); err != nil {
 		return nil, err
 	}
-	if cfg.StreamPort, err = resolvePort(*fStream, getenv(EnvStreamPort), DefaultStreamPort, EnvStreamPort); err != nil {
+	if cfg.StreamPort, cfg.ExplicitPorts.Stream, err = resolvePort(*fStream, getenv(EnvStreamPort), DefaultStreamPort, EnvStreamPort); err != nil {
 		return nil, err
 	}
-	if cfg.SourcePort, err = resolvePort(*fSource, getenv(EnvSourcePort), DefaultSourcePort, EnvSourcePort); err != nil {
+	if cfg.SourcePort, cfg.ExplicitPorts.Source, err = resolvePort(*fSource, getenv(EnvSourcePort), DefaultSourcePort, EnvSourcePort); err != nil {
 		return nil, err
 	}
-	if cfg.ControlPort, err = resolvePort(*fControl, getenv(EnvControlPort), DefaultControlPort, EnvControlPort); err != nil {
+	if cfg.ControlPort, cfg.ExplicitPorts.Control, err = resolvePort(*fControl, getenv(EnvControlPort), DefaultControlPort, EnvControlPort); err != nil {
 		return nil, err
 	}
-	if cfg.GossipPort, err = resolvePort(*fGossip, getenv(EnvGossipPort), DefaultGossipPort, EnvGossipPort); err != nil {
+	if cfg.GossipPort, cfg.ExplicitPorts.Gossip, err = resolvePort(*fGossip, getenv(EnvGossipPort), DefaultGossipPort, EnvGossipPort); err != nil {
 		return nil, err
 	}
 	if cfg.Role, err = ParseRole(resolveString(*fRole, getenv(EnvRole), "")); err != nil {
@@ -280,21 +286,29 @@ func (c *Config) NodeFilePath() string {
 	return c.store.Path()
 }
 
+// PortFlags records which base ports were explicitly pinned (flag or env), as
+// opposed to left at the built-in default. main (K) uses it to decide bind
+// policy per port: pinned → bind exactly or fail; unset → bind-or-increment.
+type PortFlags struct{ HTTP, Stream, Source, Control, Gossip bool }
+
 // resolvePort applies flag > env > default precedence for a port knob. A flag
 // value of 0 means "unset" (port 0 is meaningless for us); the env value, if
-// non-empty, must be a valid 1–65535 port number.
-func resolvePort(flagVal int, envVal string, def int, envName string) (int, error) {
+// non-empty, must be a valid 1–65535 port number. The bool return reports
+// whether the value was set explicitly (flag or env) rather than defaulted.
+func resolvePort(flagVal int, envVal string, def int, envName string) (int, bool, error) {
 	if flagVal != 0 {
-		return validatePort(flagVal, "--"+strings.TrimPrefix(envName, "ENSEMBLE_"))
+		p, err := validatePort(flagVal, "--"+strings.TrimPrefix(envName, "ENSEMBLE_"))
+		return p, true, err
 	}
 	if envVal != "" {
 		n, err := strconv.Atoi(envVal)
 		if err != nil {
-			return 0, fmt.Errorf("config: %s=%q is not a number: %w", envName, envVal, err)
+			return 0, true, fmt.Errorf("config: %s=%q is not a number: %w", envName, envVal, err)
 		}
-		return validatePort(n, envName)
+		p, err := validatePort(n, envName)
+		return p, true, err
 	}
-	return def, nil
+	return def, false, nil
 }
 
 func validatePort(n int, who string) (int, error) {

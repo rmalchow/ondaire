@@ -37,6 +37,9 @@ func BindTCPUDP(host string, base, tries int) (
 		}
 		return tcp, udp, p, nil
 	}
+	if tries == 1 {
+		return nil, nil, 0, fmt.Errorf("netx: port %d (TCP+UDP) unavailable: %w", base, lastErr)
+	}
 	return nil, nil, 0, fmt.Errorf("netx: no free TCP+UDP port in [%d,%d): %w", base, base+tries, lastErr)
 }
 
@@ -52,6 +55,9 @@ func BindTCP(host string, base, tries int) (*net.TCPListener, int, error) {
 			continue
 		}
 		return tcp, p, nil
+	}
+	if tries == 1 {
+		return nil, 0, fmt.Errorf("netx: port %d (TCP) unavailable: %w", base, lastErr)
 	}
 	return nil, 0, fmt.Errorf("netx: no free TCP port in [%d,%d): %w", base, base+tries, lastErr)
 }

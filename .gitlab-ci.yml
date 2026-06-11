@@ -179,7 +179,15 @@ docker:
 docker-site:
   stage: build
   image: docker:28-cli
-  needs: []
+  # Reuse the per-arch binaries from the build stage (build on branches,
+  # build-release on tags) so they ship inside the site image's download page.
+  needs:
+    - job: build
+      optional: true
+      artifacts: true
+    - job: build-release
+      optional: true
+      artifacts: true
   variables:
     IMAGE: "harbor.rand0m.me/public/ensemble-site"
     PLATFORMS: "linux/amd64,linux/arm64"
@@ -195,8 +203,12 @@ docker-site:
   script:
     - VER="${CI_COMMIT_TAG:-dev}"
     - TAGS="-t $IMAGE:$VER"; if [ -n "$CI_COMMIT_TAG" ]; then TAGS="$TAGS -t $IMAGE:latest"; fi
+    # Stage the prebuilt binaries where build.mjs hashes them into the download page.
+    - mkdir -p site/src/assets/downloads
+    - cp bin/ensemble-linux-* site/src/assets/downloads/
     - docker buildx build --builder site-builder
       --platform "$PLATFORMS"
+      --build-arg VER="$VER"
       -f site/Dockerfile
       $TAGS
       --push

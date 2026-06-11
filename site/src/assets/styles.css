@@ -723,3 +723,114 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; scroll-behavior: auto; }
 }
+
+/* ── download page ───────────────────────────────────────────────────────── */
+.dl { padding: 72px 0 96px; }
+.dl .sec-head h1 {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: clamp(2rem, 1.4rem + 2.6vw, 3.2rem);
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  margin: 0 0 18px;
+}
+.dl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.dl-logos { display: flex; align-items: center; gap: 6px; }
+.dl-logo { display: block; opacity: 0.95; }
+.dl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+/* header: left column (headline + description), right column (badge + logos) */
+.dl-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.dl-card-head-l { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dl-card-head-l h3 { margin: 0; font-size: 18px; min-width: 0; }
+.dl-card-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; }
+.dl-card-meta .tag { white-space: nowrap; }
+.dl-rec { margin: 0; color: var(--muted); font-size: 14.5px; }
+/* binary tile footer: filename + SHA-256 on the left, the Download CTA on the right */
+.dl-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.dl-file { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dl-fname { font-size: 13px; color: var(--muted); }
+.dl-fname code { color: var(--ink); }
+.dl-size { color: var(--faint); }
+.dl-sha { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dl-sha-label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.dl-sha code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+  line-height: 1.4;
+}
+.dl-dl { flex: none; }
+.dl-cmd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.dl-cmd code { font-family: var(--mono); font-size: 13px; color: var(--ink); word-break: break-all; }
+.dl-copy {
+  flex: none;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 7px;
+  padding: 3px 10px;
+  font: 500 12px var(--mono);
+  cursor: pointer;
+}
+.dl-copy:hover { border-color: var(--accent); color: var(--accent); }
+.dl-missing { margin: 0; color: var(--faint); font-size: 14px; }
+.dl-missing code { color: var(--muted); }
+/* extra links: each a "situation" sentence on the left, an outline button right */
+.dl-links {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 40px;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
+}
+.dl-link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.dl-link-desc { margin: 0; color: var(--muted); font-size: 15px; }
+.dl-link-btn { flex: none; }
+@media (max-width: 520px) {
+  .dl-link-row { flex-direction: column; align-items: flex-start; gap: 12px; }
+}

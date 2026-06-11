@@ -8,12 +8,14 @@
 
 import { content as C } from "./content.mjs";
 import { promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(root, "src");
 const OUT = path.join(root, "dist");
+const VERSION = process.env.ENSEMBLE_VERSION || "";
 
 const esc = (s = "") =>
   String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -21,9 +23,16 @@ const esc = (s = "") =>
 const eq = (n = 7) =>
   `<span class="eq" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i style="--i:${i}"></i>`).join("")}</span>`;
 
-const navLinks = C.nav
-  .map((l) => `<a href="${esc(l.href)}"${l.href.startsWith("#") ? "" : ' rel="noopener"'}>${esc(l.label)}</a>`)
-  .join("");
+// Nav links, with in-page anchors prefixed so they also work from a sub-page
+// (download.html → index.html#why). prefix is "" on the home page.
+const renderNav = (prefix = "") =>
+  C.nav
+    .map((l) => {
+      const href = l.href.startsWith("#") ? prefix + l.href : l.href;
+      const rel = l.href.startsWith("#") ? "" : ' rel="noopener"';
+      return `<a href="${esc(href)}"${rel}>${esc(l.label)}</a>`;
+    })
+    .join("");
 
 const features = C.why.features
   .map(
@@ -156,7 +165,7 @@ const page = `<!doctype html>
 
 <header class="nav">
   <a class="brand" href="#top">${esc(C.brand.name)}<span class="brand-dot"></span></a>
-  <nav class="nav-links">${navLinks}</nav>
+  <nav class="nav-links">${renderNav("")}</nav>
   <a class="btn btn-ghost nav-cta" href="${esc(C.hero.primary.href)}" rel="noopener">${esc(C.hero.primary.label)}</a>
 </header>
 
@@ -318,6 +327,180 @@ const page = `<!doctype html>
 </html>
 `;
 
+const footLinksHtml = C.footer.links
+  .map((l) => `<a href="${esc(l.href)}" rel="noopener">${esc(l.label)}</a>`)
+  .join("");
+
+const fmtBytes = (n) => {
+  if (!n) return "";
+  const mb = n / (1024 * 1024);
+  return mb >= 1 ? mb.toFixed(1) + " MB" : Math.round(n / 1024) + " KB";
+};
+
+// resolveDownloads enriches each download option that has a `file` with the
+// staged binary's SHA-256 + size (computed here, so local and CI builds get the
+// real hash). A missing binary renders as "not built" rather than failing — so a
+// plain `node build.mjs` (no binaries staged) still produces the page.
+async function resolveDownloads() {
+  const out = [];
+  for (const o of C.download.options) {
+    if (!o.file) {
+      out.push({ ...o });
+      continue;
+    }
+    try {
+      const buf = await fs.readFile(path.join(SRC, o.file));
+      out.push({ ...o, present: true, size: buf.length, hash: createHash("sha256").update(buf).digest("hex") });
+    } catch {
+      out.push({ ...o, present: false });
+    }
+  }
+  return out;
+}
+
+// Simplified, brand-coloured inline SVG marks (self-contained — no external
+// assets). Recognisable rather than pixel-exact; ~22px, drawn on a 24px grid.
+const LOGOS = {
+  raspberrypi: `<svg class="dl-logo" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="Raspberry Pi">
+    <g fill="#75A928"><ellipse cx="9.6" cy="6.6" rx="1.5" ry="2.9" transform="rotate(-32 9.6 6.6)"/><ellipse cx="14.4" cy="6.6" rx="1.5" ry="2.9" transform="rotate(32 14.4 6.6)"/></g>
+    <g fill="#C7203E"><circle cx="11" cy="12" r="2"/><circle cx="14.4" cy="12.3" r="2"/><circle cx="9.2" cy="14.6" r="2"/><circle cx="12.6" cy="14.8" r="2"/><circle cx="15.6" cy="15" r="1.8"/><circle cx="11" cy="17.4" r="1.9"/><circle cx="14" cy="17.6" r="1.7"/></g>
+  </svg>`,
+  docker: `<svg class="dl-logo" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="Docker" fill="#2496ED">
+    <g><rect x="6" y="9.4" width="2.4" height="2.4"/><rect x="8.8" y="9.4" width="2.4" height="2.4"/><rect x="11.6" y="9.4" width="2.4" height="2.4"/><rect x="8.8" y="6.6" width="2.4" height="2.4"/><rect x="11.6" y="6.6" width="2.4" height="2.4"/></g>
+    <path d="M4 12.4h15.2c.2 1.4-.4 2.6-1.7 2.6.1-1.1-2-1.5-2.4-.4-1 1.9-3.4 3.1-6.3 3.1C5.6 17.7 4 15.4 4 12.4z"/>
+  </svg>`,
+  fedora: `<svg class="dl-logo" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="Fedora">
+    <circle cx="12" cy="12" r="10" fill="#51A2DA"/>
+    <path d="M13.7 6.6a3.2 3.2 0 0 0-3.2 3.2v1.4H8.8v2.3h1.7v4h2.4v-4h2v-2.3h-2v-1.4c0-.5.4-.9.9-.9h1.7V6.6z" fill="#fff"/>
+  </svg>`,
+  ubuntu: `<svg class="dl-logo" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="Ubuntu">
+    <circle cx="12" cy="12" r="5.4" fill="none" stroke="#E95420" stroke-width="1.7"/>
+    <g fill="#E95420"><circle cx="12" cy="5.3" r="1.8"/><circle cx="6.2" cy="15.3" r="1.8"/><circle cx="17.8" cy="15.3" r="1.8"/></g>
+  </svg>`,
+  debian: `<svg class="dl-logo" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="Debian" fill="none" stroke="#A80030" stroke-width="1.7" stroke-linecap="round">
+    <path d="M15.6 8a5.2 5.2 0 1 0 1.5 4.7"/>
+  </svg>`,
+  arch: `<svg class="dl-logo" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="Arch Linux" fill="#1793D1">
+    <path d="M12 3.5 4.5 20l7.5-3.6L19.5 20z"/>
+  </svg>`,
+  manjaro: `<svg class="dl-logo" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="Manjaro" fill="#35BF5C">
+    <rect x="4" y="4" width="5" height="16" rx="1"/><rect x="10.5" y="9.5" width="5" height="10.5" rx="1"/><rect x="17" y="4" width="3" height="16" rx="1"/>
+  </svg>`,
+};
+
+const logosHtml = (keys = []) => {
+  const svgs = keys.map((k) => LOGOS[k]).filter(Boolean).join("");
+  return svgs ? `<div class="dl-logos">${svgs}</div>` : "";
+};
+
+function downloadCard(o) {
+  const head = `
+        <div class="dl-card-head">
+          <div class="dl-card-head-l">
+            <h3>${esc(o.name)}</h3>
+            <p class="dl-rec">${esc(o.rec)}</p>
+          </div>
+          <div class="dl-card-meta">
+            <span class="tag">${esc(o.arch)}</span>
+            ${logosHtml(o.logos)}
+          </div>
+        </div>`;
+  if (o.docker) {
+    return `
+      <article class="dl-card">${head}
+        <div class="dl-cmd">
+          <code>${esc(o.docker)}</code>
+          <button class="dl-copy" type="button" data-copy="${esc(o.docker)}" aria-label="Copy command">copy</button>
+        </div>
+      </article>`;
+  }
+  const fname = o.file.split("/").pop();
+  if (!o.present) {
+    return `
+      <article class="dl-card">${head}
+        <p class="dl-missing">Binary not staged — run <code>site/build.sh</code> (or build from a tagged CI pipeline).</p>
+      </article>`;
+  }
+  return `
+      <article class="dl-card">${head}
+        <div class="dl-card-foot">
+          <div class="dl-file">
+            <span class="dl-fname"><code>${esc(fname)}</code> <span class="dl-size">${esc(fmtBytes(o.size))}</span></span>
+            <span class="dl-sha"><span class="dl-sha-label">SHA-256</span><code>${esc(o.hash)}</code></span>
+          </div>
+          <a class="btn btn-solid dl-dl" href="${esc(o.file)}" download>Download<span class="arrow">↓</span></a>
+        </div>
+      </article>`;
+}
+
+function downloadPage(options) {
+  const cards = options.map(downloadCard).join("");
+  const links = C.download.links
+    .map(
+      (l) => `
+      <div class="dl-link-row">
+        <p class="dl-link-desc">${esc(l.desc)}</p>
+        <a class="btn btn-ghost dl-link-btn" href="${esc(l.href)}" rel="noopener">${esc(l.label)}<span class="arrow">→</span></a>
+      </div>`
+    )
+    .join("");
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Download — ${esc(C.meta.title)}</title>
+<meta name="description" content="Download ensemble — pure-Go binaries for Raspberry Pi (32/64-bit) and x86-64 Linux, plus the Docker image. SHA-256 for every build." />
+<meta name="theme-color" content="${esc(C.meta.themeColor)}" />
+<link rel="preload" href="assets/fonts/fraunces-wght.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="nav">
+  <a class="brand" href="index.html">${esc(C.brand.name)}<span class="brand-dot"></span></a>
+  <nav class="nav-links">${renderNav("index.html")}</nav>
+  <a class="btn btn-ghost nav-cta" href="index.html">← Home</a>
+</header>
+
+<main id="top">
+  <section class="dl">
+    <header class="sec-head">
+      <span class="eyebrow">${eq(6)}${esc(C.download.eyebrow)}${VERSION ? " · " + esc(VERSION) : ""}</span>
+      <h1>${esc(C.download.title)}</h1>
+      <p class="sec-intro">${esc(C.download.intro)}</p>
+    </header>
+    <div class="dl-list">${cards}</div>
+    <div class="dl-links">${links}</div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="foot-brand">${esc(C.brand.name)}${eq(4)}</div>
+  <p class="foot-note">${esc(C.footer.note)}</p>
+  <nav class="foot-links">${footLinksHtml}</nav>
+</footer>
+
+<script>
+(function () {
+  document.querySelectorAll(".dl-copy").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var t = b.getAttribute("data-copy") || "";
+      (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(
+        function () { var o = b.textContent; b.textContent = "copied"; setTimeout(function () { b.textContent = o; }, 1200); },
+        function () {}
+      );
+    });
+  });
+})();
+</script>
+</body>
+</html>
+`;
+}
+
 async function copyDir(from, to) {
   await fs.mkdir(to, { recursive: true });
   for (const e of await fs.readdir(from, { withFileTypes: true })) {
@@ -333,7 +516,16 @@ async function main() {
   await fs.mkdir(OUT, { recursive: true });
   await copyDir(path.join(SRC, "assets"), path.join(OUT, "assets"));
   await fs.writeFile(path.join(OUT, "index.html"), page);
-  console.log("built ./dist (" + (page.length / 1024).toFixed(1) + " kB html)");
+
+  const downloads = await resolveDownloads();
+  const dl = downloadPage(downloads);
+  await fs.writeFile(path.join(OUT, "download.html"), dl);
+
+  const staged = downloads.filter((o) => o.present).length;
+  const total = downloads.filter((o) => o.file).length;
+  console.log(
+    `built ./dist (index ${(page.length / 1024).toFixed(1)} kB, download ${(dl.length / 1024).toFixed(1)} kB; ${staged}/${total} binaries staged)`
+  );
 }
 
 main().catch((e) => {

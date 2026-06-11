@@ -33,7 +33,7 @@ export const content = {
     title: ["Every room.", "One sound.", "Zero fuss."],
     lede:
       "ensemble is self-hosted, synchronized audio for your whole home. Drop one small binary on each device — they discover each other and play in perfect sync. No cloud, no accounts, no config files.",
-    primary: { label: "Get it", href: RELEASES },
+    primary: { label: "Get it", href: "download.html" },
     secondary: { label: "View source", href: REPO },
     snippet: { cmd: "./ensemble", caption: "That’s the whole setup." },
     shot: {
@@ -251,8 +251,60 @@ export const content = {
     title: "Bring your speakers together.",
     body:
       "Grab a build for your device, or read the user guide to see the whole app first.",
-    primary: { label: "Download a release", href: RELEASES },
+    primary: { label: "Get it", href: "download.html" },
     secondary: { label: "Read the guide", href: GUIDE },
+  },
+
+  // The separate download page (download.html). Each option's `file` is resolved
+  // at build time: build.mjs hashes the staged binary (src/assets/downloads/) and
+  // fills in its SHA-256 + size. `docker` options carry a pull command instead.
+  download: {
+    eyebrow: "Download",
+    title: "Get ensemble for your hardware.",
+    intro:
+      "One small, static binary per device — pure Go, no runtime, no dependencies. Each is the same build attached to the matching tagged release: verify its SHA-256, make it executable, and run it. Prefer containers? Pull the master image with Spotify Connect built in.",
+    options: [
+      {
+        name: "Raspberry Pi — 64-bit",
+        rec: "Recommended: Raspberry Pi OS Lite (64-bit). Also any other arm64 Linux.",
+        arch: "linux · arm64",
+        logos: ["raspberrypi"],
+        file: "assets/downloads/ensemble-linux-arm64",
+      },
+      {
+        name: "Raspberry Pi — 32-bit",
+        rec: "Recommended: Raspberry Pi OS Lite (32-bit). Includes the Pi Zero / Pi 1 (armv6).",
+        arch: "linux · armv6",
+        logos: ["raspberrypi"],
+        file: "assets/downloads/ensemble-linux-armv6",
+      },
+      {
+        name: "PC or server — x86-64",
+        rec: "Any modern Linux distribution on a 64-bit Intel/AMD machine.",
+        arch: "linux · amd64",
+        logos: ["fedora", "ubuntu", "debian", "arch", "manjaro"],
+        file: "assets/downloads/ensemble-linux-amd64",
+      },
+      {
+        name: "Docker",
+        rec: "A master node with Spotify Connect (go-librespot) built in. Multi-arch: amd64 · arm64.",
+        arch: "container image",
+        logos: ["docker"],
+        docker: "docker pull harbor.rand0m.me/public/ensemble:latest",
+      },
+    ],
+    links: [
+      {
+        desc: "Looking for an older version, the changelog, or release notes?",
+        label: "Other versions",
+        href: RELEASES,
+      },
+      {
+        desc: "New here and need help getting a node running?",
+        label: "How to run it",
+        href: DOC("running.md"),
+      },
+    ],
   },
 
   footer: {

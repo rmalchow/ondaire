@@ -6,6 +6,7 @@
   import Nodes from "./sections/Nodes.svelte";
   import Toast from "./components/Toast.svelte";
   import UnreachableBanner from "./components/UnreachableBanner.svelte";
+  import NodeSwitcher from "./components/NodeSwitcher.svelte";
   // wordmark-small.png is rendered near display size (crisp); wordmark.png is the
   // full-size master, kept for future high-res use but not referenced here.
   import wordmark from "./assets/wordmark-small.png";
@@ -101,7 +102,7 @@
     {:else}
       <a class="iconlink" href="#/nodes" title="Nodes" aria-label="Nodes">⚙</a>
     {/if}
-    <span class="status-pill {statusLevel}" title={statusTitle}>{self.name || "…"}</span>
+    <NodeSwitcher snapshot={cluster.snapshot} {self} {statusLevel} {statusTitle} />
   </div>
 </header>
 

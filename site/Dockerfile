@@ -8,8 +8,13 @@
 # emulation needed (the final stage has no RUN).
 
 FROM --platform=$BUILDPLATFORM node:24-alpine AS build
+ARG VER=
+ENV ENSEMBLE_VERSION=$VER
 WORKDIR /site
 COPY . .
+# The CI job stages bin/ensemble-linux-* into src/assets/downloads/ before this
+# build (see .gitlab-ci.yml docker-site); build.mjs hashes them into the download
+# page and they ship under /site/dist for direct download.
 RUN node build.mjs            # → /site/dist (fully static)
 
 FROM nginx:1.27-alpine

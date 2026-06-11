@@ -90,7 +90,15 @@ ln -sf "$LIBDIR/ensemble" "$BINDIR/ensemble"
 ok "installed $LIBDIR/ensemble  (→ $BINDIR/ensemble)"
 
 # --- spotify (optional) ------------------------------------------------------
-if ask "Install Spotify Connect support (go-librespot)?"; then
+# Already installed at the expected location ⇒ the operator clearly wants it;
+# don't ask, just (re)install to pick up a newer go-librespot.
+if [ -x "$LIBDIR/go-librespot" ]; then
+  say "go-librespot already installed — updating it."
+  want_spotify=y
+elif ask "Install Spotify Connect support (go-librespot)?"; then
+  want_spotify=y
+fi
+if [ "${want_spotify:-}" = y ]; then
   glurl="https://github.com/$GLR_REPO/releases/latest/download/go-librespot_linux_${GLARCH}.tar.gz"
   say "Downloading go-librespot — $glurl"
   if fetch "$glurl" "$tmp/glr.tar.gz"; then
@@ -111,7 +119,17 @@ else
 fi
 
 # --- systemd service (optional) ----------------------------------------------
-if command -v systemctl >/dev/null 2>&1 && ask "Start ensemble at boot (systemd service)?"; then
+# Already running ⇒ assume yes (the operator installed it before); just refresh
+# the unit + binary. Otherwise ask.
+if command -v systemctl >/dev/null 2>&1; then
+  if systemctl is-active --quiet ensemble.service 2>/dev/null; then
+    say "ensemble.service is already running — refreshing it."
+    want_service=y
+  elif ask "Start ensemble at boot (systemd service)?"; then
+    want_service=y
+  fi
+fi
+if [ "${want_service:-}" = y ]; then
   # Stop a previous instance first so the new unit + binary take over cleanly.
   if systemctl is-active --quiet ensemble.service 2>/dev/null; then
     say "Stopping the running ensemble.service…"

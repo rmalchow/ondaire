@@ -23,6 +23,9 @@ export function createPlayClock() {
     anchorUri: "", // track playing at the anchor
     wasPlaying: false, // playing at the last reconcile (detects resume)
     pos: 0, // s — last sampled display position
+    lastSp: -1, // last authoritative positionSec seen (dedupe stale re-sends)
+    lastUri: "", //  "   uri
+    lastPlaying: false, // "   playing
   };
 }
 
@@ -34,6 +37,18 @@ export function reconcile(c, { positionSec, uri, playing, nowMs }, opts = {}) {
   const slew = opts.slew ?? SLEW;
   const sp = positionSec || 0;
   const u = uri || "";
+
+  // Ignore stale re-sends. The WS pushes the whole snapshot on ANY cluster change,
+  // so reconcile fires far more often than positionSec actually advances (~5 s). A
+  // re-delivered, unchanged value is NOT a fresh sample — and since our clock has
+  // legitimately run ahead of it, treating it as authoritative would read as a
+  // backward seek and snap. Only act when the playback values truly changed.
+  if (sp === c.lastSp && u === c.lastUri && playing === c.lastPlaying) {
+    return c;
+  }
+  c.lastSp = sp;
+  c.lastUri = u;
+  c.lastPlaying = playing;
 
   if (!playing) {
     // paused / idle: hold the authoritative value, no ticking.

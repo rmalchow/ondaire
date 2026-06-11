@@ -70,6 +70,22 @@ describe("playclock", () => {
     expect(sample(c, 10000, 0)).toBeCloseTo(33, 5);
   });
 
+  it("ignores stale re-sends (no backward jump from an unrelated cluster push)", () => {
+    const c = createPlayClock();
+    anchor(c, 40, 0, "file:a"); // last real heartbeat: position 40
+    const at3_5 = sample(c, 3500, 0);
+    expect(at3_5).toBeCloseTo(43.5, 3); // free-ran ahead of the stale 40
+    // an unrelated cluster change re-delivers the SAME values 3.5 s later: must NOT
+    // be treated as a seek-back to 40.
+    anchor(c, 40, 3500, "file:a");
+    const after = sample(c, 3500, 0);
+    expect(after).toBeGreaterThanOrEqual(at3_5); // no backward jump
+    expect(after).toBeCloseTo(43.5, 3);
+    // a genuinely fresh heartbeat (value changed) still reconciles normally.
+    anchor(c, 45, 5000, "file:a"); // ~real position at t=5s; est ~45 → small slew
+    expect(sample(c, 5000, 0)).toBeCloseTo(45, 1);
+  });
+
   it("clamps to duration", () => {
     const c = createPlayClock();
     anchor(c, 178, 0);

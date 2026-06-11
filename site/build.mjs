@@ -140,6 +140,17 @@ const techItems = C.tech.items
   )
   .join("");
 
+const testimonials = C.testimonials.items
+  .map(
+    (t) => `
+      <figure class="quote">
+        <img class="quote-photo" src="${esc(t.img)}" alt="${esc(t.name)}" loading="lazy" decoding="async" width="72" height="72" />
+        <blockquote>“${esc(t.quote)}”</blockquote>
+        <figcaption><span class="quote-name">${esc(t.name)}</span><span class="quote-role">${esc(t.role)}</span></figcaption>
+      </figure>`
+  )
+  .join("");
+
 const footLinks = C.footer.links
   .map((l) => `<a href="${esc(l.href)}" rel="noopener">${esc(l.label)}</a>`)
   .join("");
@@ -229,6 +240,15 @@ const page = `<!doctype html>
       <p class="sec-intro">${esc(C.tech.intro)}</p>
     </header>
     <div class="tech-grid">${techItems}</div>
+  </section>
+
+  <section id="praise" class="praise">
+    <header class="sec-head">
+      <span class="eyebrow">${esc(C.testimonials.eyebrow)}</span>
+      <h2>${esc(C.testimonials.title)}</h2>
+      <p class="sec-intro">${esc(C.testimonials.note)}</p>
+    </header>
+    <div class="quote-grid">${testimonials}</div>
   </section>
 
   <section class="cta">
@@ -521,10 +541,24 @@ async function main() {
   const dl = downloadPage(downloads);
   await fs.writeFile(path.join(OUT, "download.html"), dl);
 
+  // Serve the installer at /get.sh (the "curl … | sudo bash" one-liner). Source of
+  // truth is ../scripts/get.sh; the CI docker-site job stages a copy to site/get.sh
+  // for the Docker build context.
+  let getSh = false;
+  for (const p of [path.join(root, "..", "scripts", "get.sh"), path.join(root, "get.sh")]) {
+    try {
+      await fs.writeFile(path.join(OUT, "get.sh"), await fs.readFile(p), { mode: 0o755 });
+      getSh = true;
+      break;
+    } catch {
+      // not here; try the next location
+    }
+  }
+
   const staged = downloads.filter((o) => o.present).length;
   const total = downloads.filter((o) => o.file).length;
   console.log(
-    `built ./dist (index ${(page.length / 1024).toFixed(1)} kB, download ${(dl.length / 1024).toFixed(1)} kB; ${staged}/${total} binaries staged)`
+    `built ./dist (index ${(page.length / 1024).toFixed(1)} kB, download ${(dl.length / 1024).toFixed(1)} kB; ${staged}/${total} binaries staged; get.sh ${getSh ? "✓" : "—"})`
   );
 }
 

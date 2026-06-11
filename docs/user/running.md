@@ -19,6 +19,37 @@ and how long it lives. Pick by how permanent you need it:
 
 ---
 
+## Quick install (the one-liner)
+
+In a hurry on a Linux box? The installer detects your OS/CPU, downloads the
+matching build, and asks what you want:
+
+```sh
+curl -fsSL https://ensemble.rand0m.me/get.sh | sudo bash
+```
+
+It runs as root and:
+
+1. **Detects** your architecture (`amd64`, `arm64`, or `armv6` — the armv6 build
+   also runs on a 32-bit armv7 Pi) and downloads that `ensemble` build.
+2. Installs it to **`/usr/local/lib/ensemble/ensemble`**, symlinked into
+   `/usr/local/bin` so `ensemble` is on your `PATH`.
+3. Asks **"Install Spotify Connect support?"** — if yes, downloads the latest
+   [`go-librespot`](https://github.com/devgianlu/go-librespot) for your arch
+   alongside it.
+4. Asks **"Start ensemble at boot?"** — if yes, writes an `ensemble.service`
+   systemd unit (data in `/var/lib/ensemble`), reloads systemd, and enables +
+   starts it. Re-running the script stops the old service first, so it upgrades
+   cleanly in place.
+
+The prompts work even through the `curl … | bash` pipe (it reads your terminal
+directly); a non-interactive run just answers "no" to both. Prefer to do it by
+hand, or not use systemd? The methods below are exactly what the script wraps.
+
+> Override the download host (e.g. a mirror) with `ENSEMBLE_BASE=…` before running.
+
+---
+
 ## Foreground
 
 The simplest way — run it in your terminal:

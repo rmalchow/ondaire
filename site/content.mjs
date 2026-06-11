@@ -24,6 +24,7 @@ export const content = {
     { label: "How", href: "#how" },
     { label: "Quickstart", href: "#quickstart" },
     { label: "Tech", href: "#tech" },
+    { label: "Praise", href: "#praise" },
     { label: "Source", href: REPO },
   ],
 
@@ -156,6 +157,15 @@ export const content = {
       "You've set up software like this before — here's the shape of it. Each step links to the guide for the full version.",
     steps: [
       {
+        n: "00",
+        tag: "one-liner",
+        title: "For the lazy people",
+        body:
+          "One command does the lot: it detects your OS and CPU, downloads the right ensemble build, then asks whether you want Spotify Connect (go-librespot) and a boot-time systemd service — and sets them up. Installs into /usr/local/lib/ensemble.",
+        code: "curl -fsSL https://ensemble.rand0m.me/get.sh | sudo bash",
+        doc: { label: "What the script does, step by step", href: DOC("running.md") },
+      },
+      {
         n: "01",
         tag: "download",
         title: "Get a build",
@@ -247,6 +257,72 @@ export const content = {
     ],
   },
 
+  // Tongue-in-cheek "testimonials". Every quote is invented; the disclaimer makes
+  // that unmistakable. Portraits are from Wikimedia Commons, vendored locally.
+  testimonials: {
+    eyebrow: "Rave reviews",
+    title: "The greats can’t stop talking about it.",
+    note: "Every quote below is entirely fictional — they never said any of this, and several of them predate electricity. Portraits via Wikimedia Commons.",
+    items: [
+      {
+        name: "Ludwig van Beethoven",
+        role: "Composer · 1770–1827",
+        quote:
+          "I could not hear a single one of my rooms — yet they played as one. Magnificent. I was, however, not consulted.",
+        img: "assets/img/testimonials/beethoven.jpg",
+      },
+      {
+        name: "Wolfgang Amadeus Mozart",
+        role: "Composer · 1756–1791",
+        quote:
+          "Setup took less time than a cadenza. One file, no fuss — even a prodigy could manage it.",
+        img: "assets/img/testimonials/mozart.jpg",
+      },
+      {
+        name: "Johann Sebastian Bach",
+        role: "Composer · 1685–1750",
+        quote:
+          "Every voice entering at precisely the right instant, in every room at once. Counterpoint, but for speakers.",
+        img: "assets/img/testimonials/bach.jpg",
+      },
+      {
+        name: "Miles Davis",
+        role: "Jazz · 1926–1991",
+        quote:
+          "It’s not the notes you sync, it’s the ones you don’t. ensemble gets the silence right in all five rooms.",
+        img: "assets/img/testimonials/miles-davis.png",
+      },
+      {
+        name: "Ella Fitzgerald",
+        role: "Jazz vocalist · 1917–1996",
+        quote:
+          "No cloud, no accounts, no scat about subscriptions. Put it on and the whole house swings.",
+        img: "assets/img/testimonials/ella-fitzgerald.jpg",
+      },
+      {
+        name: "Freddie Mercury",
+        role: "Rock · 1946–1991",
+        quote:
+          "I want it all, I want it all — and I want it in every room. Darling, it delivered.",
+        img: "assets/img/testimonials/freddie-mercury.jpg",
+      },
+      {
+        name: "Jimi Hendrix",
+        role: "Rock guitarist · 1942–1970",
+        quote:
+          "’Scuse me while I sync the sky. Kitchen, hallway, garage — all phase-locked. Far out.",
+        img: "assets/img/testimonials/jimi-hendrix.jpg",
+      },
+      {
+        name: "Prince",
+        role: "Pop · 1958–2016",
+        quote:
+          "Dearly beloved, we are gathered to play one song in every room. No latency, no cloud. Just the music.",
+        img: "assets/img/testimonials/prince.png",
+      },
+    ],
+  },
+
   cta: {
     title: "Bring your speakers together.",
     body:
@@ -262,28 +338,28 @@ export const content = {
     eyebrow: "Download",
     title: "Get ensemble for your hardware.",
     intro:
-      "One small, static binary per device — pure Go, no runtime, no dependencies. Each is the same build attached to the matching tagged release: verify its SHA-256, make it executable, and run it. Prefer containers? Pull the master image with Spotify Connect built in.",
+      "One small, static binary per device — pure Go, no runtime, no dependencies. Each archive is the build attached to the matching tagged release: verify its SHA-256, unpack it, and run ./ensemble. Prefer containers? Pull the master image with Spotify Connect built in.",
     options: [
       {
         name: "Raspberry Pi — 64-bit",
         rec: "Recommended: Raspberry Pi OS Lite (64-bit). Also any other arm64 Linux.",
         arch: "linux · arm64",
         logos: ["raspberrypi"],
-        file: "assets/downloads/ensemble-linux-arm64",
+        file: "assets/downloads/ensemble-linux-arm64.tar.gz",
       },
       {
         name: "Raspberry Pi — 32-bit",
         rec: "Recommended: Raspberry Pi OS Lite (32-bit). Includes the Pi Zero / Pi 1 (armv6).",
         arch: "linux · armv6",
         logos: ["raspberrypi"],
-        file: "assets/downloads/ensemble-linux-armv6",
+        file: "assets/downloads/ensemble-linux-armv6.tar.gz",
       },
       {
         name: "PC or server — x86-64",
         rec: "Any modern Linux distribution on a 64-bit Intel/AMD machine.",
         arch: "linux · amd64",
         logos: ["fedora", "ubuntu", "debian", "arch", "manjaro"],
-        file: "assets/downloads/ensemble-linux-amd64",
+        file: "assets/downloads/ensemble-linux-amd64.tar.gz",
       },
       {
         name: "Docker",

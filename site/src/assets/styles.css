@@ -834,3 +834,49 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
 @media (max-width: 520px) {
   .dl-link-row { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
+
+/* ── praise / testimonials (fictional) ───────────────────────────────────── */
+.quote-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px;
+}
+.quote {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "photo quote" "photo who";
+  align-content: start;
+  column-gap: 16px;
+  row-gap: 8px;
+  margin: 0;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.quote-photo {
+  grid-area: photo;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: top center;
+  border: 1px solid var(--line-2);
+  filter: grayscale(0.25);
+}
+.quote blockquote {
+  grid-area: quote;
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.quote figcaption {
+  grid-area: who;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.quote-name { font-weight: 600; font-size: 14px; }
+.quote-role { color: var(--muted); font-size: 12.5px; }

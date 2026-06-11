@@ -13,8 +13,18 @@ here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
 
 "$repo/scripts/build.sh" --ui                       # web/dist + bin/ensemble-linux-*
-mkdir -p "$here/src/assets/downloads"
-cp "$repo"/bin/ensemble-linux-* "$here/src/assets/downloads/"
+
+# tar.gz each binary (renamed to `ensemble` inside, so it extracts to ./ensemble).
+dl="$here/src/assets/downloads"
+mkdir -p "$dl"
+rm -f "$dl"/ensemble-linux-*.tar.gz
+for bin in "$repo"/bin/ensemble-linux-*; do
+  name="$(basename "$bin")"                          # ensemble-linux-arm64
+  tmp="$(mktemp -d)"
+  cp "$bin" "$tmp/ensemble"
+  tar -czf "$dl/$name.tar.gz" -C "$tmp" ensemble
+  rm -rf "$tmp"
+done
 
 cd "$here"
 ENSEMBLE_VERSION="${ENSEMBLE_VERSION:-$(git -C "$repo" describe --tags --always 2>/dev/null || echo dev)}" \

@@ -203,9 +203,18 @@ docker-site:
   script:
     - VER="${CI_COMMIT_TAG:-dev}"
     - TAGS="-t $IMAGE:$VER"; if [ -n "$CI_COMMIT_TAG" ]; then TAGS="$TAGS -t $IMAGE:latest"; fi
-    # Stage the prebuilt binaries where build.mjs hashes them into the download page.
-    - mkdir -p site/src/assets/downloads
-    - cp bin/ensemble-linux-* site/src/assets/downloads/
+    # Stage the prebuilt binaries as tar.gz (renamed to `ensemble` inside) where
+    # build.mjs hashes them into the download page, and the installer for /get.sh.
+    - |
+      mkdir -p site/src/assets/downloads
+      for bin in bin/ensemble-linux-*; do
+        name=$(basename "$bin")
+        tmp=$(mktemp -d)
+        cp "$bin" "$tmp/ensemble"
+        tar -czf "site/src/assets/downloads/$name.tar.gz" -C "$tmp" ensemble
+        rm -rf "$tmp"
+      done
+      cp scripts/get.sh site/get.sh
     - docker buildx build --builder site-builder
       --platform "$PLATFORMS"
       --build-arg VER="$VER"

@@ -905,6 +905,8 @@ func outputLabel(output string) string {
 // by the stream client).
 func newDeliver(sk contracts.Sink, disabled *disableState, log *slog.Logger) stream.DeliverFunc {
 	var dec *audio.OpusDecoder
+	var decUnavail bool // sticky: the decoder can't be built (e.g. libopus missing) —
+	// back off after one WARN instead of re-probing + re-warning on every frame.
 	var curGen uint32
 	haveGen := false
 	dl := log.With("comp", "deliver")
@@ -948,11 +950,21 @@ func newDeliver(sk contracts.Sink, disabled *disableState, log *slog.Logger) str
 				dl.Debug("opus disabled on this node, dropping frame")
 				return
 			}
-			// Lazily build the decoder.
+			// Lazily build the decoder. A build failure (e.g. libopus not installed)
+			// is permanent for this process — the library won't appear mid-stream — so
+			// latch it, WARN once, and drop quietly thereafter rather than re-probing
+			// and flooding the log at frame rate. (A node without libopus advertises
+			// pcm-only, so a correctly-negotiated group never sends us opus; this is the
+			// belt-and-braces soft-fail for when it does.)
 			if dec == nil {
+				if decUnavail {
+					dl.Debug("opus decoder unavailable, dropping frame")
+					return
+				}
 				d, err := audio.NewOpusDecoder()
 				if err != nil {
-					dl.Warn("opus decoder unavailable, dropping frame", "err", err)
+					decUnavail = true
+					dl.Warn("opus decoder unavailable — dropping opus frames on this node (install libopus to enable)", "err", err)
 					return
 				}
 				dec = d

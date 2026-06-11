@@ -9,6 +9,7 @@
     setOutputDevice,
     setDisabled,
     testTone,
+    forgetNode,
   } from "../lib/api.js";
   import EditableText from "./EditableText.svelte";
   import VolumeSlider from "./VolumeSlider.svelte";
@@ -17,6 +18,16 @@
   let { node, self, snapshot } = $props();
 
   let isSelf = $derived(node.id === self.id);
+  // A dead, non-self node can be forgotten: deleted from the cluster and purged
+  // from every config that referenced it. Playback nodes count too (they go dead
+  // when their mDNS advert stops). Guarded by a confirm — it's destructive.
+  let canForget = $derived(!isSelf && !node.alive);
+  function onForget() {
+    const label = node.name || shortId(node.id);
+    if (!confirm(`Delete node "${label}" from the cluster?\n\nIt will be removed everywhere and purged from group/Spotify references. If it comes back online it will reappear.`))
+      return;
+    forgetNode(node.id).catch(() => {});
+  }
   let caps = $derived(node.capabilities || {});
   let canSpotify = $derived((caps.sources ?? []).includes("spotify"));
   let portList = $derived(ports(node));
@@ -129,11 +140,23 @@
       {#if isSelf}<span class="chip">this node</span>{/if}
       <span class="node-id small" title={node.id}>{shortId(node.id)}</span>
     </div>
-    <span class="muted small">
-      {#if node.alive}
-        {relTime(node.lastSeen)}
-      {:else}
-        offline{#if node.stale}<span class="offline"> · stale</span>{/if}
+    <span class="row small">
+      <span class="muted">
+        {#if node.alive}
+          {relTime(node.lastSeen)}
+        {:else}
+          offline{#if node.stale}<span class="offline"> · stale</span>{/if}
+        {/if}
+      </span>
+      {#if canForget}
+        <button
+          type="button"
+          class="chip forget"
+          title="Delete this offline node from the cluster"
+          onclick={onForget}
+        >
+          delete
+        </button>
       {/if}
     </span>
   </div>
@@ -394,5 +417,19 @@
     border: 1px solid #1db954;
     color: #04210f;
     font-weight: 600;
+  }
+
+  /* delete an offline node — destructive, so it reads red and only appears for
+     dead nodes (see canForget). */
+  .chip.forget {
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid color-mix(in srgb, #e5484d 50%, transparent);
+    color: #e5484d;
+  }
+  .chip.forget:hover {
+    background: #e5484d;
+    color: #fff;
+    border-color: #e5484d;
   }
 </style>

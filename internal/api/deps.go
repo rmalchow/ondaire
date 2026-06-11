@@ -27,6 +27,9 @@ type Cluster interface {
 	SetDisabled(disabled []string)
 	// SetSpotifyEndpoints replicates THIS node's Spotify Connect presets (D57).
 	SetSpotifyEndpoints(eps []contracts.SpotifyEndpoint)
+	// ForgetNode deletes an OFFLINE node (tombstone + purge references); errors if
+	// the node is self or currently online (POST /api/node/forget).
+	ForgetNode(nid id.ID) error
 	// AssignPlaybackNode assigns (target != Zero) or clears a non-gossiping
 	// playback node's group, master-side (D59). Returns false if the node is
 	// unknown or not a playback node.

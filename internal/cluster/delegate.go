@@ -38,7 +38,8 @@ func (d *delegate) NotifyMsg(msg []byte) {
 	}
 	c := d.c
 	changed := false
-	persist := false // D41: a names/settings change should re-persist the table
+	persist := false        // D41: a names/settings change should re-persist the table
+	var ownSnap *NodeRecord // scrubbed own record to gossip after a tombstone merge
 	c.mu.Lock()
 	switch kind {
 	case kindNodeDelta:
@@ -53,10 +54,18 @@ func (d *delegate) NotifyMsg(msg []byte) {
 		// D47: only our OWN settings record (key == self) is persisted; a gossiped
 		// change to another group's settings is master-keyed live state, not saved.
 		persist = changed && dl.Group == c.self
+	case kindTombstone:
+		changed = c.doc.mergeTombstone(dl.Group, dl.Tombstone)
+		if changed {
+			ownSnap = c.scrubOwnAgainstTombstonesLocked() // purge our own refs to the deleted node
+		}
 	}
 	c.mu.Unlock()
 	if persist {
 		c.markDirty()
+	}
+	if ownSnap != nil {
+		c.broadcastOwn(ownSnap)
 	}
 	if changed {
 		c.notify()
@@ -101,9 +110,16 @@ func (d *delegate) MergeRemoteState(buf []byte, join bool) {
 
 	c.mu.Lock()
 	changed, lookupChanged := c.doc.mergeAllTracked(c.self, &remote)
+	var ownSnap *NodeRecord
+	if changed {
+		ownSnap = c.scrubOwnAgainstTombstonesLocked() // purge our own refs to any newly-merged tombstones
+	}
 	c.mu.Unlock()
 	if lookupChanged {
 		c.markDirty() // D41: a gossiped name/settings change updates the table
+	}
+	if ownSnap != nil {
+		c.broadcastOwn(ownSnap)
 	}
 	if changed {
 		c.notify()
@@ -120,10 +136,26 @@ func (d *delegate) NotifyJoin(n *memberlist.Node) {
 	now := d.c.clock().Unix()
 	d.c.live.join(peer, now)
 	d.observeNode(peer, n)
+	d.clearTombstoneIfAlive(peer)
 	if peer != d.c.self {
 		d.c.log.Info("node joined", "node", peer.String(), "name", d.peerName(peer), "addr", n.Addr.String())
 	}
 	d.c.notify()
+}
+
+// clearTombstoneIfAlive drops a tombstone for a peer that has demonstrably
+// (re)joined the gossip mesh — the safety valve against a deleted-but-actually-
+// alive node (e.g. a delete issued during a partition) staying suppressed forever.
+func (d *delegate) clearTombstoneIfAlive(peer id.ID) {
+	if peer == d.c.self {
+		return
+	}
+	d.c.mu.Lock()
+	cleared := d.c.doc.clearTombstone(peer)
+	d.c.mu.Unlock()
+	if cleared {
+		d.c.log.Info("tombstone cleared; node is alive again", "node", peer.String())
+	}
 }
 
 func (d *delegate) NotifyLeave(n *memberlist.Node) {
@@ -156,6 +188,7 @@ func (d *delegate) NotifyUpdate(n *memberlist.Node) {
 	now := d.c.clock().Unix()
 	d.c.live.update(peer, now)
 	d.observeNode(peer, n)
+	d.clearTombstoneIfAlive(peer)
 	if peer != d.c.self {
 		d.c.log.Debug("node updated", "node", peer.String(), "name", d.peerName(peer))
 	}

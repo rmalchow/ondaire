@@ -132,6 +132,45 @@ func OpenDevice(spec, device string, log *slog.Logger) (contracts.Backend, strin
 	return b, name, nil
 }
 
+// OpenResilient builds the self-healing output (the default for auto/alsa/exec):
+// a failover chain over every real output on the host (the configured device
+// first), rotating on failure and resting with exponential backoff after repeated
+// whole-chain failures. The returned backend honors a device override
+// (SetPreferred, via Playout.PreferOutputDevice) and a Revive hook (test tone).
+// null/file specs bypass the chain and return that backend directly; a host with
+// no real output returns null.
+func OpenResilient(spec, device string, log *slog.Logger) (contracts.Backend, string, error) {
+	if log == nil {
+		log = slog.Default()
+	}
+	log = log.With("comp", "sink")
+
+	switch name, _ := splitSpec(spec); name {
+	case "null":
+		b, _ := openFactory("null", "", log)
+		log.Info("backend selected", "backend", "null", "reason", "explicit")
+		return b, "null", nil
+	case "file":
+		b, _, err := OpenDevice(spec, device, log)
+		return b, "file", err
+	}
+
+	cands := buildCandidates(spec, device)
+	if len(cands) == 0 {
+		b, _ := openFactory("null", "", log)
+		log.Info("backend selected", "backend", "null", "reason", "no real output device")
+		return b, "null", nil
+	}
+	log.Info("resilient output chain", "candidates", candidateLabels(cands))
+	return newResilientBackend(cands, log), "auto", nil
+}
+
+// ActiveReporter is implemented by the resilient backend: register a callback
+// fired with the live backend kind whenever the active output changes.
+type ActiveReporter interface {
+	OnActive(fn func(kind string))
+}
+
 func openAuto(device string, log *slog.Logger) (contracts.Backend, string, error) {
 	if isRegistered("alsa") {
 		if b, err := openFactory("alsa", device, log); err == nil {

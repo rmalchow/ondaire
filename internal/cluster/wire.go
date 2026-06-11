@@ -15,17 +15,19 @@ const (
 	kindGroupName byte = 'g' // one group-name entry
 	kindPlayback  byte = 'p' // one playback entry
 	kindSettings  byte = 's' // one settings entry
+	kindTombstone byte = 't' // one node tombstone (operator delete, keyed by node id in Group)
 )
 
 // delta is the JSON body of a single-record broadcast: exactly one of the
 // pointers is non-nil, selected by the leading kind byte. Group is the map key
 // for the group-scoped kinds (ignored for nodes).
 type delta struct {
-	Group    id.ID                `json:"group,omitempty"`
-	Node     *NodeRecord          `json:"node,omitempty"`
-	Name     *GroupNameRecord     `json:"name,omitempty"`
-	Playback *PlaybackRecord      `json:"playback,omitempty"`
-	Settings *GroupSettingsRecord `json:"settings,omitempty"`
+	Group     id.ID                `json:"group,omitempty"` // map key for group-scoped kinds; node id for kindTombstone
+	Node      *NodeRecord          `json:"node,omitempty"`
+	Name      *GroupNameRecord     `json:"name,omitempty"`
+	Playback  *PlaybackRecord      `json:"playback,omitempty"`
+	Settings  *GroupSettingsRecord `json:"settings,omitempty"`
+	Tombstone *TombstoneRecord     `json:"tombstone,omitempty"`
 }
 
 var errBadDelta = errors.New("cluster: empty delta payload")

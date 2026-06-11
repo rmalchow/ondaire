@@ -34,6 +34,75 @@ func TestVersionedLater(t *testing.T) {
 	}
 }
 
+// TestTombstoneSuppressesResurrection: once a node is tombstoned, a re-gossiped
+// record at or below the killed version must not bring it back; a record that
+// advanced PAST the kill version (the node genuinely restarted/reconciled) wins.
+func TestTombstoneSuppressesResurrection(t *testing.T) {
+	self := id.New()
+	dead := id.New()
+	d := newDocument()
+	d.Nodes[dead] = nodeRec(dead, 4, "pi01-stale")
+	d.Playback[dead] = &PlaybackRecord{State: "playing", Version: 1, UpdatedAt: 100}
+
+	// Delete it at its current version.
+	if !d.mergeTombstone(dead, &TombstoneRecord{KilledVersion: 4, UpdatedAt: 200}) {
+		t.Fatal("mergeTombstone should report a change")
+	}
+	if _, ok := d.Nodes[dead]; ok {
+		t.Fatal("tombstone should have removed the node record")
+	}
+	if _, ok := d.Playback[dead]; ok {
+		t.Fatal("tombstone should have removed the group playback record")
+	}
+
+	// A peer re-gossips the same (or older) version → stays dead.
+	if d.mergeNode(self, nodeRec(dead, 4, "pi01-stale")) {
+		t.Fatal("re-gossip at killed version must be suppressed")
+	}
+	if _, ok := d.Nodes[dead]; ok {
+		t.Fatal("suppressed node must not reappear")
+	}
+
+	// The node genuinely comes back at a higher version → resurrects.
+	if !d.mergeNode(self, nodeRec(dead, 5, "pi01-back")) {
+		t.Fatal("record past the kill version should resurrect")
+	}
+	if got := d.Nodes[dead]; got == nil || got.Name != "pi01-back" {
+		t.Fatalf("expected resurrection at v5, got %+v", got)
+	}
+}
+
+// TestTombstoneMergeKeepsHigherKill: the grow-only merge keeps the higher kill
+// version and is idempotent for an equal/older one.
+func TestTombstoneMergeKeepsHigherKill(t *testing.T) {
+	dead := id.New()
+	d := newDocument()
+	d.mergeTombstone(dead, &TombstoneRecord{KilledVersion: 2, UpdatedAt: 100})
+	if d.mergeTombstone(dead, &TombstoneRecord{KilledVersion: 1, UpdatedAt: 100}) {
+		t.Fatal("older kill version must not change anything")
+	}
+	if !d.mergeTombstone(dead, &TombstoneRecord{KilledVersion: 5, UpdatedAt: 100}) {
+		t.Fatal("higher kill version must raise the tombstone")
+	}
+	if d.Tombstones[dead].KilledVersion != 5 {
+		t.Fatalf("kill version = %d want 5", d.Tombstones[dead].KilledVersion)
+	}
+}
+
+// TestClearTombstone: clearing lets the node merge again (the alive safety valve).
+func TestClearTombstone(t *testing.T) {
+	self := id.New()
+	dead := id.New()
+	d := newDocument()
+	d.mergeTombstone(dead, &TombstoneRecord{KilledVersion: 3, UpdatedAt: 100})
+	if !d.clearTombstone(dead) {
+		t.Fatal("clearTombstone should report it removed one")
+	}
+	if !d.mergeNode(self, nodeRec(dead, 3, "back")) {
+		t.Fatal("after clearing, a record at the old version should merge")
+	}
+}
+
 func TestMergeNodeHigherVersionWins(t *testing.T) {
 	self := id.New()
 	peer := id.New()

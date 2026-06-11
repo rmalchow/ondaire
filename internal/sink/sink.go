@@ -304,6 +304,22 @@ func (p *Playout) SwapBackend(nb contracts.Backend) {
 	p.log.Info("output backend swapped")
 }
 
+// PreferOutputDevice forwards a device override to the LIVE output backend when
+// it supports re-ordering its failover chain (the resilient backend) — the UI
+// device selection (D37). Always targets the current backend, so it is correct
+// across a SwapBackend (e.g. a playback disable/enable cycle). Returns false when
+// the live backend ignores devices (nothing to do; persist+replicate still apply).
+func (p *Playout) PreferOutputDevice(device string) bool {
+	p.mu.Lock()
+	out := p.out
+	p.mu.Unlock()
+	if sel, ok := out.(interface{ SetPreferred(string) }); ok {
+		sel.SetPreferred(device)
+		return true
+	}
+	return false
+}
+
 // Disarm cleanly ends the local session (contracts.Sink): group went idle or
 // the session stopped. Discards buffered frames and stops the scheduler with
 // no starvation warnings. Idempotent; Reset re-arms.

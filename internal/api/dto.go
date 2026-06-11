@@ -78,6 +78,14 @@ type FollowReq struct {
 	Target string `json:"target"` // 32-hex node id
 }
 
+// --- POST /api/node/forget -------------------------------------------------
+// Delete an OFFLINE node from the cluster (tombstone + purge references). The
+// receiving master handles it locally and gossips the deletion; it is never
+// proxied to the (offline) target.
+type ForgetNodeReq struct {
+	Target string `json:"target"` // 32-hex node id, or an alive node's unique name
+}
+
 // --- POST /api/playback/assign ---------------------------------------------
 type AssignPlaybackReq struct {
 	Node   string `json:"node"`   // 32-hex playback-node id

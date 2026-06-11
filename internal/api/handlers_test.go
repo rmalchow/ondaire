@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -167,6 +168,48 @@ func TestRenameNode(t *testing.T) {
 	}
 	if len(fc.setName) != 1 || fc.setName[0] != "bob" {
 		t.Errorf("cluster setName = %v", fc.setName)
+	}
+}
+
+func TestForgetNode(t *testing.T) {
+	self := id.New()
+	dead := id.New()
+	cfg, fc, _ := baseConfig(self)
+	_, ts := testServer(t, cfg)
+
+	resp := doJSON(t, ts, http.MethodPost, "/api/node/forget", map[string]any{"target": dead.String()})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if len(fc.forgot) != 1 || fc.forgot[0] != dead {
+		t.Errorf("cluster ForgetNode = %v, want [%s]", fc.forgot, dead)
+	}
+}
+
+func TestForgetNodeBadTarget(t *testing.T) {
+	self := id.New()
+	cfg, _, _ := baseConfig(self)
+	_, ts := testServer(t, cfg)
+
+	resp := doJSON(t, ts, http.MethodPost, "/api/node/forget", map[string]any{"target": "not-an-id"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestForgetNodeRefused(t *testing.T) {
+	self := id.New()
+	dead := id.New()
+	cfg, fc, _ := baseConfig(self)
+	fc.forgetErr = errors.New("node is online")
+	_, ts := testServer(t, cfg)
+
+	resp := doJSON(t, ts, http.MethodPost, "/api/node/forget", map[string]any{"target": dead.String()})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status %d, want 409", resp.StatusCode)
 	}
 }
 

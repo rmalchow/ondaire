@@ -27,6 +27,8 @@ type fakeCluster struct {
 	setSpotifyEndpoints [][]contracts.SpotifyEndpoint
 	assigned            [][2]id.ID
 	patched             []id.ID
+	forgot              []id.ID
+	forgetErr           error
 }
 
 type observeCall struct {
@@ -99,6 +101,13 @@ func (f *fakeCluster) SetSpotifyEndpoints(eps []contracts.SpotifyEndpoint) {
 	f.mu.Lock()
 	f.setSpotifyEndpoints = append(f.setSpotifyEndpoints, eps)
 	f.mu.Unlock()
+}
+
+func (f *fakeCluster) ForgetNode(nid id.ID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.forgot = append(f.forgot, nid)
+	return f.forgetErr
 }
 
 func (f *fakeCluster) AssignPlaybackNode(node, target id.ID) bool {

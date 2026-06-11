@@ -148,6 +148,11 @@ func (b *Bridge) Run(ctx context.Context) error {
 	}
 	cmd := exec.CommandContext(ctx, b.cfg.BinPath, args...)
 	cmd.Cancel = func() error { return cmd.Process.Kill() }
+	// go-librespot resolves a config home from $XDG_CONFIG_HOME/$HOME BEFORE it
+	// honors --config_dir, and aborts ("neither $XDG_CONFIG_HOME nor $HOME are
+	// defined") when both are unset — which is exactly the case under a systemd
+	// service running as root with no login session. Point both at our state dir.
+	cmd.Env = append(os.Environ(), "HOME="+b.cfg.StateDir, "XDG_CONFIG_HOME="+b.cfg.StateDir)
 	// go-librespot logs to stderr (zeroconf, auth, track changes) — surface it for
 	// bring-up; stdout is unused (audio goes to the FIFO via the pipe backend).
 	cmd.Stdout, cmd.Stderr = nil, os.Stderr

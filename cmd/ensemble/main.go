@@ -340,13 +340,19 @@ func run(ctx context.Context, opt options) (rerr error) {
 	clockSrv.Start() // registers 0x10 on the mux (idempotent, mux not yet running)
 	clockFol := clock.NewFollower(mux, base)
 
-	// 8. Sink backend + playout. ENSEMBLE_OUTPUT=null forces null (§8.5/D27). The
-	//    configured ALSA device (D37) is honored on the alsa path (auto/explicit).
-	backend, backendName, err := sink.OpenDevice(output, cfg.OutputDevice, base)
+	// 8. Sink backend + playout. ENSEMBLE_OUTPUT=null forces null (§8.5/D27).
+	//    Otherwise the output is the resilient failover chain: it tries every real
+	//    output (the configured device first) until one works, rotates on failure,
+	//    and rests with backoff after repeated whole-chain failures (D37).
+	backend, backendName, err := sink.OpenResilient(output, cfg.OutputDevice, base)
 	if err != nil {
 		return fmt.Errorf("sink backend %q: %w", opt.Output, err)
 	}
 	cl.SetOutputBackend(backendName) // report the CHOSEN backend so the UI can show it
+	if ar, ok := backend.(sink.ActiveReporter); ok {
+		// Surface the live output kind as the chain opens / rotates outputs.
+		ar.OnActive(func(kind string) { cl.SetOutputBackend(kind) })
+	}
 	theSink := sink.New(sink.Config{
 		Backend:       backend,
 		Clock:         clockFol,
@@ -438,7 +444,7 @@ func run(ctx context.Context, opt options) (rerr error) {
 		Spotify:           spotifyCtl,
 		Stats:             statusStats(theSink, clockFol, engine),
 		Sink:              func() api.SinkControl { return theSink },
-		ApplyOutputDevice: applyOutputDevice(backendName, output, theSink, base),
+		ApplyOutputDevice: applyOutputDevice(backendName, theSink, base),
 		ApplyDisabled:     applyDisabled(disabled, output, cfg.OutputDevice, theSink, base),
 		Ports: api.PortsResp{
 			HTTP:   httpPort,
@@ -615,7 +621,8 @@ func runPlayback(ctx context.Context, opt options, cfg *config.Config, base *slo
 	log.Info("port bound", "service", "control", "proto", "udp", "port", controlPort)
 
 	// Sink backend + playout, fed by the subscriber through the decode/deliver path.
-	backend, backendName, err := sink.OpenDevice(opt.Output, cfg.OutputDevice, base)
+	// Resilient failover chain (D37): try every real output until one works.
+	backend, backendName, err := sink.OpenResilient(opt.Output, cfg.OutputDevice, base)
 	if err != nil {
 		return fmt.Errorf("sink backend %q: %w", opt.Output, err)
 	}
@@ -860,29 +867,17 @@ func deviceIDs(devs []contracts.OutputDevice) []string {
 }
 
 // applyOutputDevice returns the PATCH /api/node {outputDevice} live-apply closure
-// (D37, §8.5). It reopens the output backend for the new device and swaps it into
-// the live sink — but ONLY when the active backend kind is alsa (the only backend
-// honoring a device). For any other kind it is a no-op (persist+replicate already
-// happened upstream). A failed reopen is logged and the old backend kept.
-func applyOutputDevice(backendName, outputSpec string, sk *sink.Playout, log *slog.Logger) func(string) {
-	if backendName != "alsa" {
-		return func(string) {
-			log.Info("output device changed; backend is not alsa, persist+replicate only", "backend", backendName)
-		}
-	}
+// (D37, §8.5). The resilient backend honors it by re-ordering its failover chain
+// to prefer the chosen device (the override may itself fail, in which case the
+// chain carries on past it). For a plain backend that ignores devices it is a
+// no-op (persist+replicate already happened upstream).
+func applyOutputDevice(backendName string, sk *sink.Playout, log *slog.Logger) func(string) {
 	return func(device string) {
-		nb, name, err := sink.OpenDevice(outputSpec, device, log)
-		if err != nil {
-			log.Warn("output device reopen failed; keeping current backend", "device", device, "err", err)
+		if sk.PreferOutputDevice(device) {
+			log.Info("output device override", "device", device)
 			return
 		}
-		if name != "alsa" {
-			// The reopen degraded (e.g. alsa now fails); don't swap to a different kind.
-			_ = nb.Close()
-			log.Warn("output device reopen did not yield alsa; keeping current backend", "got", name)
-			return
-		}
-		sk.SwapBackend(nb)
+		log.Info("output device changed; backend ignores device, persist+replicate only", "backend", backendName)
 	}
 }
 
@@ -1121,8 +1116,9 @@ func applyDisabled(state *disableState, outputSpec, device string, sk *sink.Play
 			log.Info("playback disabled; sink swapped to null backend")
 			return
 		}
-		// Re-enabled: reopen the configured device/backend.
-		nb, name, err := sink.OpenDevice(outputSpec, device, log)
+		// Re-enabled: reopen the resilient failover chain (not a plain backend) so
+		// the self-healing output is restored after a disable/enable cycle.
+		nb, name, err := sink.OpenResilient(outputSpec, device, log)
 		if err != nil {
 			log.Warn("playback re-enable: backend reopen failed; keeping null", "err", err)
 			return

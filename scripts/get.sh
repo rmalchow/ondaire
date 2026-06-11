@@ -24,12 +24,37 @@ ok()   { printf '%s ✓%s %s\n' "$c_ok" "$c_off" "$*"; }
 err()  { printf '%serror:%s %s\n' "$c_err" "$c_off" "$*" >&2; exit 1; }
 
 # ask reads from the TERMINAL, not stdin — so prompts work under `curl | bash`,
-# where stdin is the script itself. Non-interactive (no tty) defaults to "no".
+# where stdin is the script itself. Non-interactive (no tty) returns the default.
+# $2 = default ("y" makes the prompt [Y/n] and a bare Enter mean yes).
 ask() {
-  local q="$1" a=""
-  printf '%s [y/N] ' "$q" >/dev/tty 2>/dev/null || { return 1; }
+  local q="$1" def="${2:-n}" a="" hint='[y/N]'
+  [ "$def" = y ] && hint='[Y/n]'
+  printf '%s %s ' "$q" "$hint" >/dev/tty 2>/dev/null || { [ "$def" = y ]; return; }
   read -r a </dev/tty || a=""
+  [ -z "$a" ] && a="$def"
   case "$a" in [yY] | [yY][eE][sS]) return 0 ;; *) return 1 ;; esac
+}
+
+# ask_value prompts for a free-text value, re-asking until non-empty. A bare Enter
+# accepts $2 (the default) when one is given. Non-interactive falls back to $2.
+ask_value() {
+  local q="$1" def="${2:-}" a="" prompt="$1"
+  [ -n "$def" ] && prompt="$q [$def]"
+  while :; do
+    printf '%s: ' "$prompt" >/dev/tty 2>/dev/null || { printf '%s' "$def"; return; }
+    read -r a </dev/tty || a=""
+    [ -z "$a" ] && a="$def"
+    [ -n "$a" ] && { printf '%s' "$a"; return; }
+  done
+}
+
+# current_node_name extracts the existing node name from node.json (if any), so a
+# re-install defaults to the name the node already advertises. Best-effort grep —
+# no jq dependency.
+current_node_name() {
+  local f="$DATADIR/node.json"
+  [ -f "$f" ] || return 0
+  sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1
 }
 
 fetch() { # fetch URL OUTFILE  (follows redirects; curl or wget)
@@ -92,6 +117,21 @@ if command -v systemctl >/dev/null 2>&1 && ask "Start ensemble at boot (systemd 
     say "Stopping the running ensemble.service…"
     systemctl stop ensemble.service
   fi
+
+  # Role: a node that serves the web UI is a "master" (it gossips + owns cluster
+  # state + serves the SPA) and also plays; a node that only plays is "playback"
+  # (receive-only, driven by a master over the control plane).
+  if ask "Run the web UI on this node (control the whole system from here)?" y; then
+    ROLE="master,playback"
+  else
+    ROLE="playback"
+  fi
+
+  # Node name: shown in the UI. Mandatory (re-asks until non-empty); defaults to
+  # the name in an existing node.json on re-install.
+  NAME="$(ask_value "Node name (shown in the UI)" "$(current_node_name)")"
+
+  say "Role: $ROLE   ·   Name: $NAME"
   cat >"$UNIT" <<UNITEOF
 [Unit]
 Description=ensemble — synchronized multiroom audio
@@ -99,8 +139,14 @@ After=network-online.target sound.target
 Wants=network-online.target
 
 [Service]
-ExecStart=$LIBDIR/ensemble --data $DATADIR
+ExecStart=$LIBDIR/ensemble --data $DATADIR --role $ROLE --name "$NAME"
 WorkingDirectory=$LIBDIR
+# Under a system service there is no login session: give go-librespot and any
+# audio-player subprocess a writable HOME so they can locate their config.
+Environment=HOME=$DATADIR
+Environment=XDG_CONFIG_HOME=$DATADIR
+# Access to ALSA hardware devices for the audio output failover chain.
+SupplementaryGroups=audio
 Restart=on-failure
 RestartSec=2
 

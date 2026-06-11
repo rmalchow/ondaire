@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -35,6 +36,33 @@ func lookExecTool() (execTool, string, bool) {
 	return execTool{}, "", false
 }
 
+// lookExecToolNamed resolves a specific tool by name (for the resilient failover
+// chain, which tries each player individually). ok=false if unknown or not on $PATH.
+func lookExecToolNamed(name string) (execTool, string, bool) {
+	for _, t := range execTools {
+		if t.name != name {
+			continue
+		}
+		if p, err := exec.LookPath(t.name); err == nil {
+			return t, p, true
+		}
+		return execTool{}, "", false
+	}
+	return execTool{}, "", false
+}
+
+// childEnv returns the environment for a player subprocess. Under systemd as
+// root there is no $HOME, which some players (notably the PipeWire/PulseAudio
+// clients) need to locate per-user config; fall back to a writable temp dir so
+// they don't abort. Everything else is inherited.
+func childEnv() []string {
+	env := os.Environ()
+	if os.Getenv("HOME") == "" {
+		env = append(env, "HOME="+os.TempDir())
+	}
+	return env
+}
+
 // respawnThrottle bounds how often a write failure may respawn the player, so a
 // persistently-failing tool (e.g. no audio device) can't fork-bomb at frame
 // cadence. The first failure of an episode respawns immediately (lastSpawn zero).
@@ -51,15 +79,39 @@ type execBackend struct {
 	once      sync.Once
 	mu        sync.Mutex
 	closed    bool
+	noRespawn bool      // when set, a write failure returns the error instead of respawning (resilient chain owns retry)
 	lastSpawn time.Time // last (re)spawn, for throttling respawn-on-write-failure
 }
 
+// newExecBackend auto-picks the first player on $PATH and self-heals on death
+// (the standalone "exec" backend; ENSEMBLE_OUTPUT=exec or auto).
 func newExecBackend(log *slog.Logger) (*execBackend, error) {
-	tool, path, ok := lookExecTool()
+	return newExecBackendTool("", true, log)
+}
+
+// newExecBackendTool starts a player. toolName "" auto-picks the first on $PATH;
+// otherwise it pins that specific tool. respawn controls internal self-heal: the
+// resilient failover chain passes respawn=false so a dead player surfaces as a
+// write error and the chain rotates to the next output (rather than respawning a
+// player that just keeps dying — e.g. pw-play with no PipeWire session).
+func newExecBackendTool(toolName string, respawn bool, log *slog.Logger) (*execBackend, error) {
+	var (
+		tool execTool
+		path string
+		ok   bool
+	)
+	if toolName == "" {
+		tool, path, ok = lookExecTool()
+	} else {
+		tool, path, ok = lookExecToolNamed(toolName)
+	}
 	if !ok {
+		if toolName != "" {
+			return nil, fmt.Errorf("exec backend: tool %q not available on $PATH", toolName)
+		}
 		return nil, fmt.Errorf("exec backend: no player tool on $PATH")
 	}
-	b := &execBackend{toolPath: path, toolName: tool.name, toolArgs: tool.args, log: log}
+	b := &execBackend{toolPath: path, toolName: tool.name, toolArgs: tool.args, log: log, noRespawn: !respawn}
 	if err := b.spawnLocked(); err != nil {
 		return nil, err
 	}
@@ -70,6 +122,7 @@ func newExecBackend(log *slog.Logger) (*execBackend, error) {
 // is the constructor).
 func (b *execBackend) spawnLocked() error {
 	cmd := exec.Command(b.toolPath, b.toolArgs...)
+	cmd.Env = childEnv()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("exec backend: stdin pipe: %w", err)
@@ -122,8 +175,13 @@ func (b *execBackend) Write(frame []byte) error {
 			return nil
 		}
 	}
-	// Write failed (broken pipe → the player process died) or no pipe. Respawn the
-	// player and retry once so playout self-heals instead of going silent forever.
+	// Write failed (broken pipe → the player process died) or no pipe.
+	if b.noRespawn {
+		// The resilient chain owns retry: surface the death so it rotates outputs.
+		return fmt.Errorf("exec: %s player down", b.toolName)
+	}
+	// Respawn the player and retry once so playout self-heals instead of going
+	// silent forever.
 	w = b.respawn()
 	if w == nil {
 		return fmt.Errorf("exec: player down")

@@ -7,19 +7,33 @@ import (
 
 // Document is the whole replicated state (§4). In-memory only; never persisted.
 type Document struct {
-	Nodes    map[id.ID]*NodeRecord          `json:"nodes"`
-	Groups   map[id.ID]*GroupNameRecord     `json:"groups"`   // group names map
-	Playback map[id.ID]*PlaybackRecord      `json:"playback"` // per-group playback
-	Settings map[id.ID]*GroupSettingsRecord `json:"settings"` // per-group settings
+	Nodes      map[id.ID]*NodeRecord          `json:"nodes"`
+	Groups     map[id.ID]*GroupNameRecord     `json:"groups"`               // group names map
+	Playback   map[id.ID]*PlaybackRecord      `json:"playback"`             // per-group playback
+	Settings   map[id.ID]*GroupSettingsRecord `json:"settings"`             // per-group settings
+	Tombstones map[id.ID]*TombstoneRecord     `json:"tombstones,omitempty"` // operator-deleted nodes (D-del)
+}
+
+// TombstoneRecord marks a node id as deleted up to KilledVersion. It is a
+// grow-only CRDT: a merge keeps the HIGHER KilledVersion (no writer/timestamp
+// tiebreak needed — max is the join), so a deletion propagates to every node and
+// converges. A node record for the id is suppressed — and never re-merged from a
+// peer — while its Version <= KilledVersion; if the node legitimately restarts it
+// reconciles its version ABOVE the tombstone (D7) and resurrects, and an alive
+// peer also clears the tombstone (a safety valve against deleting a live node).
+type TombstoneRecord struct {
+	KilledVersion uint64 `json:"killedVersion"`
+	UpdatedAt     int64  `json:"updatedAt"` // unix seconds, for purge aging
 }
 
 // newDocument returns an empty document with initialised maps.
 func newDocument() *Document {
 	return &Document{
-		Nodes:    map[id.ID]*NodeRecord{},
-		Groups:   map[id.ID]*GroupNameRecord{},
-		Playback: map[id.ID]*PlaybackRecord{},
-		Settings: map[id.ID]*GroupSettingsRecord{},
+		Nodes:      map[id.ID]*NodeRecord{},
+		Groups:     map[id.ID]*GroupNameRecord{},
+		Playback:   map[id.ID]*PlaybackRecord{},
+		Settings:   map[id.ID]*GroupSettingsRecord{},
+		Tombstones: map[id.ID]*TombstoneRecord{},
 	}
 }
 
@@ -130,11 +144,59 @@ func (d *Document) mergeNode(self id.ID, r *NodeRecord) bool {
 	if r.ID == self {
 		return false
 	}
+	// A tombstoned node stays deleted: ignore any re-gossiped record at or below
+	// the killed version (so a peer's lingering replica can't resurrect it). A
+	// record that advanced past the tombstone means the node genuinely came back.
+	if tb := d.Tombstones[r.ID]; tb != nil && r.Version <= tb.KilledVersion {
+		if _, present := d.Nodes[r.ID]; present {
+			delete(d.Nodes, r.ID)
+			return true
+		}
+		return false
+	}
 	cur, ok := d.Nodes[r.ID]
 	if ok && !versionedLater(cur.Version, cur.ID, r.Version, r.ID) {
 		return false
 	}
 	d.Nodes[r.ID] = cloneNode(r)
+	return true
+}
+
+// mergeTombstone raises (or installs) the tombstone for nid and enforces it:
+// drops the node record when it is at/below the killed version, and drops the
+// node's group playback record. Returns true if anything changed locally.
+func (d *Document) mergeTombstone(nid id.ID, r *TombstoneRecord) bool {
+	if r == nil {
+		return false
+	}
+	cur, ok := d.Tombstones[nid]
+	raised := !ok || r.KilledVersion > cur.KilledVersion
+	if !raised {
+		// Same/older kill version: refresh the age stamp if the incoming one is
+		// newer (keeps a live tombstone from purging), but report no change.
+		if ok && r.UpdatedAt > cur.UpdatedAt {
+			cur.UpdatedAt = r.UpdatedAt
+		}
+		return false
+	}
+	d.Tombstones[nid] = &TombstoneRecord{KilledVersion: r.KilledVersion, UpdatedAt: r.UpdatedAt}
+	changed := true
+	if n, present := d.Nodes[nid]; present && n.Version <= r.KilledVersion {
+		delete(d.Nodes, nid)
+	}
+	if _, present := d.Playback[nid]; present {
+		delete(d.Playback, nid) // a deleted master's group playback status is meaningless
+	}
+	return changed
+}
+
+// clearTombstone removes a tombstone for nid (the node is demonstrably alive
+// again). Returns true if one was present. Caller holds the document mutex.
+func (d *Document) clearTombstone(nid id.ID) bool {
+	if _, ok := d.Tombstones[nid]; !ok {
+		return false
+	}
+	delete(d.Tombstones, nid)
 	return true
 }
 
@@ -153,6 +215,15 @@ func (d *Document) mergeGroupName(g id.ID, r *GroupNameRecord) bool {
 
 func (d *Document) mergePlayback(g id.ID, r *PlaybackRecord) bool {
 	if r == nil {
+		return false
+	}
+	// A tombstoned master's group playback is meaningless; don't let a peer's copy
+	// re-add it after a delete (it would only age out via purge otherwise).
+	if d.Tombstones[g] != nil {
+		if _, present := d.Playback[g]; present {
+			delete(d.Playback, g)
+			return true
+		}
 		return false
 	}
 	cur, ok := d.Playback[g]
@@ -192,6 +263,13 @@ func (d *Document) mergeAll(self id.ID, remote *Document) bool {
 func (d *Document) mergeAllTracked(self id.ID, remote *Document) (changed, lookupChanged bool) {
 	if remote == nil {
 		return false, false
+	}
+	// Tombstones first: a deletion must be in effect before node records merge, so
+	// a suppressed node in the same remote document is not briefly resurrected.
+	for nid, r := range remote.Tombstones {
+		if d.mergeTombstone(nid, r) {
+			changed = true
+		}
 	}
 	for _, r := range remote.Nodes {
 		if d.mergeNode(self, r) {
@@ -289,6 +367,10 @@ func (d *Document) clone() *Document {
 		cp := *v
 		out.Settings[k] = &cp
 	}
+	for k, v := range d.Tombstones {
+		cp := *v
+		out.Tombstones[k] = &cp
+	}
 	return out
 }
 
@@ -313,6 +395,15 @@ func (d *Document) purge(self id.ID, maxAgeUnix int64, alive map[id.ID]bool) boo
 	for k, v := range d.Playback {
 		if v.UpdatedAt < maxAgeUnix {
 			delete(d.Playback, k)
+			removed = true
+		}
+	}
+	// Age out old tombstones alongside the node records they suppress: once a
+	// deleted node is itself purged everywhere, the tombstone has nothing left to
+	// suppress. Kept at least as long as node records (same maxAge).
+	for k, v := range d.Tombstones {
+		if v.UpdatedAt < maxAgeUnix {
+			delete(d.Tombstones, k)
 			removed = true
 		}
 	}

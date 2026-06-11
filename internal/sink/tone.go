@@ -30,6 +30,13 @@ func (p *Playout) TestTone(d time.Duration) error {
 	out := p.out
 	p.mu.Unlock()
 
+	// A test tone is an operator poking a node: if the output has given up and is
+	// resting after repeated failures, force it to retry the chain now so the tone
+	// has a chance of being heard (the retry may still land on a dead output).
+	if rv, ok := out.(interface{ Revive() }); ok {
+		rv.Revive()
+	}
+
 	frames := int(d / (stream.FrameDuration * time.Millisecond))
 	p.log.Info("test tone", "ms", d.Milliseconds())
 

@@ -102,6 +102,13 @@ export function setSpotifyEndpoints(nodeId, spotifyEndpoints) {
   return toasted(req("PATCH", base(nodeId) + "/node", { spotifyEndpoints }));
 }
 
+// Delete an OFFLINE node from the cluster (tombstone + purge references). Issued
+// on the LOCAL master — NOT base(nodeId): the target is offline, so proxying to it
+// would fail. The receiving master applies it locally and gossips the deletion.
+export function forgetNode(nodeId) {
+  return toasted(req("POST", "/api/node/forget", { target: nodeId }));
+}
+
 // --- group membership (issued ON the acting node) ---
 export function follow(nodeId, targetId) {
   return toasted(req("POST", base(nodeId) + "/follow", { target: targetId }));

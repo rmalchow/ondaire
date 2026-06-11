@@ -259,6 +259,30 @@ func (s *Server) sink() SinkControl {
 }
 
 // handleFollow makes THIS node follow target (§5.1).
+// handleForgetNode deletes an OFFLINE node from the cluster (§9.1): it tombstones
+// the record so gossip can't resurrect it and purges references to it. The target
+// is given in the body (a 32-hex id, or a unique alive name) so the request is NOT
+// proxied to the — offline — node; the receiving master applies it locally and
+// gossips the deletion. Refuses deleting self or an online node.
+func (s *Server) handleForgetNode(c echo.Context) error {
+	var req ForgetNodeReq
+	if err := c.Bind(&req); err != nil {
+		return failCode(c, http.StatusBadRequest, "bad_request", "")
+	}
+	target, ok, ambiguous := s.resolveTarget(req.Target)
+	if ambiguous {
+		return failCode(c, http.StatusConflict, "ambiguous_target", "name matches more than one node")
+	}
+	if !ok {
+		return failCode(c, http.StatusBadRequest, "bad_target", "")
+	}
+	if err := s.cfg.Cluster.ForgetNode(target); err != nil {
+		return failCode(c, http.StatusConflict, "forget_failed", err.Error())
+	}
+	s.log.Info("node mutation", append(auditAttrs(c, "forget"), "target", target.String())...)
+	return c.NoContent(http.StatusNoContent)
+}
+
 func (s *Server) handleFollow(c echo.Context) error {
 	var req FollowReq
 	if err := c.Bind(&req); err != nil {

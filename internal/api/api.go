@@ -89,6 +89,7 @@ func New(cfg Config) *Server {
 	g.GET("/media", s.handleMedia)
 	g.POST("/follow", s.handleFollow)
 	g.POST("/unfollow", s.handleUnfollow)
+	g.POST("/node/forget", s.handleForgetNode)
 	g.POST("/playback/assign", s.handleAssignPlayback)
 	g.POST("/playback/patch", s.handlePatchPlayback)
 	g.POST("/group/name", s.handleGroupName)

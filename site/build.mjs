@@ -425,9 +425,12 @@ function downloadCard(o) {
             ${logosHtml(o.logos)}
           </div>
         </div>`;
+  // o.note is trusted author HTML from content.mjs (may carry <code>/<strong>),
+  // so it is intentionally not run through esc(). Rendered full-width under head.
+  const note = o.note ? `\n        <p class="dl-note">${o.note}</p>` : "";
   if (o.docker) {
     return `
-      <article class="dl-card">${head}
+      <article class="dl-card">${head}${note}
         <div class="dl-cmd">
           <code>${esc(o.docker)}</code>
           <button class="dl-copy" type="button" data-copy="${esc(o.docker)}" aria-label="Copy command">copy</button>
@@ -437,12 +440,12 @@ function downloadCard(o) {
   const fname = o.file.split("/").pop();
   if (!o.present) {
     return `
-      <article class="dl-card">${head}
+      <article class="dl-card">${head}${note}
         <p class="dl-missing">Binary not staged — run <code>site/build.sh</code> (or build from a tagged CI pipeline).</p>
       </article>`;
   }
   return `
-      <article class="dl-card">${head}
+      <article class="dl-card">${head}${note}
         <div class="dl-card-foot">
           <div class="dl-file">
             <span class="dl-fname"><code>${esc(fname)}</code> <span class="dl-size">${esc(fmtBytes(o.size))}</span></span>

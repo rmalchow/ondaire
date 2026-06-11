@@ -353,6 +353,8 @@ export const content = {
         arch: "linux · armv6 · hard-float (armhf)",
         logos: ["raspberrypi"],
         file: "assets/downloads/ensemble-linux-armv6hf.tar.gz",
+        note:
+          "Heads-up: Raspberry Pi OS ships <strong>without libopus</strong> — install it with <code>sudo apt install libopus0</code> to play Opus-encoded groups (uncompressed PCM works without it). Audio hardware that needs third-party drivers is out of ensemble's scope — get the card working in Linux first.",
       },
       {
         name: "32-bit ARM — soft-float",
@@ -360,6 +362,8 @@ export const content = {
         arch: "linux · armv6 · soft-float (armel)",
         logos: ["raspberrypi"],
         file: "assets/downloads/ensemble-linux-armv6.tar.gz",
+        note:
+          "Heads-up: libopus is usually not preinstalled — add it via your distro (e.g. <code>libopus0</code>) to play Opus-encoded groups (uncompressed PCM works without it). Audio hardware that needs third-party drivers is out of ensemble's scope.",
       },
       {
         name: "PC or server — x86-64",

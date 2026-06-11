@@ -757,6 +757,18 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
 .dl-card-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; }
 .dl-card-meta .tag { white-space: nowrap; }
 .dl-rec { margin: 0; color: var(--muted); font-size: 14.5px; }
+/* per-card caveat (e.g. the Pi 32-bit libopus / driver notes) */
+.dl-note {
+  margin: 4px 0 0;
+  padding: 9px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--accent-2) 7%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--accent-2) 55%, transparent);
+  border-radius: 0 8px 8px 0;
+}
+.dl-note code { color: var(--ink); }
 /* binary tile footer: filename + SHA-256 on the left, the Download CTA on the right */
 .dl-card-foot {
   display: flex;

@@ -99,6 +99,27 @@ func (b *Bridge) SetDeviceName(name string) error {
 	return nil
 }
 
+// playerCommand POSTs a bodyless go-librespot player command ("pause", "stop")
+// to its API. go-librespot is a full Spotify Connect device, so these propagate
+// over Connect to the controlling phone — ensemble uses this to push its own
+// stop/source-switch back so the phone reflects it instead of auto-advancing.
+func (b *Bridge) playerCommand(action string) error {
+	url := fmt.Sprintf("http://127.0.0.1:%d/player/%s", b.cfg.APIPort, action)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("spotify: player %s: %w", action, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("spotify: player %s: status %d", action, resp.StatusCode)
+	}
+	return nil
+}
+
 // New builds a Bridge (no process yet — call Run). It creates the audio FIFO and
 // go-librespot config dir under StateDir.
 func New(cfg Config) (*Bridge, error) {

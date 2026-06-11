@@ -117,6 +117,9 @@ type NodeConfig interface {
 type Spotify interface {
 	Reconcile(eps []contracts.SpotifyEndpoint) // start/stop/rename preset bridges
 	Rename(nodeName string)                    // live-rename every Connect device
+	// Deactivate pushes ensemble's stop (disconnect=true) or source-switch
+	// (disconnect=false) back to the controlling phone so it stops feeding tracks.
+	Deactivate(disconnect bool)
 }
 
 // SinkControl is the live-apply side of PATCH /api/node for volume/output-delay

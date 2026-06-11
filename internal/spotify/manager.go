@@ -229,6 +229,39 @@ func (m *Manager) Close() error {
 	return nil
 }
 
+// Deactivate pushes ensemble's own stop / source-switch back to the controlling
+// phone: it pauses (disconnect=false, used when another source is selected) or
+// stops+disconnects (disconnect=true, used on an explicit Stop) the currently
+// active endpoint's go-librespot. No-op when no Spotify endpoint is active.
+//
+// Without this, go-librespot keeps its Connect session alive after ensemble
+// leaves it: the phone keeps auto-advancing tracks, each re-emitting a "playing"
+// event that bounces ensemble straight back to Spotify. Clearing hasActive BEFORE
+// sending is what breaks the loop — the resulting paused/stopped event reaches
+// onStop with hasActive already false, so it issues no second engine.Stop (which
+// could kill the source the user just switched to), and no further "playing"
+// events flow once go-librespot is paused/stopped.
+func (m *Manager) Deactivate(disconnect bool) {
+	m.mu.Lock()
+	if !m.hasActive {
+		m.mu.Unlock()
+		return
+	}
+	mg := m.bridges[m.active]
+	m.hasActive = false
+	m.mu.Unlock()
+	if mg == nil {
+		return
+	}
+	action := "pause"
+	if disconnect {
+		action = "stop"
+	}
+	if err := mg.bridge.playerCommand(action); err != nil {
+		m.log.Debug("spotify deactivate failed", "action", action, "err", err)
+	}
+}
+
 // ---- orchestration callbacks (fired from each bridge's event goroutine) -------
 
 func (m *Manager) onPlay(eid string) {

@@ -407,6 +407,9 @@ func (s *Server) handlePlay(c echo.Context) error {
 	if err := s.cfg.Group.Play(c.Request().Context(), uri); err != nil {
 		return s.fail(c, err)
 	}
+	if s.cfg.Spotify != nil && !strings.HasPrefix(uri, "spotify:") {
+		s.cfg.Spotify.Deactivate(false) // switched to another source → pause the phone
+	}
 	s.log.Info("ui mutation", append(auditAttrs(c, "play"), "uri", uri)...)
 	return c.NoContent(http.StatusNoContent)
 }
@@ -490,6 +493,9 @@ func (s *Server) handleEnqueue(c echo.Context) error {
 	if err := s.cfg.Group.Enqueue(c.Request().Context(), uris); err != nil {
 		return s.fail(c, err)
 	}
+	if s.cfg.Spotify != nil {
+		s.cfg.Spotify.Deactivate(false) // enqueuing files replaces Spotify → pause the phone
+	}
 	s.log.Info("ui mutation", append(auditAttrs(c, "enqueue"), "count", len(uris))...)
 	return c.NoContent(http.StatusNoContent)
 }
@@ -572,6 +578,9 @@ func (s *Server) handleNext(c echo.Context) error {
 func (s *Server) handleStop(c echo.Context) error {
 	if err := s.cfg.Group.Stop(c.Request().Context()); err != nil {
 		return s.fail(c, err)
+	}
+	if s.cfg.Spotify != nil {
+		s.cfg.Spotify.Deactivate(true) // explicit Stop → disconnect the Connect device
 	}
 	s.log.Info("ui mutation", auditAttrs(c, "stop")...)
 	return c.NoContent(http.StatusNoContent)

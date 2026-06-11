@@ -83,6 +83,7 @@ type PlaybackRecord struct {
 	Metadata    *contracts.TrackMetadata `json:"metadata,omitempty"` // now-playing track info (D57); nil when none
 	QueueLen    int                      `json:"queueLen,omitempty"` // count of UPCOMING tracks; items are NOT gossiped (pulled on demand, D-queue)
 	QueueRev    int64                    `json:"queueRev,omitempty"` // monotonic change marker; UI re-pulls the queue when it moves
+	Seekable    bool                     `json:"seekable,omitempty"` // current source supports POST /seek (file queue)
 	Version     uint64                   `json:"version"`
 	UpdatedAt   int64                    `json:"updatedAt"`
 	Writer      id.ID                    `json:"writer"`

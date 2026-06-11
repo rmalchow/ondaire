@@ -17,11 +17,22 @@ type flacSource struct {
 	shiftR   uint   // right shift to reach 16-bit (when bps > 16)
 	shiftL   uint   // left shift to reach 16-bit (when bps < 16)
 	samples  uint64 // total inter-channel samples (per channel), 0 when unknown
+	seekable bool   // opened via NewSeek (reader is an io.ReadSeeker)
 	eof      bool
 }
 
 func newFLACSource(r io.Reader) (*flacSource, error) {
-	st, err := flac.New(r)
+	// A seekable reader (a file) is opened with NewSeek so Stream.Seek works; a
+	// non-seekable one (http stream) uses the plain parser.
+	var st *flac.Stream
+	var err error
+	seekable := false
+	if rs, ok := r.(io.ReadSeeker); ok {
+		st, err = flac.NewSeek(rs)
+		seekable = true
+	} else {
+		st, err = flac.New(r)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: flac open: %v", ErrBadMedia, err)
 	}
@@ -38,6 +49,7 @@ func newFLACSource(r io.Reader) (*flacSource, error) {
 		rate:     int(info.SampleRate),
 		channels: ch,
 		samples:  info.NSamples,
+		seekable: seekable,
 	}
 	bps := int(info.BitsPerSample)
 	if bps > 16 {
@@ -57,6 +69,20 @@ func (f *flacSource) duration() (float64, bool) {
 		return 0, false
 	}
 	return float64(f.samples) / float64(f.rate), true
+}
+
+// seek repositions to sec by sample number (frame-granular). Requires a stream
+// opened via NewSeek (file sources).
+func (f *flacSource) seek(sec float64) error {
+	if !f.seekable || f.rate <= 0 {
+		return ErrNotSeekable
+	}
+	sample := uint64(sec * float64(f.rate))
+	if _, err := f.stream.Seek(sample); err != nil {
+		return fmt.Errorf("%w: flac seek: %v", ErrBadMedia, err)
+	}
+	f.eof = false
+	return nil
 }
 
 func (f *flacSource) Close() error { return nil }

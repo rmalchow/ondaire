@@ -252,6 +252,9 @@ type Playback struct {
 	// from the master via GET /queue.
 	QueueLen int   `json:"queueLen,omitempty"`
 	QueueRev int64 `json:"queueRev,omitempty"`
+	// Seekable reports whether the current source supports POST /seek (decoded file
+	// queue → true; live http/input/spotify → false). Drives the UI scrubber.
+	Seekable bool `json:"seekable,omitempty"`
 }
 
 // QueueItem is one UPCOMING track in a file-source play queue. The queue is NOT

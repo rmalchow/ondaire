@@ -21,6 +21,12 @@ type sampleReader interface {
 	io.Closer
 }
 
+// decoderSeeker is the OPTIONAL capability of a sampleReader that can reposition
+// to an absolute time. mp3/flac/wav implement it when their reader is seekable.
+type decoderSeeker interface {
+	seek(sec float64) error
+}
+
 // newDecoder picks a sampleReader by media format and wraps r. format is
 // "wav"/"mp3"/"flac"; empty/unknown triggers a 12-byte sniff before giving up
 // with ErrUnsupportedFormat.
@@ -58,6 +64,7 @@ type framer struct {
 	src      sampleReader
 	rs       *resampler
 	channels int
+	rate     int     // native sample rate (kept so a seek can rebuild the resampler)
 	canon    []int16 // accumulated canonical (48k, stereo) samples
 	scratch  []int16 // native-read scratch
 	idx      uint64
@@ -67,11 +74,33 @@ type framer struct {
 
 func newFramer(src sampleReader) *framer {
 	rate, ch := src.info()
-	f := &framer{src: src, channels: ch}
+	f := &framer{src: src, channels: ch, rate: rate}
 	if rate != stream.SampleRate {
 		f.rs = newResampler(rate)
 	}
 	return f
+}
+
+// seek repositions the underlying decoder to sec and discards buffered/resampled
+// state (the resampler has no in-place reset, so a fresh one is built). Returns
+// ErrNotSeekable when the decoder can't seek.
+func (f *framer) seek(sec float64) error {
+	s, ok := f.src.(decoderSeeker)
+	if !ok {
+		return ErrNotSeekable
+	}
+	if err := s.seek(sec); err != nil {
+		return err
+	}
+	f.canon = f.canon[:0]
+	f.scratch = f.scratch[:0]
+	f.eof = false
+	f.done = false
+	f.idx = 0
+	if f.rate != stream.SampleRate {
+		f.rs = newResampler(f.rate)
+	}
+	return nil
 }
 
 // fill pulls one batch from src, converts to canonical stereo 48k, and appends

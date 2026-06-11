@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createPlayClock, reconcile, sample } from "./playclock.js";
+import { createPlayClock, reconcile, sample, markSeek } from "./playclock.js";
 
 // helper: play "file:a" at positionSec, anchored at nowMs.
 function anchor(c, positionSec, nowMs, uri = "file:a") {
@@ -84,6 +84,18 @@ describe("playclock", () => {
     // a genuinely fresh heartbeat (value changed) still reconciles normally.
     anchor(c, 45, 5000, "file:a"); // ~real position at t=5s; est ~45 → small slew
     expect(sample(c, 5000, 0)).toBeCloseTo(45, 1);
+  });
+
+  it("markSeek jumps immediately and the server echo is a no-op", () => {
+    const c = createPlayClock();
+    anchor(c, 10, 0);
+    sample(c, 3000, 0); // ~13
+    markSeek(c, 90, 3000); // user scrubbed to 90
+    expect(sample(c, 3000, 0)).toBeCloseTo(90, 5);
+    expect(sample(c, 4000, 0)).toBeCloseTo(91, 5); // free-runs from there
+    // the server's echo of the seeked position must not perturb it
+    anchor(c, 90, 4000, "file:a");
+    expect(sample(c, 4000, 0)).toBeCloseTo(91, 3);
   });
 
   it("clamps to duration", () => {

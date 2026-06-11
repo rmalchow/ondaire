@@ -142,6 +142,33 @@ func TestQueueListEmptyIsArray(t *testing.T) {
 	}
 }
 
+func TestSeekDelegates(t *testing.T) {
+	self := id.New()
+	cfg, _, fg := baseConfig(self)
+	_, ts := testServer(t, cfg)
+
+	resp := doJSON(t, ts, http.MethodPost, "/api/seek", map[string]any{"positionSec": 42.5})
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if fg.seekPos != 42.5 {
+		t.Fatalf("seekPos = %v, want 42.5", fg.seekPos)
+	}
+}
+
+func TestSeekRejectsNegative(t *testing.T) {
+	self := id.New()
+	cfg, _, _ := baseConfig(self)
+	_, ts := testServer(t, cfg)
+
+	resp := doJSON(t, ts, http.MethodPost, "/api/seek", map[string]any{"positionSec": -3})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
 func TestNextDelegates(t *testing.T) {
 	self := id.New()
 	cfg, _, fg := baseConfig(self)

@@ -470,6 +470,23 @@ func (s *Server) handleEnqueue(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// handleSeek jumps the current track to a position (seconds) on THIS node's group;
+// master only. 409 not_seekable when the source can't seek.
+func (s *Server) handleSeek(c echo.Context) error {
+	var req SeekReq
+	if err := c.Bind(&req); err != nil {
+		return failCode(c, http.StatusBadRequest, "bad_request", "")
+	}
+	if req.PositionSec < 0 {
+		return failCode(c, http.StatusBadRequest, "bad_request", "")
+	}
+	if err := s.cfg.Group.Seek(c.Request().Context(), req.PositionSec); err != nil {
+		return s.fail(c, err)
+	}
+	s.log.Info("ui mutation", append(auditAttrs(c, "seek"), "positionSec", req.PositionSec)...)
+	return c.NoContent(http.StatusNoContent)
+}
+
 // handleQueueList returns the UPCOMING queue items for THIS node's group, read
 // live from the master's running session. The queue is deliberately NOT gossiped
 // (only its length + a change marker ride the playback record); the UI pulls the

@@ -1210,6 +1210,10 @@ func (g *groupAdapter) QueueList() []contracts.QueueItem {
 	return g.e.QueueSnapshot()
 }
 
+func (g *groupAdapter) Seek(ctx context.Context, positionSec float64) error {
+	return mapErr(g.e.Seek(positionSec))
+}
+
 func (g *groupAdapter) Next(ctx context.Context) error {
 	return mapErr(g.e.Next())
 }
@@ -1252,6 +1256,8 @@ func mapErr(err error) error {
 		return translated{api.ErrNotPlaying, err}
 	case errors.Is(err, group.ErrNotPaused):
 		return translated{api.ErrNotPaused, err}
+	case errors.Is(err, group.ErrNotSeekable):
+		return translated{api.ErrNotSeekable, err}
 	default:
 		return err
 	}

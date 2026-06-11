@@ -282,6 +282,7 @@ func resolvePlayback(r *PlaybackRecord) contracts.Playback {
 		Metadata:    r.Metadata,
 		QueueLen:    r.QueueLen,
 		QueueRev:    r.QueueRev,
+		Seekable:    r.Seekable,
 	}
 }
 

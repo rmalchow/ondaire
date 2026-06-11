@@ -26,6 +26,7 @@ var (
 	ErrMediaNotFound   = errors.New("media not found")
 	ErrBadScheme       = errors.New("bad scheme")
 	ErrBadPath         = errors.New("bad path")
+	ErrNotSeekable     = errors.New("source not seekable")
 )
 
 // errStatus maps a group-engine error to (httpStatus, code, hint). Unknown
@@ -52,6 +53,8 @@ func errStatus(err error) (int, string, string) {
 		return http.StatusConflict, "not_playing", ""
 	case errors.Is(err, ErrNotPaused):
 		return http.StatusConflict, "not_paused", ""
+	case errors.Is(err, ErrNotSeekable):
+		return http.StatusConflict, "not_seekable", "this source can't be seeked"
 	case errors.Is(err, ErrMediaNotFound):
 		return http.StatusNotFound, "media_not_found", ""
 	case errors.Is(err, ErrBadScheme):

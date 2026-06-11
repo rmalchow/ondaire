@@ -132,6 +132,13 @@ type QueuePlayReq struct {
 	URI   string `json:"uri,omitempty"`
 }
 
+// --- POST /api/seek --------------------------------------------------------
+// Jump the current track to PositionSec (seconds from the start). Master only;
+// 409 not_seekable when the source can't seek (live/stream/line-in).
+type SeekReq struct {
+	PositionSec float64 `json:"positionSec"`
+}
+
 // --- error envelope (every 4xx/5xx) ----------------------------------------
 type ErrorResp struct {
 	Error string `json:"error"`          // machine-stable short code

@@ -38,6 +38,25 @@ func (m *mp3Source) duration() (float64, bool) {
 	return float64(n) / float64(m.rate*4), true
 }
 
+// seek repositions to sec via the decoder's PCM byte offset (16-bit stereo at the
+// file's rate → 4 bytes/sample-frame). go-mp3 builds a frame index and seeks the
+// underlying file; the source reader must be seekable (file sources are).
+func (m *mp3Source) seek(sec float64) error {
+	if m.rate <= 0 {
+		return ErrNotSeekable
+	}
+	off := int64(sec * float64(m.rate) * 4)
+	if off < 0 {
+		off = 0
+	}
+	if _, err := m.dec.Seek(off, io.SeekStart); err != nil {
+		return fmt.Errorf("%w: mp3 seek: %v", ErrBadMedia, err)
+	}
+	m.odd = nil
+	m.eof = false
+	return nil
+}
+
 func (m *mp3Source) Close() error { return nil }
 
 func (m *mp3Source) read(dst []int16) ([]int16, error) {

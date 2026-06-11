@@ -27,7 +27,17 @@ var (
 	ErrBadMedia = errors.New("audio: cannot open media")
 	// ErrTraversal — a file URI resolving outside MEDIA_DIR (§6).
 	ErrTraversal = errors.New("audio: path escapes media dir")
+	// ErrNotSeekable — Seek called on a source/decoder that can't reposition
+	// (a live stream, or a format/reader without seek support).
+	ErrNotSeekable = errors.New("audio: source not seekable")
 )
+
+// Seeker is an OPTIONAL Source capability: jump to an absolute position (seconds)
+// within the current media. Only seekable sources (decoded local files) implement
+// it; live sources (http/input/spotify) do not. Type-asserted by the caller.
+type Seeker interface {
+	Seek(sec float64) error
+}
 
 // Source is the one contract every media source satisfies (§6.1, D26). It
 // produces canonical PCM (§8.1) one frame at a time and is owned by exactly one

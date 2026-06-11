@@ -53,6 +53,13 @@ type MetadataSource interface {
 	Metadata() (contracts.TrackMetadata, bool)
 }
 
+// SeekableSource is the optional capability of a MediaSource that can jump to an
+// absolute position (seconds) — decoded file sources implement it; live sources
+// (http/input/spotify) do not. Type-asserted by the queue when seeking.
+type SeekableSource interface {
+	Seek(sec float64) error
+}
+
 // QueueProgress is the optional play-queue channel: a MediaSource backed by a
 // queue (the file-source queueSource) implements it. playbackRecord type-asserts
 // the active source and, when present, takes the now-playing URI/metadata + the

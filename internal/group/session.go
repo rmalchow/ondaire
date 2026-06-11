@@ -212,6 +212,7 @@ func (s *session) playbackRecord(now time.Time, st contracts.SourceStats) contra
 		rec.Metadata = meta
 		rec.QueueLen = len(upcoming)
 		rec.QueueRev = qp.QueueRev()
+		rec.Seekable = true // file queue: decoded sources seek (POST /seek)
 		if !s.paused.Load() {
 			rec.PositionSec = posSec
 		}

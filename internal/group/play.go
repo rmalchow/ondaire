@@ -432,18 +432,73 @@ func (e *Engine) Resume() error {
 		return ErrNotSynced
 	}
 
+	s.paused.Store(false)
+	e.restartSessionLocked(mv, startMaster)
+	e.log.Info("playback resumed", "uri", s.uri, "gen", e.gen)
+	return nil
+}
+
+// restartSessionLocked re-anchors the running session at the source's CURRENT
+// position under a fresh generation: bump gen, re-stamp startMaster, signal run()
+// to reset its frame index, re-arm the source session (RECONFIG → members drop
+// their buffer and re-prime from here), drive the local player, and republish.
+// Shared by Resume and Seek. Caller holds e.mu; e.sess is non-nil and NOT paused;
+// mv is this node's view; startMaster is a fresh clock reading.
+func (e *Engine) restartSessionLocked(mv myView, startMaster int64) {
+	s := e.sess
 	e.gen++
 	gen := e.gen
 	s.gen.Store(gen)
 	s.startMaster.Store(startMaster + int64(e.p.LeadMs)*1_000_000)
 	s.anchorSeq.Add(1) // signal run() to reset its frame index to 0 under the new gen
-	s.paused.Store(false)
-
 	e.p.Source.StartSession(gen, stream.ParseTransport(s.transport), s.bufferMs)
 	e.drivePlayerLocked(mv)
 	e.p.Cluster.SetPlayback(s.groupID, s.playbackRecord(e.now(), e.p.Source.Stats()))
 	e.lastBeat = e.now()
-	e.log.Info("playback resumed", "uri", s.uri, "gen", gen)
+}
+
+// Seek jumps the current file-queue track to positionSec and re-anchors playback
+// so every member re-primes from the new spot (same machinery as resume). While
+// paused it just repositions the source + frozen position; resume re-arms. Only a
+// file queue is seekable today (live/spotify sources are not). Master-only.
+func (e *Engine) Seek(positionSec float64) error {
+	if positionSec < 0 {
+		positionSec = 0
+	}
+	startMaster, ok := e.waitForClock()
+	if !ok {
+		return ErrNotSynced
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return ErrClosed
+	}
+	if e.sess == nil {
+		return ErrNotPlaying
+	}
+	qs := e.currentQueueLocked()
+	if qs == nil {
+		return ErrNotSeekable // single (non-queue) sources aren't seekable yet
+	}
+	if err := qs.Seek(positionSec); err != nil {
+		return err
+	}
+	s := e.sess
+	if s.paused.Load() {
+		s.pausedSec = positionSec // resume re-arms from the new source position
+		e.p.Cluster.SetPlayback(s.groupID, s.playbackRecord(e.now(), e.p.Source.Stats()))
+		e.lastBeat = e.now()
+		e.log.Info("queue seek (paused)", "positionSec", positionSec)
+		return nil
+	}
+	snap := e.p.Cluster.Snapshot()
+	mv := myGroup(snap, e.self)
+	if !mv.found {
+		return ErrNotSynced
+	}
+	e.restartSessionLocked(mv, startMaster)
+	e.log.Info("queue seek", "positionSec", positionSec, "gen", e.gen)
 	return nil
 }
 

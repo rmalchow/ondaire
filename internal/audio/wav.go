@@ -21,11 +21,14 @@ type wavSource struct {
 	r         io.Reader
 	rate      int
 	channels  int
-	bitsPer   int     // bits per sample
-	format    int     // wavPCM | wavIEEEFloat
-	bytesPer  int     // bytes per single sample (per channel)
-	remaining int64   // bytes left in the data chunk (math.MaxInt64 if unknown)
-	durSec    float64 // track length in seconds, 0 when the data size is unknown
+	bitsPer   int       // bits per sample
+	format    int       // wavPCM | wavIEEEFloat
+	bytesPer  int       // bytes per single sample (per channel)
+	remaining int64     // bytes left in the data chunk (math.MaxInt64 if unknown)
+	durSec    float64   // track length in seconds, 0 when the data size is unknown
+	seeker    io.Seeker // set when r is seekable (file sources) → enables seek()
+	dataStart int64     // byte offset of the first sample (for seek)
+	dataBytes int64     // total data-chunk bytes (for recomputing remaining after seek)
 	carry     []byte
 	eof       bool
 }
@@ -84,8 +87,16 @@ func newWAVSource(r io.Reader) (*wavSource, error) {
 				return nil, err
 			}
 			if w.remaining != math.MaxInt64 {
+				w.dataBytes = w.remaining
 				if bytesPerSec := w.rate * w.channels * w.bytesPer; bytesPerSec > 0 {
 					w.durSec = float64(w.remaining) / float64(bytesPerSec)
+				}
+			}
+			// Record the data-chunk start so seek() can reposition (file sources).
+			if s, ok := w.r.(io.Seeker); ok {
+				if pos, err := s.Seek(0, io.SeekCurrent); err == nil {
+					w.seeker = s
+					w.dataStart = pos
 				}
 			}
 			return w, nil
@@ -136,6 +147,31 @@ func (w *wavSource) duration() (float64, bool) {
 		return 0, false
 	}
 	return w.durSec, true
+}
+
+// seek repositions the file to the frame-aligned byte offset for sec within the
+// data chunk. Requires a seekable reader (file sources).
+func (w *wavSource) seek(sec float64) error {
+	frameBytes := int64(w.bytesPer * w.channels)
+	if w.seeker == nil || w.rate <= 0 || frameBytes <= 0 {
+		return ErrNotSeekable
+	}
+	off := int64(sec*float64(w.rate)) * frameBytes
+	if off < 0 {
+		off = 0
+	}
+	if w.dataBytes > 0 && off > w.dataBytes {
+		off = w.dataBytes
+	}
+	if _, err := w.seeker.Seek(w.dataStart+off, io.SeekStart); err != nil {
+		return fmt.Errorf("%w: wav seek: %v", ErrBadMedia, err)
+	}
+	if w.dataBytes > 0 {
+		w.remaining = w.dataBytes - off
+	}
+	w.carry = nil
+	w.eof = false
+	return nil
 }
 
 func (w *wavSource) Close() error { return nil }

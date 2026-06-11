@@ -97,6 +97,7 @@ func New(cfg Config) *Server {
 	g.POST("/queue", s.handleEnqueue)
 	g.POST("/queue/remove", s.handleQueueRemove)
 	g.POST("/queue/play", s.handleQueuePlay)
+	g.POST("/seek", s.handleSeek)
 	g.POST("/next", s.handleNext)
 	g.POST("/stop", s.handleStop)
 	g.POST("/pause", s.handlePause)

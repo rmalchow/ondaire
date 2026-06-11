@@ -4,7 +4,7 @@
   // on the right. When active it tints (accent band) so the playing room is obvious
   // at a glance; idle keeps the SAME footprint, just emptier (no reflow either way).
   import { position } from "../lib/fmt.js";
-  import { createPlayClock, reconcile, sample } from "../lib/playclock.js";
+  import { createPlayClock, reconcile, sample, markSeek } from "../lib/playclock.js";
   import {
     stop,
     pause,
@@ -13,6 +13,7 @@
     queueRemove,
     queuePlay,
     getQueue,
+    seek,
   } from "../lib/api.js";
 
   let { group, expanded = false } = $props();
@@ -93,6 +94,26 @@
     }, 250);
     return () => clearInterval(id);
   });
+
+  // Scrubbing: enabled only when the source reports seekable (file queue) and we
+  // know its length. While dragging we show the dragged value (the ticker keeps
+  // running underneath but the bar reflects the user); on release we optimistically
+  // jump the clock and POST the seek.
+  let seekable = $derived(!!pb.seekable && durationSec > 0);
+  let dragging = $state(false);
+  let dragValue = $state(0);
+  function onSeekInput(e) {
+    dragging = true;
+    dragValue = Number(e.target.value);
+  }
+  function onSeekCommit(e) {
+    const v = Number(e.target.value);
+    dragging = false;
+    markSeek(clock, v, performance.now());
+    displayPos = v;
+    seek(group.master, v).catch(() => {});
+  }
+
   function friendlyTrack(uri) {
     if (!uri) return "";
     if (uri.startsWith("spotify:")) return "Spotify";
@@ -215,16 +236,18 @@
        seeking lands in a later pass. Sources with no known length (line-in, live
        streams) show elapsed only and a disabled empty track. -->
   <div class="transport">
-    <span class="t-time small">{position(displayPos)}</span>
+    <span class="t-time small">{position(dragging ? dragValue : displayPos)}</span>
     <input
       class="t-bar"
       type="range"
       min="0"
       max={durationSec || 1}
-      value={durationSec ? Math.min(displayPos, durationSec) : 0}
+      value={dragging ? dragValue : durationSec ? Math.min(displayPos, durationSec) : 0}
       step="0.1"
-      disabled
-      title="seeking coming soon"
+      disabled={!seekable}
+      oninput={onSeekInput}
+      onchange={onSeekCommit}
+      title={seekable ? "seek" : "position"}
       aria-label="playback position"
     />
     <span class="t-time small">{durationSec ? position(durationSec) : "live"}</span>
@@ -368,10 +391,11 @@
     min-width: 0;
     height: 4px;
     accent-color: var(--accent);
-    cursor: default; /* display-only for now */
+    cursor: pointer;
   }
   .t-bar:disabled {
     opacity: 0.7;
+    cursor: default;
   }
 
   /* right: two equal-width controls, identical footprint in every state */

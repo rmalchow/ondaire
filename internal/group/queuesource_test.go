@@ -39,6 +39,19 @@ func qOpener(frames map[string]int) (func(string) (MediaSource, error), *[]strin
 	return open, &opened
 }
 
+// qSeekableSrc is a qFrameSrc that also implements SeekableSource.
+type qSeekableSrc struct {
+	qFrameSrc
+	seekedTo float64
+	seeks    int
+}
+
+func (s *qSeekableSrc) Seek(sec float64) error {
+	s.seekedTo = sec
+	s.seeks++
+	return nil
+}
+
 func item(uri string) contracts.QueueItem { return contracts.QueueItem{URI: uri} }
 
 // drain reads frames until io.EOF, returning the total frame count.
@@ -167,6 +180,50 @@ func TestQueuePlayUpcomingStaleGuardNoop(t *testing.T) {
 	q.PlayUpcoming(0, "wrong")
 	if uri, _, _, up := q.Now(); uri != "a" || len(up) != 2 {
 		t.Fatalf("guard mismatch should be a no-op, now = %q upcoming = %v", uri, up)
+	}
+}
+
+func TestQueueSeekRepositionsCurrent(t *testing.T) {
+	var cur *qSeekableSrc
+	open := func(uri string) (MediaSource, error) {
+		cur = &qSeekableSrc{qFrameSrc: qFrameSrc{n: 1_000_000}}
+		return cur, nil
+	}
+	q := newQueueSource([]contracts.QueueItem{item("a"), item("b")}, open, nil)
+	if err := q.prime(); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, stream.FrameBytes)
+	_ = q.ReadFrame(buf) // playing "a"
+	rev0 := q.QueueRev()
+	if err := q.Seek(30); err != nil {
+		t.Fatalf("seek: %v", err)
+	}
+	if cur.seeks != 1 || cur.seekedTo != 30 {
+		t.Fatalf("inner seek = (%d, %.1f), want (1, 30)", cur.seeks, cur.seekedTo)
+	}
+	_, _, pos, up := q.Now()
+	if pos < 29.99 || pos > 30.01 {
+		t.Fatalf("after seek pos = %.3f, want ~30", pos)
+	}
+	if len(up) != 1 || up[0].URI != "b" {
+		t.Fatalf("seek must not touch the upcoming queue: %v", up)
+	}
+	if q.QueueRev() <= rev0 {
+		t.Fatalf("seek should bump rev")
+	}
+}
+
+func TestQueueSeekNotSeekable(t *testing.T) {
+	open, _ := qOpener(map[string]int{"a": 100}) // qFrameSrc: not seekable
+	q := newQueueSource([]contracts.QueueItem{item("a")}, open, nil)
+	if err := q.prime(); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, stream.FrameBytes)
+	_ = q.ReadFrame(buf)
+	if err := q.Seek(5); err != ErrNotSeekable {
+		t.Fatalf("seek on non-seekable source = %v, want ErrNotSeekable", err)
 	}
 }
 

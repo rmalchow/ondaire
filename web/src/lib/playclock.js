@@ -80,6 +80,18 @@ export function reconcile(c, { positionSec, uri, playing, nowMs }, opts = {}) {
   return c;
 }
 
+// markSeek forces the clock to sec immediately (a user scrub release), anchoring
+// there so the bar jumps at once. Recording it as the last authoritative value
+// makes the server's subsequent echo a no-op.
+export function markSeek(c, sec, nowMs) {
+  c.anchorPos = sec;
+  c.anchorAt = nowMs;
+  c.pos = sec;
+  c.lastSp = sec;
+  c.wasPlaying = true;
+  return c;
+}
+
 // sample reads the display position at nowMs, clamped to durationSec (0 = unknown),
 // and monotonic within a track (never steps back between snaps).
 export function sample(c, nowMs, durationSec = 0) {

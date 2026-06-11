@@ -158,6 +158,8 @@ type fakeGroup struct {
 	playQIndex     int
 	playQURI       string
 	queueList      []contracts.QueueItem
+	seekErr        error
+	seekPos        float64
 	nextErr        error
 	nextN          int
 	stopErr        error
@@ -234,6 +236,13 @@ func (g *fakeGroup) QueueList() []contracts.QueueItem {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.queueList
+}
+
+func (g *fakeGroup) Seek(_ context.Context, positionSec float64) error {
+	g.mu.Lock()
+	g.seekPos = positionSec
+	g.mu.Unlock()
+	return g.seekErr
 }
 
 func (g *fakeGroup) Next(context.Context) error {

@@ -69,6 +69,9 @@ type Group interface {
 	// QueueList returns the current UPCOMING queue items, read live from the
 	// running session (master only); empty when nothing is queued.
 	QueueList() []contracts.QueueItem
+	// Seek jumps the current track to positionSec, re-anchoring playback (master
+	// only); errors when nothing plays or the source isn't seekable.
+	Seek(ctx context.Context, positionSec float64) error
 	// Next skips to the next queued track, gaplessly (master only).
 	Next(ctx context.Context) error
 	// Stop stops THIS node's group playback; master only.

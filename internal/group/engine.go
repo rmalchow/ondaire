@@ -18,6 +18,7 @@ var (
 	ErrNotSynced   = errors.New("group: clock not synced yet, retry")
 	ErrNotPlaying  = errors.New("group: nothing is playing") // D39 pause
 	ErrNotPaused   = errors.New("group: not paused")         // D39 resume
+	ErrNotSeekable = errors.New("group: source not seekable")
 	ErrClosed      = errors.New("group: engine closed")
 )
 

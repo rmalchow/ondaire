@@ -264,6 +264,34 @@ func (q *queueSource) RemoveUpcoming(index int, uriGuard string) {
 	q.rev++
 }
 
+// Seek repositions the CURRENTLY-PLAYING item to sec (seconds) when its source
+// supports it, resetting the per-track position so Now() reports the new spot.
+// Returns ErrNotSeekable when nothing is open or the current source can't seek.
+// The caller (engine) re-anchors the session so members re-prime from here.
+func (q *queueSource) Seek(sec float64) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.inner == nil {
+		return ErrNotSeekable
+	}
+	sk, ok := q.inner.(SeekableSource)
+	if !ok {
+		return ErrNotSeekable
+	}
+	if sec < 0 {
+		sec = 0
+	}
+	if err := sk.Seek(sec); err != nil {
+		return ErrNotSeekable
+	}
+	q.framesInCur = int64(sec * 1e9 / float64(stream.FrameNanos))
+	if q.framesInCur < 0 {
+		q.framesInCur = 0
+	}
+	q.rev++
+	return nil
+}
+
 // QueueRev returns the monotonic change counter (QueueProgress). The UI re-pulls
 // the queue contents whenever this moves; the items are never gossiped.
 func (q *queueSource) QueueRev() int64 {

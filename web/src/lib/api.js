@@ -187,6 +187,10 @@ export function queuePlay(masterId, index, uri) {
 export function getQueue(masterId) {
   return req("GET", base(masterId) + "/queue");
 }
+// seek jumps the current track to positionSec (seconds) on the master.
+export function seek(masterId, positionSec) {
+  return toasted(req("POST", base(masterId) + "/seek", { positionSec }));
+}
 // next skips to the next queued track (gaplessly).
 export function next(masterId) {
   return toasted(req("POST", base(masterId) + "/next"));

@@ -96,6 +96,16 @@ func (s *fileSource) ReadFrame(dst []byte) error { return s.fr.frame(dst) }
 
 func (s *fileSource) Live() bool { return false }
 
+// Seek jumps to sec within the file (satisfies Seeker), repositioning the decoder
+// and clearing the framer's buffered/resampled state. ErrNotSeekable if the
+// underlying decoder/reader can't seek.
+func (s *fileSource) Seek(sec float64) error {
+	if s.closed {
+		return ErrNotSeekable
+	}
+	return s.fr.seek(sec)
+}
+
 func (s *fileSource) Close() error {
 	if s.closed {
 		return nil

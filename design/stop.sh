@@ -1,0 +1,6 @@
+#!/bin/bash
+cd $(dirname $0)
+export home=$(pwd)
+echo "home directory is ${home}"
+echo "stopping stack ... "
+docker compose down --remove-orphans || /usr/bin/true

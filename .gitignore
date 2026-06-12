@@ -17,3 +17,6 @@ web/dist/*
 # Audio test fixtures are real committed files despite the format ignores above.
 !internal/audio/testdata/*
 respot
+# Open Design local workspace (runtime data + secrets)
+design/open_design_data/
+design/.env

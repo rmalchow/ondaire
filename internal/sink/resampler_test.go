@@ -48,18 +48,15 @@ func TestResamplerSampleCountsGrounded(t *testing.T) {
 	if inj, drop := r.sampleStats(); inj != 0 || drop != 0 {
 		t.Fatalf("rate=1.0: injected=%d dropped=%d, want 0/0 (no spurious counts)", inj, drop)
 	}
-	// Sustained rate > 1 (DAC slow → carry fills): only DROPS, in whole frames.
-	// +5000 ppm — well above the servo's ±300 clamp so the guard fires quickly in
-	// the test, but gentle enough that the carry never empties (the design range).
+	// Sustained rate > 1 (DAC slow → carry fills): only DROPS, and now at
+	// SINGLE-sample granularity (no whole-frame flush). +5000 ppm — well above the
+	// servo's ±300 clamp so the trim works hard in the test.
 	r = newResampler()
 	r.setRate(5000)
 	feed(r, 800)
 	inj, drop := r.sampleStats()
 	if drop == 0 || inj != 0 {
 		t.Fatalf("rate>1: injected=%d dropped=%d, want drop>0 inj=0", inj, drop)
-	}
-	if drop%stream.FrameSamples != 0 {
-		t.Fatalf("rate>1: dropped=%d not a whole-frame multiple of %d", drop, stream.FrameSamples)
 	}
 	// Sustained rate < 1 (DAC fast → carry drains): only INJECTS.
 	r = newResampler()
@@ -74,6 +71,60 @@ func TestResamplerSampleCountsGrounded(t *testing.T) {
 	r.reset()
 	if inj2, _ := r.sampleStats(); inj2 != before {
 		t.Fatalf("reset zeroed the lifetime counter: %d -> %d", before, inj2)
+	}
+}
+
+// TestResamplerNoSawtoothUnderSustainedDrift is the regression guard for the
+// whole-frame "sawtooth" resync. Under a sustained rate the correction must be
+// realized as a stream of single-sample nudges that pin the carry near one frame
+// — never a 2-frame buildup that discharges as a 20 ms step. Drive +200 ppm
+// through a continuous 1 kHz sine for many frames and assert: (a) the carry never
+// grows toward two frames, (b) the realized correction accrues smoothly (not in
+// 960-sized jumps), and (c) the reconstructed output has no curvature spike.
+func TestResamplerNoSawtoothUnderSustainedDrift(t *testing.T) {
+	r := newResampler()
+	r.setRate(200)
+	freq, amp := 1000.0, 9000.0
+	const frames = 4000
+	var out []int16
+	maxCarry := 0
+	for f := 0; f < frames; f++ {
+		base := f * stream.FrameSamples
+		in := makeFrame(func(i int) (int16, int16) {
+			v := int16(amp * math.Sin(2*math.Pi*freq*float64(base+i)/float64(stream.SampleRate)))
+			return v, v
+		})
+		o := r.process(in)
+		if l := len(r.carry[0]); l > maxCarry {
+			maxCarry = l
+		}
+		for i := 0; i < stream.FrameSamples; i++ {
+			l, _ := sampleLR(o, i)
+			out = append(out, l)
+		}
+	}
+	// (a) carry pinned near one frame — the old code let it reach ~2 frames, then dumped.
+	if maxCarry > leadPad+stream.FrameSamples+maxTrim+2 {
+		t.Fatalf("carry grew to %d (target %d) — whole-frame buildup not prevented",
+			maxCarry, leadPad+stream.FrameSamples)
+	}
+	// (b) correction accrued, single-sample granular, ≈ 200 ppm · FrameSamples · frames.
+	_, drop := r.sampleStats()
+	want := uint64(200e-6 * float64(stream.FrameSamples*frames))
+	if drop < want/2 || drop > want*2 {
+		t.Fatalf("dropped=%d, want ≈%d single-sample corrections", drop, want)
+	}
+	// (c) no seam/sawtooth glitch anywhere over the sustained run.
+	start := 2 * stream.FrameSamples
+	var maxCurv float64
+	for k := start + 1; k < len(out)-1; k++ {
+		c := math.Abs(float64(out[k+1]) - 2*float64(out[k]) + float64(out[k-1]))
+		if c > maxCurv {
+			maxCurv = c
+		}
+	}
+	if maxCurv > 400 {
+		t.Fatalf("curvature spike %.0f under sustained drift — correction not smooth", maxCurv)
 	}
 }
 

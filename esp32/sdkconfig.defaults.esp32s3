@@ -1,0 +1,11 @@
+# ESP32-S3-WROOM-1 / DevKitC-1. Native USB-Serial-JTAG is the console the web
+# flasher's Improv + JSON config talk over (no external UART bridge needed).
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Console + stdio over the built-in USB-Serial-JTAG CDC port.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Board selection (boards/board.h + default pin map).
+CONFIG_ENSEMBLE_BOARD_ESP32S3=y

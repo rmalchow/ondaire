@@ -19,13 +19,14 @@ export const content = {
 
   brand: { name: "ensemble" },
 
-  // Header nav is deliberately trimmed to four links — every section still
-  // exists on the page, this is just the top-bar shortlist. The GitHub entry
-  // renders with an icon (see renderNav in build.mjs).
+  // Header nav is a trimmed shortlist — every section still exists on the page.
+  // (The "Flash a node" sub-page is still built — flash.html — but intentionally
+  // UNLINKED until the firmware passes the conformance bar; see docs/esp32.md.)
   nav: [
     { label: "Why", href: "#why" },
-    { label: "How", href: "#how" },
+    { label: "Screenshots", href: "#screens" },
     { label: "Quickstart", href: "#quickstart" },
+    { label: "Under the hood", href: "#tech" },
     { label: "GitHub", href: GITHUB, icon: "github" },
   ],
 
@@ -36,7 +37,7 @@ export const content = {
     lede:
       "ensemble is self-hosted, synchronized audio for your whole home. Drop one small binary on each device — they discover each other and play in perfect sync. No cloud, no accounts, no config files.",
     primary: { label: "Get it", href: "download.html" },
-    secondary: { label: "View source", href: REPO },
+    secondary: { label: "View source", href: GITHUB },
     snippet: { cmd: "./ensemble", caption: "That’s the whole setup." },
     shot: {
       src: "assets/img/overview.png",
@@ -80,7 +81,7 @@ export const content = {
   },
 
   screens: {
-    eyebrow: "A look around",
+    eyebrow: "A Look Around",
     title: "One app, the whole house.",
     items: [
       {
@@ -126,8 +127,10 @@ export const content = {
     ],
   },
 
-  how: {
-    eyebrow: "How it works",
+  // The home-page Quickstart: the three-step gist + a Download CTA. The detailed
+  // install one-liner and the config-flag reference now live on the download page.
+  quickstart: {
+    eyebrow: "Quickstart",
     title: "Three steps, then it’s just music.",
     steps: [
       {
@@ -149,80 +152,15 @@ export const content = {
           "Open the built-in UI, group devices into rooms, and play. A shared clock keeps every speaker aligned to the millisecond.",
       },
     ],
-  },
-
-  quickstart: {
-    eyebrow: "Quickstart",
-    title: "From download to whole-home sound in minutes.",
-    intro:
-      "You've set up software like this before — here's the shape of it. Each step links to the guide for the full version.",
-    steps: [
-      {
-        n: "00",
-        tag: "one-liner",
-        title: "For the lazy people",
-        body:
-          "One command does the lot: it detects your OS and CPU, downloads the right ensemble build, then asks whether you want Spotify Connect (go-librespot) and a boot-time systemd service — and sets them up. Installs into /usr/local/lib/ensemble.",
-        code: "curl -fsSL https://ensemble.rand0m.me/get.sh | sudo bash",
-        doc: { label: "What the script does, step by step", href: DOC("running.md") },
-      },
-      {
-        n: "01",
-        tag: "download",
-        title: "Get a build",
-        body:
-          "One static, pure-Go binary per device — no runtime, no dependencies. Prebuilt for Linux amd64, arm64, and armv6 (Pi Zero); attached to every tagged release. Or run the master in Docker, with Spotify Connect (go-librespot) baked in.",
-        code:
-          "# native — grab the binary for each device's architecture, then:\nchmod +x ./ensemble\n\n# docker — master-only image, Spotify Connect included:\ndocker pull harbor.rand0m.me/public/ensemble:latest",
-        action: { label: "Download a release", href: RELEASES },
-        doc: { label: "Install scenarios (NAS, Pi, desktop, ESP32)", href: GUIDE },
-      },
-      {
-        n: "02",
-        tag: "pair",
-        title: "Run it — nodes find each other",
-        body:
-          "Start the binary on each device with a speaker. On first run a node mints a permanent ID, advertises itself over mDNS, and gossips its state — peers appear within seconds, with no central server or broker. Every node serves the same web app and proxies to the rest, so open any one of them and group rooms by telling one node to follow another. A shared clock keeps the group aligned to the millisecond.",
-        code:
-          "./ensemble                      # on each device\n\n# then open the built-in UI on any node:\n#   http://<any-node-ip>:8080",
-        doc: { label: "Pairing, grouping & the UI", href: DOC("ui-reference.md") },
-      },
-      {
-        n: "03",
-        tag: "flags",
-        title: "The flags you'll actually use",
-        body:
-          "Every flag has an ENSEMBLE_* environment equivalent; all are optional, with sensible defaults. Ports left at their default bind-or-increment (run several nodes on one box); a port you set explicitly is pinned (binds exactly or exits).",
-        params: [
-          { flag: "--name <name>", def: "node id", what: "display name + Spotify device name (first start only)" },
-          { flag: "--role <role>", def: "both", what: "master | playback | master,playback" },
-          { flag: "--media <dir>", def: "<data>/media", what: "library directory, browsed recursively" },
-          { flag: "--data <dir>", def: "./data", what: "node.json, cluster state, Spotify creds" },
-          { flag: "--http-port <n>", def: "8080", what: "UI + REST API + WebSocket + node proxy" },
-          { flag: "ENSEMBLE_OUTPUT", def: "auto", what: "alsa · exec · null · file:<path>" },
-        ],
-        doc: { label: "Full configuration reference", href: DOC("config-reference.md") },
-      },
-      {
-        n: "04",
-        tag: "start",
-        title: "Keep it running",
-        body:
-          "However you supervise processes — from a throwaway foreground run to a boot-time service:",
-        methods: [
-          { label: "foreground", cmd: "./ensemble" },
-          { label: "detached", cmd: "nohup ./ensemble --name kitchen >ensemble.log 2>&1 &" },
-          { label: "systemd", cmd: "sudo systemctl enable --now ensemble" },
-          { label: "docker", cmd: "docker run -d --network host -v /srv/music:/media:ro … --name living-room" },
-          { label: "compose", cmd: "docker compose up -d" },
-        ],
-        doc: { label: "Startup methods in detail (units + commands)", href: DOC("running.md") },
-      },
-    ],
+    cta: {
+      text: "That’s the whole idea. Grab a build for your hardware and you’ll have the house playing in sync in a few minutes.",
+      label: "Download",
+      href: "download.html",
+    },
   },
 
   tech: {
-    eyebrow: "Under the hood",
+    eyebrow: "Under The Hood",
     title: "Playing in sync is hard. ensemble does the hard part.",
     intro:
       "Two speakers playing the same instant over flaky Wi-Fi means fighting both the network and physics. Four problems, four fixes:",
@@ -369,31 +307,83 @@ export const content = {
     title: "Get ensemble for your hardware.",
     intro:
       "One small, static binary per device — pure Go, no runtime, no dependencies. Each archive is the build attached to the matching tagged release: verify its SHA-256, unpack it, and run ./ensemble. Prefer containers? Pull the master image with Spotify Connect built in.",
+    // Teaser for the (in-progress) hardware-player support. This block will
+    // eventually be the entry point to the browser flasher (flash.html); no link
+    // yet — the firmware isn't conformant. See docs/esp32.md + docs/PLAYER.md.
+    esp32: {
+      badge: "Coming soon",
+      title: "ESP32 players — support in progress",
+      body:
+        "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ensemble player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Supported boards are PSRAM ESP32s: ESP32-S3 (e.g. the ESP32-S3-DevKitC-1, or the tiny Waveshare ESP32-S3-Zero) and the classic ESP32-WROVER. The browser flasher will land right here soon.",
+    },
+    // Guided installer (scripts/get.sh) — the fastest path onto a Linux box.
+    // Rendered after the ESP32 teaser, before the per-arch download cards.
+    installer: {
+      title: "Installer",
+      body:
+        "The quickest way onto a Linux box: a guided one-liner. It detects your OS and CPU, downloads the matching ensemble build, then walks you through the optional extras — Spotify Connect (go-librespot) and a boot-time systemd service — and sets them up. Installs into /usr/local/lib/ensemble; re-run any time to update.",
+      code: "curl -fsSL https://ensemble.rand0m.me/get.sh | sudo bash",
+      // Expandable, annotated walkthrough of scripts/get.sh — its real flow with
+      // section labels + explanatory comments (not the verbatim 256 lines).
+      walkthrough: {
+        summary: "What the script does, step by step",
+        hrefLabel: "Read the full get.sh",
+        href: `${REPO}/-/blob/main/scripts/get.sh`,
+        script: `#!/usr/bin/env bash
+#   curl -fsSL https://ensemble.rand0m.me/get.sh | sudo bash
+set -euo pipefail
+
+# ── 1. Pre-flight ──────────────────────────────────────────────
+# Must run as root, on Linux, with tar present.
+[ "$(id -u)" = 0 ] || err "run with sudo"
+
+# ── 2. Detect the CPU and pick the matching 64-bit build ───────
+case "$(uname -m)" in
+  x86_64|amd64)   ARCH=amd64 ;;
+  aarch64|arm64)  ARCH=arm64 ;;          # Raspberry Pi OS 64-bit
+  *) err "unsupported arch (32-bit is no longer supported)" ;;
+esac
+
+# ── 3. Download + install ──────────────────────────────────────
+# Binary lands in /usr/local/lib/ensemble, symlinked onto your PATH.
+fetch "$BASE/assets/downloads/ensemble-linux-$ARCH.tar.gz" | tar -xz
+install -m755 ensemble /usr/local/lib/ensemble/ensemble
+ln -sf  /usr/local/lib/ensemble/ensemble /usr/local/bin/ensemble
+
+# ── 4. Choose a role (prompts read the terminal, so they work
+#       even under  curl | bash) ─────────────────────────────────
+if ask "Run the web UI on this node?"; then
+  ROLE="master,playback"      # serves the UI, gossips, can play audio
+else
+  ROLE="playback"             # receive-only, driven by a master
+fi
+
+# ── 5. Spotify Connect — masters only, optional ────────────────
+# Fetches the matching go-librespot build alongside ensemble.
+[ "$ROLE" != playback ] && ask "Install Spotify Connect?" && install_go_librespot
+
+# ── 6. Boot service — optional ─────────────────────────────────
+# Writes /etc/systemd/system/ensemble.service and enables it, so
+# ensemble starts at boot and restarts on failure.
+ask "Start ensemble at boot (systemd)?" && install_systemd_unit
+
+# ── 7. Appliance hardening — optional, for an SD-card Pi ───────
+# Console-only (frees the audio card from the desktop), trims extra
+# services, sends logs to RAM, disables swap.
+ask "Harden as a headless audio appliance?" && harden_appliance
+
+echo "ready — open the web UI at  http://<this-host>:8080"`,
+      },
+    },
     options: [
       {
         name: "Raspberry Pi — 64-bit",
-        rec: "Recommended: Raspberry Pi OS Lite (64-bit). Also any other arm64 Linux.",
+        rec: "Raspberry Pi OS Lite (64-bit) on a Pi 3 / 4 / 5 or Zero 2, or any other arm64 Linux. 32-bit Pi OS is no longer supported.",
         arch: "linux · arm64",
         logos: ["raspberrypi"],
         file: "assets/downloads/ensemble-linux-arm64.tar.gz",
-      },
-      {
-        name: "Raspberry Pi — 32-bit",
-        rec: "Recommended: Raspberry Pi OS Lite (32-bit). Includes the Pi Zero / Pi 1 (armv6). Hard-float — uses /lib/ld-linux-armhf.so.3.",
-        arch: "linux · armv6 · hard-float (armhf)",
-        logos: ["raspberrypi"],
-        file: "assets/downloads/ensemble-linux-armv6hf.tar.gz",
         note:
-          "Heads-up: Raspberry Pi OS ships <strong>without libopus</strong> — install it with <code>sudo apt install libopus0</code> to play Opus-encoded groups (uncompressed PCM works without it). Audio hardware that needs third-party drivers is out of ensemble's scope — get the card working in Linux first.",
-      },
-      {
-        name: "32-bit ARM — soft-float",
-        rec: "For armel userlands whose loader is /lib/ld-linux.so.3, not Raspberry Pi OS. Same ARMv6 code, soft-float ABI.",
-        arch: "linux · armv6 · soft-float (armel)",
-        logos: ["raspberrypi"],
-        file: "assets/downloads/ensemble-linux-armv6.tar.gz",
-        note:
-          "Heads-up: libopus is usually not preinstalled — add it via your distro (e.g. <code>libopus0</code>) to play Opus-encoded groups (uncompressed PCM works without it). Audio hardware that needs third-party drivers is out of ensemble's scope.",
+          "Heads-up: Opus playback loads <strong>libopus</strong> at runtime. The Desktop image already has it; on a minimal Lite install that lacks it, add it with <code>sudo apt install libopus0</code> (uncompressed PCM works without it). Audio hardware that needs third-party drivers is out of ensemble's scope — get the card working in Linux first.",
       },
       {
         name: "PC or server — x86-64",
@@ -404,12 +394,40 @@ export const content = {
       },
       {
         name: "Docker",
-        rec: "A master node with Spotify Connect (go-librespot) built in. Multi-arch: amd64 · arm64.",
+        rec: "For a NAS or server: runs a master — mount your music library and serve it to your players, with Spotify Connect (go-librespot) built in. Multi-arch: amd64 · arm64.",
         arch: "container image",
         logos: ["docker"],
-        docker: "docker pull harbor.rand0m.me/public/ensemble:latest",
+        docker: [
+          "docker run -d --network host \\",
+          "  -v /srv/music:/media:ro \\",
+          "  -v ensemble-data:/data \\",
+          "  harbor.rand0m.me/public/ensemble:latest --name living-room",
+        ].join("\n"),
+        // First paragraph: trusted author HTML, rendered as plain body text.
+        body:
+          "The image runs the <strong>master role only</strong> by default — it sources audio (your library + Spotify Connect) and controls the cluster, but does not play locally. Reaching host audio hardware (sound cards, USB DACs, I2S) from a container isn't reliable and is <strong>out of scope</strong>: the actual output happens on your players (the Pi binary, or an ESP32 node). Mount your library read-only on <code>/media</code>; mutable state lives on <code>/data</code>. You can change any default with the <code>ENSEMBLE_*</code> environment variables — see the config flags below.",
+        // The one genuine gotcha, kept as a callout.
+        note:
+          "<strong><code>--network host</code> is required.</strong> Players discover the master over mDNS and go-librespot advertises Spotify Connect over zeroconf — multicast doesn't cross Docker's bridge network (and ports bind-or-increment, so there's nothing to publish).",
       },
     ],
+    // Common config flags — rendered as its own block UNDER the download cards.
+    flags: {
+      title: "Common config flags",
+      intro:
+        "Almost every flag has an ENSEMBLE_* environment equivalent (handy in Docker); all are optional, with sensible defaults. Ports left at their default bind-or-increment (run several nodes on one box); a port you set explicitly is pinned (binds exactly or exits).",
+      // Rendered as a param · env var · default · description table.
+      cols: ["param", "env var", "default", "description"],
+      params: [
+        { param: "--name <name>", env: "—", def: "node id", what: "display name + Spotify device name (first start only)" },
+        { param: "--role <role>", env: "ENSEMBLE_ROLE", def: "both", what: "master | playback | master,playback" },
+        { param: "--media <dir>", env: "ENSEMBLE_MEDIA_DIR", def: "<data>/media", what: "library directory, browsed recursively" },
+        { param: "--data <dir>", env: "ENSEMBLE_DATA_DIR", def: "./data", what: "node.json, cluster state, Spotify creds" },
+        { param: "--http-port <n>", env: "ENSEMBLE_HTTP_PORT", def: "8080", what: "UI + REST API + WebSocket + node proxy" },
+        { param: "--output <spec>", env: "ENSEMBLE_OUTPUT", def: "auto", what: "alsa · exec · null · file:<path>" },
+      ],
+      doc: { label: "Full configuration reference", href: DOC("config-reference.md") },
+    },
     links: [
       {
         desc: "Looking for an older version, the changelog, or release notes?",
@@ -421,6 +439,45 @@ export const content = {
         label: "How to run it",
         href: DOC("running.md"),
       },
+    ],
+  },
+
+  // The browser web-flasher page (flash.html). ESP Web Tools detects the chip
+  // and flashes the matching merged firmware from `firmware.builds`; the custom
+  // panel then provisions Wi-Fi + I2S/encoder over Web Serial (no toolchain).
+  flash: {
+    eyebrow: "Build a node",
+    title: "Flash a DIY speaker, right from your browser.",
+    intro:
+      "Turn an ESP32 + an I2S DAC into a real ensemble player — it shows up in the cluster, joins any group, and plays in lock-step like every other room. No toolchain, no app: plug it in over USB-C in Chrome or Edge, click Install, then set your Wi-Fi and pins. Receive-only, opus over Wi-Fi.",
+    requirements:
+      "Needs Chrome or Edge on desktop (Web Serial). Plug the board in via USB-C. First flash on an S2/S3 may need download mode: hold BOOT, tap RESET, release BOOT — the installer will tell you.",
+    install: { label: "Install firmware", note: "ESP Web Tools picks the right build for your chip automatically." },
+    bom: {
+      title: "What you need",
+      items: [
+        "A PSRAM-equipped ESP32 board — an ESP32-S3 (DevKitC-1 or Waveshare S3-Zero) or a classic ESP32-WROVER.",
+        "A PCM5102A I2S DAC (the common purple GY-PCM5102 module).",
+        "A KY-040 / EC11 rotary encoder for local volume (optional).",
+        "Wiring + pinouts live in the repo under esp32/devices/.",
+      ],
+    },
+    steps: [
+      { n: "1", title: "Plug in & install", body: "Connect the board over USB-C, click Install, and wait for the flash to finish." },
+      { n: "2", title: "Set Wi-Fi", body: "Connect over serial and enter your 2.4 GHz network — credentials are written straight to the device." },
+      { n: "3", title: "Confirm wiring", body: "Set the I2S and encoder pins (defaults match the wiring guide), then hit Test tone to verify the DAC." },
+      { n: "4", title: "Reboot & play", body: "The node joins the LAN, the cluster discovers it, and it’s assignable to any group. Turn the knob for volume." },
+    ],
+    docHref: `${REPO}/-/blob/main/docs/esp32.md`,
+    docLabel: "Firmware & hardware guide",
+  },
+
+  // Firmware builds offered by the flasher. Each `file` is resolved at build
+  // time (build.mjs resolveFirmware) into the ESP Web Tools manifest + SHA-256.
+  firmware: {
+    manifestName: "ensemble player",
+    builds: [
+      { chipFamily: "ESP32-S3", label: "ESP32-S3", note: "ESP32-S3-WROOM-1 / DevKitC-1 (PSRAM)", file: "assets/firmware/ensemble-fw-esp32s3.bin" },
     ],
   },
 

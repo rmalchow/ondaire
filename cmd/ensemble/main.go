@@ -45,7 +45,7 @@ import (
 // ENSEMBLE_OUTPUT, ENSEMBLE_LOG) plus the raw flag args forwarded to config.Load.
 type options struct {
 	Host     string   // --host bind address; "" => all interfaces, "127.0.0.1" in dev/e2e
-	Output   string   // ENSEMBLE_OUTPUT (env only, D2): "" => auto | null | file:<p> | name
+	Output   string   // --output / ENSEMBLE_OUTPUT (D2): "" => auto | null | file:<p> | name
 	LogLevel string   // ENSEMBLE_LOG (debug|info|warn|error), default info
 	cfgArgs  []string // flag args forwarded to config.Load (--host stripped)
 }
@@ -79,21 +79,22 @@ func main() {
 	}
 }
 
-// parseOptions extracts the K-owned knobs (--host, ENSEMBLE_OUTPUT, ENSEMBLE_LOG)
+// parseOptions extracts the K-owned knobs (--host, --output, ENSEMBLE_LOG)
 // and forwards the remaining flag args to config.Load (A owns flag>env>default for
 // ports/dirs/name/join). It parses with a permissive FlagSet so unknown flags
-// (the config ones) are passed through untouched.
+// (the config ones) are passed through untouched. --host and --output follow the
+// usual flag>env>default precedence (flag overrides the ENSEMBLE_* fallback).
 func parseOptions(args []string, env func(string) string) (options, error) {
 	opt := options{
-		Output:   env("ENSEMBLE_OUTPUT"),
 		LogLevel: env("ENSEMBLE_LOG"),
 	}
 	if opt.LogLevel == "" {
 		opt.LogLevel = "info"
 	}
 
-	// Pull --host (and --host=v) out of args; everything else goes to config.Load.
-	var host string
+	// Pull --host / --output (and the =v forms) out of args; everything else
+	// goes to config.Load. "" means the flag was absent → fall back to env below.
+	var host, output string
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -114,6 +115,16 @@ func parseOptions(args []string, env func(string) string) (options, error) {
 			host = strings.TrimPrefix(a, "--host=")
 		case strings.HasPrefix(a, "-host="):
 			host = strings.TrimPrefix(a, "-host=")
+		case a == "--output" || a == "-output":
+			if i+1 >= len(args) {
+				return opt, errors.New("flag needs an argument: --output")
+			}
+			output = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--output="):
+			output = strings.TrimPrefix(a, "--output=")
+		case strings.HasPrefix(a, "-output="):
+			output = strings.TrimPrefix(a, "-output=")
 		default:
 			rest = append(rest, a)
 		}
@@ -121,7 +132,11 @@ func parseOptions(args []string, env func(string) string) (options, error) {
 	if host == "" {
 		host = env("ENSEMBLE_HOST")
 	}
+	if output == "" {
+		output = env("ENSEMBLE_OUTPUT")
+	}
 	opt.Host = host
+	opt.Output = output
 	opt.cfgArgs = rest
 
 	// Validate the config flags up front (no panic on a bad port etc.) without

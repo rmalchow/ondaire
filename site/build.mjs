@@ -95,7 +95,7 @@ const lbDots = lbItems
 // The hero reuses one of the gallery shots; open the lightbox at its slide.
 const heroLbIdx = Math.max(0, C.screens.items.findIndex((s) => s.src === C.hero.shot.src));
 
-const steps = C.how.steps
+const steps = C.quickstart.steps
   .map(
     (s) => `
       <li class="step">
@@ -104,43 +104,6 @@ const steps = C.how.steps
         <p>${esc(s.body)}</p>
       </li>`
   )
-  .join("");
-
-const qsSteps = C.quickstart.steps
-  .map((s) => {
-    const code = s.code
-      ? `<pre class="qs-code"><code>${esc(s.code)}</code></pre>`
-      : "";
-    const params = s.params
-      ? `<div class="qs-params">${s.params
-          .map(
-            (p) =>
-              `<code class="qs-flag">${esc(p.flag)}</code><span>${esc(p.what)} <em>· default ${esc(p.def)}</em></span>`
-          )
-          .join("")}</div>`
-      : "";
-    const methods = s.methods
-      ? `<div class="qs-methods">${s.methods
-          .map((m) => `<span class="qs-mlabel">${esc(m.label)}</span><code>${esc(m.cmd)}</code>`)
-          .join("")}</div>`
-      : "";
-    const action = s.action
-      ? `<a class="btn btn-solid qs-dl" href="${esc(s.action.href)}" rel="noopener">${esc(s.action.label)}<span class="arrow">→</span></a>`
-      : "";
-    const doc = s.doc
-      ? `<a class="qs-doc" href="${esc(s.doc.href)}" rel="noopener">for further details — ${esc(s.doc.label)}<span class="arrow">→</span></a>`
-      : "";
-    return `
-      <article class="qs">
-        <div class="qs-top">
-          <div class="qs-h"><span class="qs-n">${esc(s.n)}</span><h3>${esc(s.title)}</h3></div>
-          <span class="tag">${esc(s.tag)}</span>
-        </div>
-        <p class="qs-body">${esc(s.body)}</p>
-        ${code}${params}${methods}
-        <div class="qs-foot">${action}${doc}</div>
-      </article>`;
-  })
   .join("");
 
 const techItems = C.tech.items
@@ -250,21 +213,16 @@ const page = `<!doctype html>
     <div class="screen-list">${screens}</div>
   </section>
 
-  <section id="how" class="how">
-    <header class="sec-head">
-      <span class="eyebrow">${esc(C.how.eyebrow)}</span>
-      <h2>${esc(C.how.title)}</h2>
-    </header>
-    <ol class="steps">${steps}</ol>
-  </section>
-
-  <section id="quickstart" class="quickstart">
+  <section id="quickstart" class="how">
     <header class="sec-head">
       <span class="eyebrow">${esc(C.quickstart.eyebrow)}</span>
       <h2>${esc(C.quickstart.title)}</h2>
-      <p class="sec-intro">${esc(C.quickstart.intro)}</p>
     </header>
-    <div class="qs-list">${qsSteps}</div>
+    <ol class="steps">${steps}</ol>
+    <div class="qs-cta">
+      <p class="qs-cta-text">${esc(C.quickstart.cta.text)}</p>
+      <a class="btn btn-solid qs-cta-btn" href="${esc(C.quickstart.cta.href)}" rel="noopener">${esc(C.quickstart.cta.label)}<span class="arrow">→</span></a>
+    </div>
   </section>
 
   <section id="tech" class="tech-sec">
@@ -274,10 +232,7 @@ const page = `<!doctype html>
       <p class="sec-intro">${esc(C.tech.intro)}</p>
     </header>
     <div class="tech-grid">${techItems}</div>
-  </section>
-
-  <section id="proof" class="proof">
-    <header class="sec-head">
+    <header class="sec-head tech-proof-head">
       <span class="eyebrow">${esc(C.proof.eyebrow)}</span>
       <h2>${esc(C.proof.title)}</h2>
       <p class="sec-intro">${esc(C.proof.intro)}</p>
@@ -472,9 +427,12 @@ function downloadCard(o) {
   // so it is intentionally not run through esc(). Rendered full-width under head.
   const note = o.note ? `\n        <p class="dl-note">${o.note}</p>` : "";
   if (o.docker) {
+    // o.body is trusted author HTML too — a plain explanatory paragraph that
+    // sits above the --network host callout (o.note) and the run command.
+    const body = o.body ? `\n        <p class="dl-body">${o.body}</p>` : "";
     return `
-      <article class="dl-card">${head}${note}
-        <div class="dl-cmd">
+      <article class="dl-card">${head}${body}${note}
+        <div class="dl-cmd dl-cmd-multi">
           <code>${esc(o.docker)}</code>
           <button class="dl-copy" type="button" data-copy="${esc(o.docker)}" aria-label="Copy command">copy</button>
         </div>
@@ -501,6 +459,54 @@ function downloadCard(o) {
 
 function downloadPage(options) {
   const cards = options.map(downloadCard).join("");
+  const t = C.download.esp32;
+  const esp32 = t
+    ? `
+    <section class="dl-teaser" aria-label="${esc(t.title)}">
+      <div class="dl-teaser-head">
+        <h2>${esc(t.title)}</h2>
+        <span class="dl-soon">${esc(t.badge)}</span>
+      </div>
+      <p class="dl-teaser-body">${esc(t.body)}</p>
+    </section>`
+    : "";
+  const inst = C.download.installer;
+  const iw = inst && inst.walkthrough;
+  const installer = inst
+    ? `
+    <article class="dl-card dl-installer">
+      <div class="dl-card-head"><div class="dl-card-head-l"><h3>${esc(inst.title)}</h3></div></div>
+      <p class="dl-rec">${esc(inst.body)}</p>
+      <div class="dl-cmd">
+        <code>${esc(inst.code)}</code>
+        <button class="dl-copy" type="button" data-copy="${esc(inst.code)}" aria-label="Copy command">copy</button>
+      </div>${iw ? `
+      <details class="dl-script">
+        <summary>${esc(iw.summary)}</summary>
+        <pre class="dl-code"><code>${esc(iw.script)}</code></pre>
+        <a class="dl-doc" href="${esc(iw.href)}" rel="noopener">${esc(iw.hrefLabel)}<span class="arrow">→</span></a>
+      </details>` : ""}
+    </article>`
+    : "";
+  const fl = C.download.flags;
+  const flags = fl
+    ? `
+    <section class="dl-flags">
+      <header class="sec-head">
+        <h2>${esc(fl.title)}</h2>
+        <p class="sec-intro">${esc(fl.intro)}</p>
+      </header>
+      <table class="qs-table">
+        <thead><tr>${fl.cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+        <tbody>${fl.params
+          .map(
+            (p) =>
+              `<tr><td><code class="qs-flag">${esc(p.param)}</code></td><td><code class="qs-env">${esc(p.env)}</code></td><td><code class="qs-def">${esc(p.def)}</code></td><td>${esc(p.what)}</td></tr>`
+          )
+          .join("")}</tbody>
+      </table>${fl.doc ? `\n      <a class="qs-doc" href="${esc(fl.doc.href)}" rel="noopener">for further details — ${esc(fl.doc.label)}<span class="arrow">→</span></a>` : ""}
+    </section>`
+    : "";
   const links = C.download.links
     .map(
       (l) => `
@@ -516,7 +522,7 @@ function downloadPage(options) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Download — ${esc(C.meta.title)}</title>
-<meta name="description" content="Download ensemble — pure-Go binaries for Raspberry Pi (32/64-bit) and x86-64 Linux, plus the Docker image. SHA-256 for every build." />
+<meta name="description" content="Download ensemble — pure-Go binaries for 64-bit Raspberry Pi (arm64) and x86-64 Linux, plus the Docker image. SHA-256 for every build." />
 <meta name="theme-color" content="${esc(C.meta.themeColor)}" />
 <link rel="preload" href="assets/fonts/fraunces-wght.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin />
@@ -538,7 +544,8 @@ function downloadPage(options) {
       <h1>${esc(C.download.title)}</h1>
       <p class="sec-intro">${esc(C.download.intro)}</p>
     </header>
-    <div class="dl-list">${cards}</div>
+    <div class="dl-list">${esp32}${installer}${cards}</div>
+    ${flags}
     <div class="dl-links">${links}</div>
   </section>
 </main>
@@ -567,6 +574,260 @@ function downloadPage(options) {
 `;
 }
 
+// resolveFirmware enriches each firmware build with the staged merged-image's
+// SHA-256 + size (like resolveDownloads). A missing image renders as "not built"
+// so a plain `node build.mjs` still produces the flasher page + a valid manifest.
+async function resolveFirmware() {
+  const out = [];
+  for (const b of C.firmware.builds) {
+    try {
+      const buf = await fs.readFile(path.join(SRC, b.file));
+      out.push({ ...b, present: true, size: buf.length, hash: createHash("sha256").update(buf).digest("hex") });
+    } catch {
+      out.push({ ...b, present: false });
+    }
+  }
+  return out;
+}
+
+// ESP Web Tools manifest: one build per detected chipFamily, each a single
+// merged image at offset 0. `path` is relative to the manifest's own location.
+function firmwareManifest(builds) {
+  return {
+    name: C.firmware.manifestName,
+    version: VERSION || "dev",
+    new_install_prompt_erase: true,
+    builds: builds
+      .filter((b) => b.present)
+      .map((b) => ({ chipFamily: b.chipFamily, parts: [{ path: b.file.split("/").pop(), offset: 0 }] })),
+  };
+}
+
+function flashPage(builds) {
+  const F = C.flash;
+  const anyBuild = builds.some((b) => b.present);
+  const buildRows = builds
+    .map((b) => {
+      const fname = b.file.split("/").pop();
+      const meta = b.present
+        ? `<span class="fl-ok">staged</span> <span class="dl-size">${esc(fmtBytes(b.size))}</span>`
+        : `<span class="fl-no">not built</span>`;
+      const sha = b.present ? `<code class="fl-sha">${esc(b.hash)}</code>` : "";
+      return `
+        <div class="fl-build">
+          <div><strong>${esc(b.label)}</strong> <span class="dl-rec">${esc(b.note)}</span></div>
+          <div class="fl-build-meta"><code>${esc(fname)}</code> ${meta} ${sha}</div>
+        </div>`;
+    })
+    .join("");
+  const bom = F.bom.items.map((i) => `<li>${esc(i)}</li>`).join("");
+  const steps = F.steps
+    .map((s) => `<li class="step"><span class="step-n">${esc(s.n)}</span><h3>${esc(s.title)}</h3><p>${esc(s.body)}</p></li>`)
+    .join("");
+
+  // The install widget: ESP Web Tools when a build is staged, else a placeholder.
+  const installer = anyBuild
+    ? `<esp-web-install-button manifest="assets/firmware/manifest.json">
+        <button class="btn btn-solid" slot="activate">${esc(F.install.label)} <span class="arrow">↧</span></button>
+        <span slot="unsupported" class="fl-warn">This browser can’t flash — use Chrome or Edge on desktop.</span>
+        <span slot="not-allowed" class="fl-warn">Flashing needs a secure (https) page.</span>
+      </esp-web-install-button>
+      <p class="dl-rec">${esc(F.install.note)}</p>`
+    : `<p class="dl-missing">Firmware not staged — built by the CI <code>firmware</code> job (or run <code>esp32/build.sh</code>).</p>`;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flash a player — ${esc(C.meta.title)}</title>
+<meta name="description" content="Flash an ESP32 + I2S DAC ensemble player from your browser — ESP Web Tools + Web Serial provisioning. No toolchain." />
+<meta name="theme-color" content="${esc(C.meta.themeColor)}" />
+<link rel="preload" href="assets/fonts/fraunces-wght.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="assets/styles.css" />
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+<style>
+  .fl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin:18px 0}
+  .fl-field{display:flex;flex-direction:column;gap:5px;font-size:14px}
+  .fl-field label{color:var(--muted,#8b93a3)}
+  .fl-field input,.fl-field select{background:#0f1218;border:1px solid #2c333f;border-radius:8px;color:inherit;padding:8px 10px;font:inherit}
+  .fl-actions{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}
+  .fl-build{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid #20262f}
+  .fl-build-meta{font-size:13px;color:#8b93a3;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .fl-sha{font-size:11px;word-break:break-all;max-width:100%}
+  .fl-ok{color:#46c46a}.fl-no{color:#c46a46}.fl-warn{color:#d9a441}
+  .fl-log{background:#0a0c10;border:1px solid #20262f;border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap;max-height:180px;overflow:auto;color:#9aa3b2}
+  .fl-card{background:#12151c;border:1px solid #20262f;border-radius:14px;padding:20px;margin:18px 0}
+  .fl-disabled{opacity:.5;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="nav">
+  <a class="brand" href="index.html">${esc(C.brand.name)}<span class="brand-dot"></span></a>
+  <nav class="nav-links">${renderNav("index.html")}</nav>
+  <a class="btn btn-ghost nav-cta" href="index.html">← Home</a>
+</header>
+
+<main id="top">
+  <section class="dl">
+    <header class="sec-head">
+      <span class="eyebrow">${eq(6)}${esc(F.eyebrow)}${VERSION ? " · " + esc(VERSION) : ""}</span>
+      <h1>${esc(F.title)}</h1>
+      <p class="sec-intro">${esc(F.intro)}</p>
+    </header>
+
+    <div class="fl-card">
+      <h2>1 · Install</h2>
+      <p class="dl-rec">${esc(F.requirements)}</p>
+      <div class="fl-actions">${installer}</div>
+      <div class="fl-builds">${buildRows}</div>
+    </div>
+
+    <div class="fl-card">
+      <h2>2 · Configure over USB</h2>
+      <p class="dl-rec">After flashing, connect to set Wi-Fi and confirm the DAC + encoder pins. Defaults match the wiring guide.</p>
+      <div class="fl-actions">
+        <button class="btn btn-solid" id="fl-connect" type="button">Connect</button>
+        <button class="btn btn-ghost" id="fl-load" type="button" disabled>Load current</button>
+        <button class="btn btn-ghost" id="fl-tone" type="button" disabled>Test tone</button>
+        <button class="btn btn-ghost" id="fl-reboot" type="button" disabled>Reboot</button>
+      </div>
+      <div id="fl-form" class="fl-disabled">
+        <div class="fl-grid">
+          <div class="fl-field"><label>Player name</label><input id="cf-name" placeholder="e.g. kitchen" /></div>
+          <div class="fl-field"><label>Wi-Fi SSID (2.4 GHz)</label><input id="cf-wifi_ssid" /></div>
+          <div class="fl-field"><label>Wi-Fi password</label><input id="cf-wifi_pass" type="password" placeholder="(unchanged)" /></div>
+        </div>
+        <div class="fl-grid">
+          <div class="fl-field"><label>I2S BCK</label><input id="cf-i2s_bclk" type="number" /></div>
+          <div class="fl-field"><label>I2S LCK</label><input id="cf-i2s_lrck" type="number" /></div>
+          <div class="fl-field"><label>I2S DIN</label><input id="cf-i2s_dout" type="number" /></div>
+          <div class="fl-field"><label>I2S MCLK (-1 = none)</label><input id="cf-i2s_mclk" type="number" /></div>
+          <div class="fl-field"><label>Encoder CLK</label><input id="cf-enc_a" type="number" /></div>
+          <div class="fl-field"><label>Encoder DT</label><input id="cf-enc_b" type="number" /></div>
+          <div class="fl-field"><label>Encoder SW</label><input id="cf-enc_sw" type="number" /></div>
+          <div class="fl-field"><label>DAC</label><select id="cf-dac"><option value="0">PCM5102A (sw gain)</option><option value="1">PCM5122 (I2C)</option></select></div>
+          <div class="fl-field"><label>Codec pref</label><select id="cf-codec"><option value="0">opus</option><option value="1">pcm</option></select></div>
+          <div class="fl-field"><label>Buffer ms</label><input id="cf-buffer_ms" type="number" /></div>
+          <div class="fl-field"><label>Control port</label><input id="cf-control_port" type="number" /></div>
+        </div>
+        <div class="fl-actions"><button class="btn btn-solid" id="fl-save" type="button">Save to device</button></div>
+      </div>
+      <div class="fl-log" id="fl-log">Not connected.</div>
+    </div>
+
+    <div class="fl-card">
+      <h2>What you need</h2>
+      <ul class="dl-rec">${bom}</ul>
+      <ol class="steps" style="margin-top:14px">${steps}</ol>
+    </div>
+
+    <div class="dl-links">
+      <div class="dl-link-row">
+        <p class="dl-link-desc">Wiring diagrams, pinouts, the config protocol, and the build are all in the repo.</p>
+        <a class="btn btn-ghost dl-link-btn" href="${esc(F.docHref)}" rel="noopener">${esc(F.docLabel)}<span class="arrow">→</span></a>
+      </div>
+      <div class="dl-link-row">
+        <p class="dl-link-desc">Prefer prebuilt software nodes for a Pi or PC?</p>
+        <a class="btn btn-ghost dl-link-btn" href="download.html">Download builds<span class="arrow">→</span></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="foot-brand">${esc(C.brand.name)}${eq(4)}</div>
+  <p class="foot-note">${esc(C.footer.note)}</p>
+  <nav class="foot-links">${footLinksHtml}</nav>
+</footer>
+
+<script>
+(function () {
+  // Provision the node over Web Serial using the firmware's line-JSON protocol
+  // (docs/esp32.md §6.2): {"cmd":"get|set|test|reboot"}. Chrome/Edge only.
+  var FIELDS = ["name","wifi_ssid","i2s_bclk","i2s_lrck","i2s_dout","i2s_mclk",
+    "enc_a","enc_b","enc_sw","dac","codec","buffer_ms","control_port"];
+  var NUM = ["i2s_bclk","i2s_lrck","i2s_dout","i2s_mclk","enc_a","enc_b","enc_sw","dac","codec","buffer_ms","control_port"];
+  var port, writer, buf = "", waiters = [];
+  var logEl = document.getElementById("fl-log");
+  function log(m){ logEl.textContent = (logEl.textContent + "\\n" + m).split("\\n").slice(-40).join("\\n"); logEl.scrollTop = logEl.scrollHeight; }
+  function $(id){ return document.getElementById(id); }
+  function setEnabled(on){
+    ["fl-load","fl-tone","fl-reboot"].forEach(function(i){ $(i).disabled = !on; });
+    $("fl-form").classList.toggle("fl-disabled", !on);
+  }
+
+  function send(obj){
+    var line = JSON.stringify(obj) + "\\n";
+    return writer.write(new TextEncoder().encode(line)).then(function(){
+      return new Promise(function(res){ waiters.push(res); setTimeout(function(){ var i=waiters.indexOf(res); if(i>=0){waiters.splice(i,1); res(null);} }, 3000); });
+    });
+  }
+  function onLine(line){
+    line = line.trim(); if(!line) return;
+    var obj; try { obj = JSON.parse(line); } catch(e){ return; } // ignore log noise
+    log("← " + line);
+    var w = waiters.shift(); if (w) w(obj);
+  }
+  async function readLoop(){
+    var dec = new TextDecoderStream();
+    port.readable.pipeTo(dec.writable).catch(function(){});
+    var r = dec.readable.getReader();
+    for(;;){
+      var out; try { out = await r.read(); } catch(e){ break; }
+      if (out.done) break;
+      buf += out.value;
+      var nl;
+      while ((nl = buf.indexOf("\\n")) >= 0) { onLine(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
+    }
+  }
+
+  $("fl-connect").addEventListener("click", async function(){
+    if (!navigator.serial) { log("Web Serial unavailable — use Chrome or Edge on desktop."); return; }
+    try {
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      writer = port.writable.getWriter();
+      readLoop();
+      setEnabled(true);
+      log("connected. Click “Load current”.");
+    } catch(e){ log("connect failed: " + e.message); }
+  });
+
+  $("fl-load").addEventListener("click", async function(){
+    log("→ get");
+    var r = await send({ cmd: "get" });
+    if (!r || !r.cfg) { log("no response"); return; }
+    var c = r.cfg;
+    FIELDS.forEach(function(k){ if (k in c && $("cf-"+k)) $("cf-"+k).value = c[k]; });
+    if ("wifi_ssid" in c) $("cf-wifi_ssid").value = c.wifi_ssid || "";
+    $("cf-wifi_pass").value = "";
+    log("loaded id=" + (c.id || "?"));
+  });
+
+  $("fl-save").addEventListener("click", async function(){
+    var cfg = {};
+    FIELDS.forEach(function(k){ var el=$("cf-"+k); if(!el) return; var v=el.value;
+      cfg[k] = NUM.indexOf(k)>=0 ? parseInt(v,10) : v; });
+    var ssid = $("cf-wifi_ssid").value; if (ssid) cfg.wifi_ssid = ssid;
+    var pass = $("cf-wifi_pass").value; if (pass) cfg.wifi_pass = pass;
+    log("→ set");
+    var r = await send({ cmd: "set", cfg: cfg });
+    log(r && r.ok ? "saved ✓" : ("save failed: " + (r && r.err ? r.err : "?")));
+  });
+
+  $("fl-tone").addEventListener("click", async function(){ log("→ test tone"); var r = await send({cmd:"test",what:"tone"}); log(r&&r.ok?"tone done":"tone failed"); });
+  $("fl-reboot").addEventListener("click", async function(){ log("→ reboot"); send({cmd:"reboot"}); });
+})();
+</script>
+</body>
+</html>
+`;
+}
+
 async function copyDir(from, to) {
   await fs.mkdir(to, { recursive: true });
   for (const e of await fs.readdir(from, { withFileTypes: true })) {
@@ -587,6 +848,16 @@ async function main() {
   const dl = downloadPage(downloads);
   await fs.writeFile(path.join(OUT, "download.html"), dl);
 
+  // Flasher page + ESP Web Tools manifest. The merged firmware images (if staged)
+  // are copied by copyDir(assets); here we just emit flash.html + manifest.json.
+  const firmware = await resolveFirmware();
+  await fs.writeFile(path.join(OUT, "flash.html"), flashPage(firmware));
+  await fs.mkdir(path.join(OUT, "assets", "firmware"), { recursive: true });
+  await fs.writeFile(
+    path.join(OUT, "assets", "firmware", "manifest.json"),
+    JSON.stringify(firmwareManifest(firmware), null, 2)
+  );
+
   // Serve the installer at /get.sh (the "curl … | sudo bash" one-liner). Source of
   // truth is ../scripts/get.sh; the CI docker-site job stages a copy to site/get.sh
   // for the Docker build context.
@@ -603,8 +874,9 @@ async function main() {
 
   const staged = downloads.filter((o) => o.present).length;
   const total = downloads.filter((o) => o.file).length;
+  const fwStaged = firmware.filter((b) => b.present).length;
   console.log(
-    `built ./dist (index ${(page.length / 1024).toFixed(1)} kB, download ${(dl.length / 1024).toFixed(1)} kB; ${staged}/${total} binaries staged; get.sh ${getSh ? "✓" : "—"})`
+    `built ./dist (index ${(page.length / 1024).toFixed(1)} kB, download ${(dl.length / 1024).toFixed(1)} kB; ${staged}/${total} binaries, ${fwStaged}/${firmware.length} firmware staged; get.sh ${getSh ? "✓" : "—"})`
   );
 }
 

@@ -1,0 +1,10 @@
+# Managed component dependencies, resolved + pinned to dependencies.lock on the
+# first `idf.py build`.
+dependencies:
+  idf:
+    version: ">=5.3"
+  # mDNS advertisement of the _ensemble._tcp playback service (PLAYER §5).
+  espressif/mdns: "^1.8"
+  # Opus decode-only (the default Wi-Fi group codec). Lean libopus wrapper that
+  # exposes the standard opus.h API (opus_decoder_create / opus_decode).
+  esphome/micro-opus: "*"

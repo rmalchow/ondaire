@@ -8,7 +8,7 @@
 ensemble/
 ├── cmd/                    # Binaries
 │   ├── ensemble/          # Main multiroom audio daemon
-│   ├── dumbclient/        # Wire protocol reference client (ESP32)
+│   ├── player/        # Wire protocol reference client (ESP32)
 │   └── soundcheck/        # Audio device diagnostic tool
 ├── internal/              # All runtime logic (not importable externally)
 │   ├── contracts/         # Skeleton: cross-piece interfaces (Backend, Sink, Clock, StateStore)
@@ -46,7 +46,7 @@ ensemble/
 │   ├── README.md         # Full specification (§1–§10)
 │   ├── arch/             # Per-component design docs (piece A–K)
 │   ├── user/             # UI walkthrough with screenshots
-│   └── external/         # DUMB-CLIENT.md (wire protocol), esp32.md
+│   └── external/         # PLAYER.md (wire protocol), esp32.md
 ├── scripts/              # Build & dev tools
 │   ├── build.sh          # Compile Go (multi-arch) + Svelte UI
 │   ├── ui.sh             # Web UI build only

@@ -620,9 +620,10 @@ Recorded as a contractConcern since it touches the C/H boundary.
   Stale higher-versioned copies of our record linger in peers. The `Start`
   reconciliation bumps our version above the max remote copy so our writes win.
   Without it, our `SetName` post-restart could be silently dropped by peers.
-- **Stale `following` → dead/unknown master.** Derivation treats such a node as
-  its own master (solo) for the snapshot (§5). C does not write; H self-heals.
-  Prevents phantom groups pointing at dead masters.
+- **Stale `following` → dead/unknown master.** Derivation treats such a node's
+  **player as idle** (in no group) for the snapshot — the node still masters its
+  own group intrinsically (§5). C does not write; H self-heals. Prevents phantom
+  groups pointing at dead masters.
 - **Group ID is derived, so a renamed group keeps its name when it reforms
   (§5).** Names are keyed by group id (XOR of members); C stores them keyed by
   id, never by membership, so reforming the same node set reuses the name. No

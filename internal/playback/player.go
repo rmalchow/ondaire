@@ -20,7 +20,7 @@ import (
 )
 
 // Player is the verb interface every playout front-end drives (D54/D61,
-// DUMB-CLIENT.md §6). All methods are safe to call repeatedly with the same
+// PLAYER.md §6). All methods are safe to call repeatedly with the same
 // arguments — they are idempotent, matching the control plane's soft-state model
 // (D58). Implementations are not required to be goroutine-safe; callers serialize
 // (the group engine under its mutex, the control listener on its read goroutine).
@@ -56,7 +56,7 @@ type Player interface {
 }
 
 // Attach is the parameter set for Player.Attach, mirroring the ATTACH wire payload
-// (DUMB-CLIENT.md §6.1). Codec and BufferMs are carried for front-ends that own
+// (PLAYER.md §6.1). Codec and BufferMs are carried for front-ends that own
 // their own decode/sink construction (a standalone playback node); the localPlayer
 // ignores them because the gossiping member's decode + sink lead are wired by K and
 // the group, exactly as before the split.

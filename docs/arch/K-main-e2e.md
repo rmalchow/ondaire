@@ -100,7 +100,7 @@ type options struct {
 	DataDir    string   // --data        / ENSEMBLE_DATA_DIR    (default ./data)
 	MediaDir   string   // --media       / ENSEMBLE_MEDIA_DIR   (default DATA_DIR/media)
 	Name       string   // --name        (initial node name; applied on first start only)
-	Output     string   // ENSEMBLE_OUTPUT (env only, D2): "" → "auto" | "null" | "file:<path>" | backend name
+	Output     string   // --output / ENSEMBLE_OUTPUT (D2): "" → "auto" | "null" | "file:<path>" | backend name
 	Join       []string // --join / ENSEMBLE_JOIN (D20): comma-sep host:gossipPort seeds (dev e2e)
 	Host       string   // --host bind address, default "" (all ifaces); "127.0.0.1" in dev2/e2e
 	LogLevel   string   // ENSEMBLE_LOG (debug|info|warn|error), default info
@@ -757,8 +757,9 @@ Go unit tests (`cmd/ensemble/main_test.go`):
   port/dir.
 - `TestParseOptionsJoinList` — `--join a:1,b:2` and `ENSEMBLE_JOIN` parse to
   `[]string{"a:1","b:2"}` (D20).
-- `TestParseOptionsOutputNull` — `ENSEMBLE_OUTPUT=null` → `opt.Output=="null"`
-  (env-only, D2; no flag).
+- `TestParseOptionsOutputNull` / `TestParseOptionsOutputFlag` — both
+  `ENSEMBLE_OUTPUT=null` and `--output null` → `opt.Output=="null"`; the flag
+  beats the env (D2), and is stripped from the args forwarded to config.Load.
 - `TestParseOptionsBadPort` — non-numeric `--http-port` → parse error, no panic.
 - `TestCapabilitiesNullForcesNoPlayback` — output=null → `caps.Playback==false`,
   `caps.Sources` contains `"file"` and `"http"`. (`caps.Codecs` is independent

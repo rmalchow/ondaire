@@ -20,8 +20,12 @@ seed + last-known follow target (`""` = solo); its live value rides the replicat
 record. Atomic temp+fsync+rename writes. (Fields added over time: volume D35,
 outputDelayMs D36, outputDevice D37, disabled D40, following D45.)
 
-**D2 — `ENSEMBLE_OUTPUT` is env-only**, no flag: `auto` (default) | `null` |
-`file:<path>` | an explicit backend name. `auto` picks alsa → exec → null (D27).
+**D2 — `--output` / `ENSEMBLE_OUTPUT` selects the sink backend:** `auto`
+(default) | `null` | `file:<path>` | an explicit backend name. `auto` picks
+alsa → exec → null (D27). Flag > env > default, parsed in K (main) alongside
+`--host` — it's a K-owned runtime knob, not a config-package flag. *(Originally
+env-only; the `--output` flag was added later for CLI symmetry with the other
+knobs — there's no reason a Docker-only env var should be the sole way to set it.)*
 
 **D41 / D47 — `cluster.json` persists only the long-lived lookup tables.** Two
 things, each a FULL LWW record (version + writer, so the gossip merge applies):
@@ -394,14 +398,14 @@ there is no external client to keep compatible.
 **D46 — wire protocol v1: magic `0xE5` is the version marker.** Receivers ignore
 unknown packet types (new optional types are additive); an incompatible revision
 changes the magic. This lets a protocol-minimal receive-only client
-(`docs/DUMB-CLIENT.md`, `cmd/dumbclient`) interoperate without cluster membership.
+(`docs/PLAYER.md`, `cmd/player`) interoperate without cluster membership.
 
 **D49 — two independently-enableable roles, `master` and `playback`** (default both).
 - **`master`** participates in memberlist gossip, owns/replicates cluster state,
   serves the REST/WS API + SPA, and sources/streams audio. It is the only external
   control surface (D56).
 - **`playback`** is the receive-and-play role (wire behavior =
-  [DUMB-CLIENT.md](../DUMB-CLIENT.md)): subscribe, clock-follow, play in sync. It
+  [PLAYER.md](../PLAYER.md)): subscribe, clock-follow, play in sync. It
   announces via mDNS, **never gossips, holds no cluster state**, and is **driven by a
   master**, idle until told to join. The protocol is identical for Go and MCU; only
   capabilities differ (D51). A combined node gossips *because* it is a master.
@@ -470,7 +474,7 @@ sent a STATUS recently; it expires when both go stale. `DeriveGroups`/`nodeView`
 **local** `Player` with direct in-process calls; the wire control plane (D58) is used
 **only** for remote nodes. Both front-ends hit the identical interface, so "behaves the
 same for Go and MCU" holds without a node ever wire-driving itself over loopback. This
-collapses the former two playout paths (full member; standalone `cmd/dumbclient`) into
+collapses the former two playout paths (full member; standalone `cmd/player`) into
 one component.
 
 **D62 — multi-master convergence reuses the D7 reconcile.** The master that first

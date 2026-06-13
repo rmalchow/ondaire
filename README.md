@@ -28,9 +28,9 @@ in sync — no server, no database, no config files, no cloud.
   follow another and they merge. Name a combination of rooms and the name
   sticks whenever that set reforms.
 
-> A node can also be a "dumb" speaker: the wire protocol is small and
-> documented in [`docs/DUMB-CLIENT.md`](docs/DUMB-CLIENT.md) for firmware
-> (e.g. an ESP32 + DAC), with a reference client in [`cmd/dumbclient`](cmd/dumbclient).
+> A node can also be a receive-only **player**: the wire protocol is small and
+> documented in [`docs/PLAYER.md`](docs/PLAYER.md) for firmware
+> (e.g. an ESP32 + DAC), with a reference player in [`cmd/player`](cmd/player).
 
 ---
 
@@ -129,6 +129,7 @@ Flags (each has an `ENSEMBLE_*` env equivalent); all are optional:
 | `--source-port` | `9200` | audio source: subscriptions + control (tcp+udp) |
 | `--gossip-port` | `7946` | cluster gossip (tcp+udp) |
 | `--host <addr>` | all interfaces | bind address |
+| `--output <spec>` | `auto` | output backend: `auto` \| `alsa` \| `exec` \| `null` \| `file:<path>` |
 
 Ports are **bind-or-increment** *when left at the default*: if one is taken the
 node tries the next and advertises whatever it actually bound. A port you **set
@@ -140,7 +141,6 @@ Env-only knobs:
 
 | Env | Default | What |
 |-----|---------|------|
-| `ENSEMBLE_OUTPUT` | `auto` | output backend: `auto` \| `alsa` \| `exec` \| `null` \| `file:<path>` |
 | `ENSEMBLE_ALSA_LATENCY_MS` | `200` | ALSA device buffer (raise on a glitchy Pi) |
 | `ENSEMBLE_LOG` | `info` | log level (`debug` \| `info` \| `warn` \| `error`) |
 
@@ -167,7 +167,7 @@ servo'd playout so the audio leaves every speaker at the same instant.
 
 Deeper docs live in [`docs/`](docs/): [`README.md`](docs/README.md) is the full
 spec, [`arch/`](docs/arch) has per-component design and the decision log,
-[`DUMB-CLIENT.md`](docs/DUMB-CLIENT.md) is the wire protocol,
+[`PLAYER.md`](docs/PLAYER.md) is the wire protocol,
 [`esp32.md`](docs/esp32.md) the ESP32-S2 hardware node, [`calibration.md`](docs/calibration.md)
 the acoustic coherence measurement & calibration, and [`RELEASING.md`](RELEASING.md) covers releases.
 

@@ -81,14 +81,9 @@ e2e:
     matrix:
       - { GOOS: linux, GOARCH: amd64,  ARCH: amd64 }
       - { GOOS: linux, GOARCH: arm64,  ARCH: arm64 }
-      # Two 32-bit builds from the same GOARM=6 code (Pi Zero W / Pi 1, ARMv6; GOARM=6
-      # mandatory). purego forces dynamic linking even at CGO_ENABLED=0, and Go stamps
-      # the soft-float armel loader /lib/ld-linux.so.3 — fine on armel, but absent on
-      # hard-float armhf userlands (Raspberry Pi OS), where it dies at exec with
-      # "cannot execute: required file not found". The hf variant overrides the ELF
-      # interpreter to the armhf loader. (See scripts/build.sh for the full rationale.)
-      - { GOOS: linux, GOARCH: arm, GOARM: "6", ARCH: armv6 }                                       # soft-float armel
-      - { GOOS: linux, GOARCH: arm, GOARM: "6", ARCH: armv6hf, INTERP: "/lib/ld-linux-armhf.so.3" } # hard-float armhf
+      # 32-bit ARM (armv6/armhf, Pi Zero / Pi 1) is no longer supported — the
+      # soft-/hard-float loader split was never reliable enough. 64-bit only: amd64
+      # + arm64 (Raspberry Pi OS 64-bit on a Pi 3/4/5/Zero 2).
   script:
     - VER="${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}"   # release tag, else dev sha
     - SUFFIX="${GOOS}-${ARCH}"
@@ -126,6 +121,68 @@ build-release:
     paths: [bin/]
     reports:
       dotenv: build.env
+    expire_in: never
+
+# 3b) ESP32 playback-node firmware. Built in the official ESP-IDF image (it has
+# the toolchain + cmake/ninja/patch) — one matrix job per board class, each
+# producing a single merged flash image (fw/ensemble-fw-<board>.bin) the web
+# flasher serves. Branch/MR pipelines build only when esp32/** changed; tag
+# pipelines always build (firmware-release, never-expiring artifacts for the
+# release links + the site image). See esp32/ and docs/esp32.md.
+.firmware-template:
+  stage: build
+  image: espressif/idf:release-v5.4
+  needs: []
+  parallel:
+    matrix:
+      - { BOARD: esp32s3, CHIP: ESP32S3 }
+  variables:
+    IDF_TOOLS_PATH: "$CI_PROJECT_DIR/.espressif"
+  cache:
+    key: idf-tools
+    paths: [.espressif]
+  script:
+    - . "$IDF_PATH/export.sh"
+    - cd esp32
+    # Per-board sdkconfig in the build dir so the matrix jobs never share config.
+    - IDFARGS="-B build-$BOARD -DBOARD=$BOARD -DSDKCONFIG=build-$BOARD/sdkconfig"
+    - idf.py $IDFARGS set-target "$BOARD"
+    - idf.py $IDFARGS build
+    - idf.py $IDFARGS merge-bin -o "ensemble-fw-$BOARD.bin"   # → build-$BOARD/
+    - mkdir -p ../fw
+    - cp "build-$BOARD/ensemble-fw-$BOARD.bin" "../fw/ensemble-fw-$BOARD.bin"
+    - cd ..
+    # Per-board job id for the release asset links (dotenv; by-ref artifacts
+    # endpoint resolves names only, never a SHA — same reason as the Go build).
+    - echo "FW_JOB_ID_${CHIP}=$CI_JOB_ID" > firmware.env
+  tags:
+    - shared
+
+firmware:
+  extends: .firmware-template
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: [esp32/**/*]
+    - if: $CI_COMMIT_BRANCH
+      changes: [esp32/**/*]
+  artifacts:
+    name: "ensemble-fw-${CI_COMMIT_REF_SLUG}"
+    paths: [fw/]
+    reports:
+      dotenv: firmware.env
+    expire_in: 4 weeks
+
+firmware-release:
+  extends: .firmware-template
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+  artifacts:
+    name: "ensemble-fw-${CI_COMMIT_TAG}"
+    paths: [fw/]
+    reports:
+      dotenv: firmware.env
     expire_in: never
 
 # 3c) Multi-arch (amd64 + arm64) Docker image of an ensemble MASTER, Spotify built
@@ -186,8 +243,12 @@ docker:
 docker-site:
   stage: build
   image: docker:28-cli
-  # Reuse the per-arch binaries from the build stage (build on branches,
-  # build-release on tags) so they ship inside the site image's download page.
+  # Reuse the per-arch binaries from the build stage (download page) plus the
+  # ESP32 firmware images (flasher page); all optional so the site still builds
+  # when a given producer job didn't run this pipeline.
+  variables:
+    IMAGE: "harbor.rand0m.me/public/ensemble-site"
+    PLATFORMS: "linux/amd64,linux/arm64"
   needs:
     - job: build
       optional: true
@@ -195,9 +256,12 @@ docker-site:
     - job: build-release
       optional: true
       artifacts: true
-  variables:
-    IMAGE: "harbor.rand0m.me/public/ensemble-site"
-    PLATFORMS: "linux/amd64,linux/arm64"
+    - job: firmware
+      optional: true
+      artifacts: true
+    - job: firmware-release
+      optional: true
+      artifacts: true
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -222,6 +286,11 @@ docker-site:
         rm -rf "$tmp"
       done
       cp scripts/get.sh site/get.sh
+    # Stage the ESP32 firmware images where build.mjs hashes them into the
+    # flasher page + ESP Web Tools manifest (absent if no firmware job ran).
+    - |
+      mkdir -p site/src/assets/firmware
+      cp fw/ensemble-fw-*.bin site/src/assets/firmware/ 2>/dev/null || true
     - docker buildx build --builder site-builder
       --platform "$PLATFORMS"
       --build-arg VER="$VER"
@@ -260,8 +329,7 @@ changelog:
           git log --no-merges --pretty='- %s' "$CI_COMMIT_TAG" | head -50
         fi
         echo
-        echo "Pure-Go binaries for linux/amd64 + linux/arm64 + linux/armv6 (Pi Zero W / Pi 1)."
-        echo "32-bit ARM ships two variants: armv6hf (hard-float armhf — Raspberry Pi OS) and armv6 (soft-float armel)."
+        echo "Pure-Go binaries for linux/amd64 + linux/arm64 (64-bit only; use Raspberry Pi OS 64-bit on a Pi 3/4/5/Zero 2)."
         echo "Optional libraries (libopus, libasound) are loaded at runtime."
         echo "Android companion APK: see the share/ensemble-android project."
       } > release-notes.md
@@ -286,10 +354,10 @@ changelog:
 release:
   stage: release
   image: registry.gitlab.com/gitlab-org/release-cli:latest
-  needs: [build-release, changelog, test]
+  needs: [build-release, firmware-release, changelog, test]
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
-  script: [ 'echo "Releasing $CI_COMMIT_TAG (amd64 $BUILD_JOB_ID_AMD64, arm64 $BUILD_JOB_ID_ARM64, armv6 $BUILD_JOB_ID_ARMV6, armv6hf $BUILD_JOB_ID_ARMV6HF)"' ]
+  script: [ 'echo "Releasing $CI_COMMIT_TAG (amd64 $BUILD_JOB_ID_AMD64, arm64 $BUILD_JOB_ID_ARM64; fw-s3 $FW_JOB_ID_ESP32S3)"' ]
   release:
     tag_name: "$CI_COMMIT_TAG"
     name: "Ensemble $CI_COMMIT_TAG"
@@ -300,10 +368,8 @@ release:
           url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_AMD64/artifacts/raw/bin/ensemble-linux-amd64"
         - name: "ensemble-linux-arm64 ($CI_COMMIT_TAG)"
           url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_ARM64/artifacts/raw/bin/ensemble-linux-arm64"
-        - name: "ensemble-linux-armv6 — soft-float armel ($CI_COMMIT_TAG)"
-          url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_ARMV6/artifacts/raw/bin/ensemble-linux-armv6"
-        - name: "ensemble-linux-armv6hf — hard-float armhf / Raspberry Pi OS ($CI_COMMIT_TAG)"
-          url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_ARMV6HF/artifacts/raw/bin/ensemble-linux-armv6hf"
+        - name: "ensemble-fw-esp32s3 — ESP32-S3 player firmware ($CI_COMMIT_TAG)"
+          url: "$CI_PROJECT_URL/-/jobs/$FW_JOB_ID_ESP32S3/artifacts/raw/fw/ensemble-fw-esp32s3.bin"
   tags:
     - shared
 

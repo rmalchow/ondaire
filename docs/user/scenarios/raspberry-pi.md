@@ -44,8 +44,8 @@ can follow *any* master, including a [desktop](desktop.md).
 Ensemble is a **single static binary** — no runtime to install, pure Go, same build
 for every Pi from the Zero 2 up.
 
-1. **Get the binary** for the Pi's architecture (`linux/arm64` for a 64-bit Pi OS;
-   `linux/arm` for the older 32-bit / Pi Zero). Grab it from a
+1. **Get the binary** — `linux/arm64`, running **Raspberry Pi OS 64-bit** (Pi 3 / 4 /
+   5 or Zero 2; 32-bit Pi OS is no longer supported). Grab it from a
    [release](../../../RELEASING.md), or
    [build it](../../../README.md#build) and copy it over:
 

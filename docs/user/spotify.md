@@ -40,7 +40,7 @@ go-librespot is a separate, open-source project:
 
 - **Source & docs:** [`github.com/devgianlu/go-librespot`](https://github.com/devgianlu/go-librespot)
 - **Prebuilt binaries:** [**releases → latest**](https://github.com/devgianlu/go-librespot/releases/latest)
-  (Linux `amd64` / `arm64` / `armv6`, macOS, …)
+  (Linux `amd64` / `arm64`, macOS, …)
 
 ensemble is verified against **go-librespot 0.7.3** — match that release or newer.
 

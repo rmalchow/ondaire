@@ -138,14 +138,14 @@ in each other's UI within seconds of starting.
 
 ## 6. Audio output backend
 
-How a **player** gets sound out of the box it runs on. Env-only:
+How a **player** gets sound out of the box it runs on:
 
-| Env | Default | What it does |
-|-----|---------|--------------|
-| `ENSEMBLE_OUTPUT` | `auto` | Selects the output backend (see below). |
-| `ENSEMBLE_ALSA_LATENCY_MS` | `200` | ALSA device buffer in ms. **Raise it** (e.g. `400`) if a Pi crackles or underruns; lower it for tighter latency on a solid machine. |
+| Flag | Env | Default | What it does |
+|------|-----|---------|--------------|
+| `--output <spec>` | `ENSEMBLE_OUTPUT` | `auto` | Selects the output backend (see below). |
+| — | `ENSEMBLE_ALSA_LATENCY_MS` | `200` | ALSA device buffer in ms. **Raise it** (e.g. `400`) if a Pi crackles or underruns; lower it for tighter latency on a solid machine. |
 
-`ENSEMBLE_OUTPUT` values:
+`--output` / `ENSEMBLE_OUTPUT` values:
 
 - **`auto`** *(default)* — pick the best available backend, in order:
   **alsa → exec → null**. This is what makes "just run it" work everywhere.

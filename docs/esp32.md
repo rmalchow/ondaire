@@ -1,93 +1,187 @@
-# ESP32-S2 dumb node
+# ESP32 player (PSRAM ESP32-S3 / WROVER)
 
-A hardware **node**: a tiny receive-only ensemble speaker built on an
-**ESP32-S2-WROOM** + an I2S DAC. It is **visible and assignable** in the cluster
-(it shows up in the UI, you can drop it into any group, set its volume and
-delay, and auto-calibrate it) but it is a **thin** node — it never sources
-audio (no library, can't become master) and it does **not** run gossip. The
-audio wire protocol it speaks is specified in [`DUMB-CLIENT.md`](DUMB-CLIENT.md);
-this document is the firmware + hardware + membership + provisioning design.
-Status: **design spec** (not yet implemented).
+A hardware **player**: a tiny receive-only ensemble speaker built on a
+**PSRAM-equipped ESP32** (ESP32-S3-WROOM-1 or classic ESP32-WROVER) + an I2S DAC.
+It is **visible and
+assignable** in the cluster (it shows up in the UI, you can drop it into any
+group, set its volume and delay, and auto-calibrate it) but it is a **receive-only**
+node — it never sources audio (no library, can't become a master/"room") and it
+does **not** run gossip. The audio wire protocol it speaks is specified in
+[`PLAYER.md`](PLAYER.md); this document is the firmware + hardware + membership +
+provisioning design.
+
+> **Status: in bring-up — not yet conformant.** The firmware lives in
+> [`../esp32/`](../esp32) (build + flash in [`esp32/README.md`](../esp32/README.md))
+> and runs on real hardware (it boots, provisions over USB, joins the cluster over
+> mDNS, clock-syncs, and answers the v2 control plane — first validated on a bench
+> board). But **no board passes the §8 conformance bar yet** (clean, sustained,
+> phase-aligned playout) —
+> see the [target matrix](#boards--build-targets), where the *Supported* column is
+> deliberately all-unchecked. The browser flasher is built but **intentionally
+> unlinked from the marketing site** until a board is conformant (re-link by
+> restoring the `flash.html` entries in `site/content.mjs`).
+>
+> **Two v1 deltas from earlier drafts:** (1) the node is driven by the **full v2
+> control plane** — discovered over mDNS and `ATTACH`ed by a master (an earlier
+> "thin HTTP API on the MCU" sketch and the legacy `/api/cluster` self-poll are
+> **not** used; the existing Go master in `internal/playback/` already drives it, no
+> server change).
+> (2) There is **no on-device HTTP** — Wi-Fi creds *and* all pin/DAC settings are
+> provisioned over USB via the JSON console (§6.5), so the SoftAP/captive portal is
+> dropped, and Improv-Serial is replaced by the same JSON panel. The rate servo
+> (§3.3) ships as drift telemetry only (advertises `queue=0`); the skip/silence
+> floor bounds drift within `bufferMs`.
 
 > Companion board: the [`kicad/` amp board](../kicad) is an ESP32-S3 +
-> PCM5102A + TPA3118D2 reference. The firmware here targets the **S2-WROOM**
-> (single-core, native USB — ideal for the web flasher); it is otherwise
-> identical in concept and shares the I2S/DAC design.
+> PCM5102A + TPA3118D2 reference. The firmware shares the I2S/DAC design across
+> every board class in the matrix below.
+
+---
+
+## Boards & build targets
+
+The firmware is **one image, parameterized by a board profile chosen at build
+time**. A board profile is two small files:
+
+- `esp32/boards/board_<board>.h` — the default **pin map** + capability flags
+  (`BOARD_HAS_APLL`, reserved pins);
+- `esp32/sdkconfig.defaults.<board>` — the **console** (USB-UART bridge vs native
+  USB), flash size, and PSRAM mode.
+
+Everything a profile sets is a *board fact* (§6.1), and every pin is still
+**NVS-overridable at provisioning time** — so one image fits many layouts and the
+profile is just sane defaults, not a hard wiring.
+
+### Selecting a board to build
+
+```sh
+cd esp32
+./build.sh esp32s2            # Docker wrapper — no local ESP-IDF needed
+# or, with ESP-IDF on PATH:
+idf.py -DBOARD=esp32s2 build
+```
+
+`build.sh` maps the board name to its chip target (e.g. `esp32-wrover` → `esp32`,
+`esp32s3-zero` → `esp32s3`) and selects the matching `sdkconfig.defaults.<board>`.
+After editing a board's `sdkconfig.defaults.*`, delete `build-<board>/sdkconfig`
+so it regenerates.
+
+### Adding a board
+
+1. `esp32/boards/board_<board>.h` — copy the closest sibling; fix the pin map,
+   `BOARD_HAS_APLL`, and any reserved pins.
+2. `esp32/sdkconfig.defaults.<board>` — console + flash size + PSRAM mode.
+3. A `BOARD → chip` row in `esp32/build.sh`.
+4. A matrix row in `.gitlab-ci.yml`.
+5. A row in the table below, plus a **board photo** and a **wiring diagram** under
+   [`esp32/devices/`](../esp32/devices) — the flasher (§6.2) and these docs reuse
+   the same assets.
+
+### Aspirational target matrix
+
+**Targets are PSRAM-only.** A player needs the jitter buffer + opus decoder in
+SPIRAM; without PSRAM the ~320–400 KB internal-RAM budget is a knife-fight against
+the Wi-Fi/lwIP stack (opus-only, trimmed buffers, init-ordering tricks) — not worth
+shipping. So non-PSRAM parts (ESP32-S2, ESP32-C3, ESP32-C6, classic WROOM) are
+**out of the supported matrix**; they may still boot as a bench/bring-up build, but
+they are not products.
+
+> **Legend.** *Console* is how the board flashes/provisions over USB (§6.4).
+> *queue* = the rate servo can actuate the I2S clock via APLL (§3.3).
+>
+> **The _Supported_ column is the one that matters: a box is checked only when
+> that board passes the §8 conformance bar on real hardware. Nothing is checked
+> yet.**
+
+| Board | Chip | PSRAM | Console (USB) | queue (APLL) | Reserved pins | Supported |
+|-------|------|-------|---------------|:------------:|---------------|:---------:|
+| ESP32-S3-DevKitC-1-N16R8 | ESP32-S3 | 8 MB | UART **+** native JTAG | no | 35–37 (octal PSRAM) | [ ] |
+| Waveshare ESP32-S3-Zero | ESP32-S3 | 2 MB | native USB-Serial-JTAG | no | — | [ ] |
+| ESP32-DevKitC (WROVER) | ESP32 (classic) | 8 MB | CP2102 UART → `ttyUSB` | **yes** | 16, 17 (PSRAM) | [ ] |
+| Generic / bring-your-own-pins (PSRAM) | S3 / WROVER | required | varies | varies | — | [ ] |
+
+Boards in hand: an **ESP32-WROVER** DevKitC (8 MB PSRAM, classic dual-core **with**
+APLL — the first PSRAM target on the bench). The **S3-Zero** (2 MB PSRAM) is the
+inbound small-form pick. Out of scope: non-PSRAM ESP32s (above); **Nordic** parts
+(BLE/Thread radios, no Wi-Fi); and the **RP2040 / Pico W** family (a different SDK,
+and the plain Pico W is RAM-tight at 264 KB — the **Pico 2 W**, 520 KB, would be the
+only sane non-Espressif port).
 
 ---
 
 ## 1. What it must do (recap)
 
-From `DUMB-CLIENT.md`, a conforming node:
+From [`PLAYER.md`](PLAYER.md), a conforming player:
 
-1. **Discovers** the group master — either a fixed master IP/port from config,
-   or by polling any node's `GET /api/cluster` over HTTP and resolving its
-   group's `master` → `sourcePort`/`streamPort`.
-2. **Subscribes** to the master's `SOURCE_PORT` (UDP): `HELLO` (prime-me),
-   re-`HELLO` keepalive every 5 s, `RESTART` on >2 s starvation, honor
-   `RECONFIG`.
-3. **Clock-syncs** to the master's `STREAM_PORT` (UDP) at 1 Hz: 4-timestamp
-   NTP exchange, median-of-best-RTT offset, against a local monotonic clock.
+1. **Announces over mDNS** (`role=playback` + control port + capabilities) and is
+   **idle until a master ATTACHes it**. It does **not** self-discover or poll any
+   HTTP API — the master finds it and drives it.
+2. On **ATTACH**, subscribes to the master's `SOURCE_PORT` (UDP): `HELLO` (prime-me),
+   re-`HELLO` keepalive every 5 s, `RESTART` on >2 s starvation, honor `RECONFIG`.
+3. **Clock-syncs** to the master's `STREAM_PORT` (UDP) at 1 Hz: 4-timestamp NTP
+   exchange, median-of-best-RTT offset, against a local monotonic clock.
 4. **Plays out**: jitter-buffer received frames and emit each at
    `pts − offset + bufferMs` on the local clock; silence on gaps.
 5. **Decodes opus** (the default group codec; PCM datagrams fragment on Wi-Fi —
-   §1 of DUMB-CLIENT.md). Opus is effectively mandatory on Wi-Fi hardware.
+   §1 of PLAYER.md). Opus is effectively mandatory on Wi-Fi hardware.
+6. Applies the master's **SETVOL / SETDELAY / SETEQ** and answers **STATUSREQ** with
+   STATUS (§6 of PLAYER.md) — so it stays controllable and visible in the UI.
 
-Everything below is *how* an S2-WROOM does that, plus membership, local volume,
-and a browser-based flasher/provisioner.
+Everything below is *how* a PSRAM ESP32 does that, plus local volume and a
+browser-based flasher/provisioner.
 
 ---
 
-## 1b. Membership — a "thin" node (no gossip on the MCU)
+## 1b. Membership — discovered, represented, assigned (no gossip, no HTTP on the MCU)
 
-A dumb node should be **visible and assignable**, not a hidden fixed-IP speaker.
-But gossip in ensemble *is* hashicorp/memberlist (SWIM, TCP push/pull, msgpack,
-LWW-doc replication) — too heavy to reimplement on a single-core S2, and
-unnecessary. Instead the MCU runs **mDNS + a tiny HTTP API**, and the full
-nodes represent it in the replicated doc:
+A player is **visible and assignable**, not a hidden fixed-IP speaker — yet it
+neither gossips nor runs any HTTP. ensemble's gossip is hashicorp/memberlist (SWIM,
+TCP push/pull, msgpack, LWW-doc replication) — too heavy for an MCU and unnecessary.
+Instead the MCU only **advertises over mDNS** and **answers the v2 control plane**;
+a master (the "room" role) discovers, represents, and drives it:
 
 ```
-   ESP node                         any full node
-   ────────                         ─────────────
-   mDNS advertise  ───────────────▶ discovers _ensemble._tcp TXT (thin=1)
-   _ensemble._tcp                   │
-   thin=1, id, ports                ▼  injects a thin node-record into the
-                                    │  gossip doc; refreshes lastSeen by
-   GET  /api/status   ◀────────────┘  HTTP-health-polling the ESP node
-   PATCH /api/node    ◀── volume / outputDelayMs / name   (UI, calibration)
-   POST /api/follow|/unfollow ◀── group assignment        (UI, takeover)
+   ESP player                       master (a "room")
+   ──────────                       ─────────────────
+   mDNS advertise  ───────────────▶ discovers _ensemble._tcp (role=playback, caps)
+   role=playback,id,control         │  injects a NON-GOSSIPING node record into the
+                                     │  cluster doc; liveness = mDNS freshness OR STATUS
+   ATTACH/SETVOL/SETDELAY  ◀─────────┤  drives it (assigned via `Following`); the UI's
+   STATUS  ─────────────────────────▶  volume / delay / assignment reach it over the wire
 ```
 
-What this buys, for ~5 HTTP endpoints + mDNS on the chip (no SWIM, no msgpack,
-no doc merge):
+What this buys, for **mDNS + one UDP control port** on the chip (no SWIM, no
+msgpack, no HTTP, no doc merge):
 
-- **Visible** in `/api/cluster` and the Nodes UI.
-- **Assignable** — `follow`/`unfollow` hit the node's own HTTP (direct or via
-  the proxy), so the UI's *Add node…* / *Leave* and play-from-node takeover work.
-- **Controllable & calibratable** — `outputDelayMs`, `volume`, `name` are
-  `PATCH`ed to its HTTP, so the UI sliders **and** the auto-calibration
-  ([`calibrate.md`](calibrate.md)) treat it exactly like a software node.
-- **Non-mastering** — no media library, never runs a source; a takeover/`play`
-  is refused (`ErrNotMaster`-equivalent). By default it's a solo group of one
-  that plays nothing until it follows someone.
+- **Visible** in `/api/cluster` and the Rooms UI — the master injects a node record
+  for the discovered player (`cluster.UpsertPlaybackNode`).
+- **Assignable** — the operator drops it into a group; it reuses the `Following`
+  field, and `DeriveGroups` attaches it to that master. It is **never a solo group
+  of its own** and never becomes a master.
+- **Controllable & calibratable** — `SETVOL`/`SETDELAY` (and auto-calibration,
+  [`calibrate.md`](calibrate.md)) reach it over the control plane, so the UI sliders
+  treat it exactly like a software player.
+- **Non-mastering** — no media library, never sources audio; invisible to codec
+  negotiation (the group's codec is chosen by its gossiping members only).
 
-Server-side support needed (small Go change, tracked separately): a `thin` node
-kind whose record is **HTTP-health-polled** by full nodes instead of
-gossip-tracked, and which ages out when no full node can reach it. The MCU's
-`following` lives in its own NVS/HTTP state, gossiped on its behalf, so group
-membership derives normally (§5 of the spec).
+This needs **no on-MCU HTTP** and **no special server work**: the existing master
+(`internal/playback` driver + `internal/cluster` ingest) already discovers, injects,
+assigns, and drives it. Liveness for the non-gossiping player is mDNS-browse freshness
+OR a recent STATUS, ageing out when both go stale (D60).
 
-> **Fully-dumb fallback** (`disc_mode=1`, fixed master IP, no HTTP/mDNS): the
-> non-cluster mode from `DUMB-CLIENT.md` — invisible, pinned to one master, not
-> calibratable through the UI. Use only on segmented networks or for bring-up.
+> **Bench/bring-up fallback** (`disc_mode=1`, fixed master IP, no mDNS): the
+> self-directed mode from [`PLAYER.md`](PLAYER.md) §11 — **invisible**, pinned to one
+> master, not controllable through the UI. Opt-in, for segmented networks or
+> bring-up only — never how a deployed player participates.
 
 ---
 
 ## 2. Hardware
 
 ### 2.1 Bill of materials (minimum)
-- **ESP32-S2-WROOM** module (single-core Xtensa LX7 @ 240 MHz, 320 KB SRAM,
-  ≥4 MB flash, **no PSRAM**, native USB-OTG, 2.4 GHz Wi-Fi).
+- A **PSRAM-equipped ESP32** module (ESP32-S3-WROOM-1 with ≥2 MB PSRAM, or a
+  classic ESP32-WROVER with 8 MB PSRAM), ≥4 MB flash, 2.4 GHz Wi-Fi. PSRAM is
+  required — it holds the jitter buffer + opus decoder (§3.1).
 - **I2S DAC** — PCM5102A (no I2C; hardware-config pins) *or* PCM5122 (I2C, has
   a hardware volume register). Line/headphone out, or feed a class-D amp
   (TPA3118 as on the companion board).
@@ -150,19 +244,22 @@ ESP-IDF (5.x). USB-CDC for console/provisioning.
   └────────────┘  └──────────────────┘
 ```
 
-### 3.1 Memory budget (320 KB SRAM, no PSRAM)
-- Jitter buffer: 200 ms PCM @ 48 k stereo s16 ≈ **38 KB** (ring of ~10×20 ms
-  frames + a little slack).
-- Opus decoder state + scratch ≈ **30 KB**.
-- Wi-Fi/lwIP ≈ **50 KB**; I2S DMA ≈ **8 KB**; tasks/stacks ≈ **20 KB**.
-- Comfortable headroom; PSRAM not required.
+### 3.1 Memory budget (PSRAM holds the big buffers)
+- Jitter buffer (compressed opus packets, or decoded PCM with room to spare) and
+  the opus decoder state + scratch live in **PSRAM** (SPIRAM), so internal SRAM is
+  never the constraint.
+- Internal SRAM then comfortably covers Wi-Fi/lwIP ≈ **50 KB**, I2S DMA ≈ **8 KB**,
+  and tasks/stacks ≈ **20 KB**.
+- This is exactly why targets are PSRAM-only: on a non-PSRAM part the jitter
+  buffer + decoder + Wi-Fi stack fight over ~320–400 KB and only fit opus-only with
+  trimmed buffers (the abandoned S2-class budget).
 
 ### 3.2 Opus decode
 Default group codec. Decode each 20 ms / 48 kHz / stereo Opus packet to PCM
 before the jitter buffer. libopus decode-only on a single 240 MHz LX7 is a small
 fraction of a core; it is the right choice because a 20 ms Opus packet (~320 B)
 is one unfragmented datagram on Wi-Fi. (PCM mode is accepted for wired/bench use
-but discouraged — see DUMB-CLIENT.md.)
+but discouraged — see [`PLAYER.md`](PLAYER.md).)
 
 ### 3.3 Clock & the rate servo — done in hardware
 The server's rate servo resamples in software; the ESP32 does it for free in
@@ -189,18 +286,18 @@ silence. Apply local volume (gain or DAC register) just before I2S.
 
 ## 4. Local volume — rotary encoder (and optional I2C)
 
-- **Quadrature decode** via the S2 **PCNT** peripheral (or A/B GPIO ISR) with
+- **Quadrature decode** via the ESP32 **PCNT** peripheral (or A/B GPIO ISR) with
   debounce; one detent = ±1 step. The push switch toggles **mute**.
 - **Apply** the volume as either: (a) a digital gain on the PCM (software,
   any DAC), or (b) the DAC's hardware volume register over **I2C** (PCM5122) —
   cleaner, no bit loss. I2C is optional; without it, software gain is used.
-- **Optional OLED** (I2C): show group name (from the discovery poll), volume %,
+- **Optional OLED** (I2C): show group name (from the ATTACH/STATUS state), volume %,
   sync state, and a buffer/health bar.
-- **Cluster-visible volume**: because a thin node serves its own HTTP API
-  (§1b), the knob and the UI/`PATCH /api/node {volume}` are the *same* value —
-  the firmware applies it locally and reports it in `GET /api/status`, so the UI
-  slider and the knob stay in sync. (In fully-dumb fallback mode it is
-  local-only.)
+- **Cluster-visible volume**: the knob and the master's `SETVOL` (driven from the
+  UI's per-room volume) are the *same* value — the firmware applies the knob locally
+  and reports it in `STATUS`, and obeys `SETVOL` over the control plane (last writer
+  wins), so the UI slider and the knob stay in sync. (In the bench fixed-master
+  fallback it is local-only.)
 
 ---
 
@@ -211,7 +308,7 @@ board boot into AP/provisioning mode.
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `wifi_ssid` / `wifi_pass` | str | Wi-Fi credentials (set via Improv) |
+| `wifi_ssid` / `wifi_pass` | str | Wi-Fi credentials (set via the flasher / JSON console) |
 | `disc_mode` | u8 | `0`=mDNS auto, `1`=fixed master |
 | `master_ip` / `source_port` / `stream_port` | str/u16 | fixed-master target |
 | `group` | str | optional: which group/node name to follow when several exist |
@@ -228,70 +325,116 @@ board boot into AP/provisioning mode.
 
 ## 6. Web flasher & provisioner
 
-A **static web page** (Chrome/Edge, Web Serial API) that flashes the firmware
-and writes all of §5 over the USB cable — no toolchain, no app install. Hosted on
-GitLab Pages (or any static host) and linked from releases.
+A **static web page** (Chrome/Edge, Web Serial API) that flashes the firmware and
+writes the per-device settings over USB — no toolchain, no app install. Built by
+`site/build.mjs` (`flash.html` + an [ESP Web Tools](https://esphome.github.io/esp-web-tools/)
+manifest) and hosted on GitLab Pages.
 
-### 6.1 Stack
-- **[ESP Web Tools](https://esphome.github.io/esp-web-tools/)** —
-  `<esp-web-install-button manifest="manifest.json">`. Flashes the merged
-  firmware via the serial bootloader over native USB. (First flash: the S2 may
-  need download mode — hold **BOOT**, tap **RESET**, release BOOT; the page
-  instructs this.)
-- **Improv-Serial** (built into ESP Web Tools; the S2 has **no BLE**, so use the
-  serial variant) — the firmware implements Improv-Serial, so the page shows a
-  **“Connect to Wi-Fi”** dialog right after flashing and writes `wifi_ssid/pass`.
-- **Custom settings panel** — for the non-Wi-Fi config (I2S/I2C pins, encoder,
-  DAC type, discovery mode, default volume) the page talks a tiny
-  **JSON-over-serial** protocol to the firmware's USB-CDC console.
+> **Status:** built but **unlinked** from the site nav and download page until a
+> board is conformant (§8). Re-link by restoring the `flash.html` entries in
+> `site/content.mjs` (`nav` + `download.links`).
 
-### 6.2 Config-over-serial protocol
-Line-delimited JSON on the USB-CDC console, framed `\n`:
+### 6.1 What the user is actually choosing — three buckets
+
+Most of §5 is **not** a per-device decision. Sorting the config into three buckets
+is what keeps the panel small and unconfusing:
+
+| Bucket | Examples | Who sets it |
+|--------|----------|-------------|
+| **Board facts** | I2S/encoder pins, PSRAM mode, APLL/`queue`, console type, reserved pins | The **board profile** — chosen by *picking the board*, never typed |
+| **Per-device identity / network** | `wifi_ssid`, `wifi_pass`, `name` | **The flasher** — the only bucket it must ask for |
+| **Cluster / runtime** | `codec`, `buffer_ms`, `vol`, delay, EQ | The **master**, over the control plane (ATTACH/SETVOL/SETDELAY/RECONFIG) — overwritten on attach, so the flasher must **not** ask |
+
+So the front door is just **pick board → Wi-Fi → (optional name)**: *board facts*
+fill in from the profile, *cluster/runtime* settings are absent entirely.
+
+### 6.2 Board picker — photo + wiring diagram, for visual confirmation
+
+The picker is the heart of the page. ESP Web Tools auto-detects the **chip
+family** over Web Serial; the page narrows the list to that chip, and for each
+supported board shows:
+
+- a **photo of the board** — so you can confirm "yes, that's the one in my hand"; and
+- its **wiring diagram** — the DAC + encoder hookup for that board's default pins.
+
+Both assets live per board under [`../esp32/devices/`](../esp32/devices)
+(`<board>.jpg` + `wiring-<board>.svg`) and are the same diagrams used elsewhere in
+these docs. Picking a board loads its default pin map; you flash, set Wi-Fi, hit
+**Test tone**, reboot — with the wiring picture right there to check against.
+
+### 6.3 "Bring your own pins" — the escape hatch
+
+For a breadboard build, a board we don't ship a profile for, or non-standard
+wiring, the picker offers **Generic / bring-your-own-pins**: choose the chip
+family, then set the I2S + encoder pins by hand (validated in firmware). No
+photo/diagram — this is the power-user path; the named-board path is the front
+door for everyone else.
+
+### 6.4 USB transport is a board fact, not a question
+
+Whether a board flashes over a **USB-UART bridge** (CH340/CH341/CP2102 → a
+`ttyUSB` port, may need a host driver, **survives a crash/reset** so logs keep
+streaming) or **native USB** (USB-Serial-JTAG / OTG-CDC → a driverless `ttyACM`
+port that **re-enumerates** on reset) is fixed by the board (see the matrix). The
+user never picks it; the page just shows the right conditional hint:
+
+- bridge boards → "you may need the CH340/CP210x driver";
+- native-USB boards → "the port disappears and comes back after reboot/flash — click reconnect."
+
+For debugging, the bridge boards (the WROVER DevKitC) are nicer (persistent port
+for panic backtraces); for end users, native-USB boards (S3-Zero) are nicer (one
+driverless cable). First flash may need download mode — hold **BOOT**, tap
+**RESET**, release BOOT; the installer instructs this.
+
+### 6.5 Config-over-serial protocol
+
+Line-delimited JSON on the console, framed `\n` — the same protocol whether the
+panel or a script drives it. Validation (pin ranges, conflicts) is in firmware;
+bad config is rejected, never half-applied.
 
 ```
 →  {"cmd":"get"}
 ←  {"ok":true,"cfg":{"i2s_bclk":36,"i2s_lrck":35,...,"disc_mode":0}}
-→  {"cmd":"set","cfg":{"i2s_dout":37,"dac":1,"i2c_sda":8,"i2c_scl":9,"disc_mode":1,"master_ip":"192.168.1.10"}}
+→  {"cmd":"set","cfg":{"wifi_ssid":"...","wifi_pass":"...","name":"kitchen"}}
 ←  {"ok":true}                          # validated + written to NVS
+→  {"cmd":"set","cfg":{"i2s_dout":37,"enc_a":4}}   # BYO-pins path only
+←  {"ok":true}
 →  {"cmd":"test","what":"tone"}         # 1 kHz on the configured I2S — confirm wiring
 ←  {"ok":true}
 →  {"cmd":"reboot"}
 ```
 
-The same protocol is exposed so anyone can script provisioning; the web page is
-just a friendly front-end over it. Validation (pin ranges, conflicts) happens in
-firmware; bad config is rejected, never half-applied.
+> The device-hosted **SoftAP / captive-portal** fallback from earlier drafts is
+> **dropped** — there is no on-device HTTP. A deployed, headless node is
+> re-provisioned over USB (or reset to defaults), never over the air.
 
-### 6.3 Fallback: device-hosted config
-If serial isn't available (already deployed, headless), the firmware also serves
-the same settings form over HTTP: on boot without Wi-Fi it raises a SoftAP
-`ensemble-setup-XXXX` with a captive portal; once on Wi-Fi, the page is reachable
-at the device's IP. Same JSON schema, same validation.
-
-### 6.4 Flashing flow (user's view)
-1. Plug the board in via USB-C, open the flasher page in Chrome/Edge.
-2. **Install** → ESP Web Tools flashes (with the BOOT-button hint if needed).
-3. **Connect to Wi-Fi** (Improv-Serial dialog).
-4. **Device settings** panel → pick DAC, set/confirm I2S + encoder pins,
-   discovery mode → **Save** → **Test tone** to verify audio → **Reboot**.
-5. The node joins the LAN, finds the group, and plays. Turn the knob for volume.
+### 6.6 Flashing flow (user's view)
+1. Plug the board in via USB-C; open the flasher in Chrome/Edge.
+2. **Pick your board** — confirm against the photo; the wiring diagram shows the hookup.
+3. **Install** → ESP Web Tools flashes the matching merged image (BOOT-button hint if needed).
+4. **Set Wi-Fi** (and an optional name).
+5. **Test tone** to verify the DAC wiring → **Reboot**.
+6. The node joins the LAN, the cluster discovers it, and it's assignable to any group.
 
 ---
 
 ## 7. Build, partitions, OTA
-- **ESP-IDF 5.x**, target `esp32s2`. `idf.py build` → merged `firmware.bin` for
-  the manifest. CI can produce the flasher artifacts alongside the Go release.
-- Partition table: factory + 2 OTA slots + NVS (+ optional `spiffs` for the
-  config page assets).
-- **OTA** (optional, v1.1): check a release URL on boot; the flasher page can
-  also push an update over serial.
+- **ESP-IDF 5.x**; pick a target with `./build.sh <board>` (or `idf.py
+  -DBOARD=<board> build`) per [Boards & build targets](#boards--build-targets).
+  Each board build merges to one `ensemble-fw-<board>.bin` for the flasher
+  manifest; CI produces them alongside the Go release.
+- Partition table: NVS + otadata + 2 OTA slots (`esp32/partitions.csv`). App-only
+  flash at `0x20000` preserves NVS (node id + Wi-Fi); a merged flash at `0x0`
+  wipes it.
+- **OTA** (optional, later): check a release URL on boot; the flasher can also
+  push an update over serial.
 
 ---
 
 ## 8. Conformance
 
-The firmware must pass the same behavioral bar as the reference client
-(`cmd/dumbclient`) and the e2e conformance leg (`scripts/e2e.sh` step 11b):
+The firmware must pass the same behavioral bar as the reference player
+(`cmd/player`) and the e2e conformance leg (`scripts/e2e.sh` step 11b):
 subscribe to a live group, play in sync (no dropouts, sample-aligned within the
 buffer), survive `RECONFIG`/master-change, and stay out of cluster membership.
 A bench check: run a software member and the ESP node in the same group on the
@@ -299,9 +442,8 @@ same track; both speakers should be phase-aligned (use [`calibrate.md`](calibrat
 to remove the fixed per-device offset).
 
 ## 9. Scope / limits (v1)
-Receive-only and non-mastering (no library, never sources); thin membership via
-mDNS + HTTP (no gossip on the MCU); opus on Wi-Fi; one group at a time; 2.4 GHz
-Wi-Fi. Needs the server-side `thin` node-kind (§1b) to be visible/assignable;
-without it, fall back to fixed-master fully-dumb mode. No TLS/auth (trusted LAN,
-matching the rest of ensemble). Mic/voice and BLE are out of scope (the S2 has
-no BLE).
+Receive-only and non-mastering (no library, never sources); membership via mDNS +
+the v2 control plane (no gossip, no HTTP on the MCU — a master discovers, represents,
+and drives it, §1b); opus on Wi-Fi; one group at a time; 2.4 GHz Wi-Fi. No TLS/auth
+(trusted LAN, matching the rest of ensemble). Mic/voice and BLE are out of scope (a
+player is receive-only over Wi-Fi).

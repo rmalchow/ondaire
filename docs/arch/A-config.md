@@ -171,8 +171,11 @@ Flag names (registered in `Load` on a private `flag.FlagSet`, spec §2):
 --join         string  default ""   (=> env ENSEMBLE_JOIN; dev-only seed list)
 ```
 
-`--output` is intentionally **not** a flag (spec §2 lists no output flag; §8.5
-calls it `ENSEMBLE_OUTPUT` env only). Config reads it from env exclusively.
+`--output` is **not** a config-package flag. The config package still reads
+`ENSEMBLE_OUTPUT` into `Config.Output` (env only, no flag here), but the live
+runtime knob is K-owned: `main` (K) parses `--output` alongside `--host`
+(flag > env > default; D2) and passes the resolved backend spec straight to the
+sink (E). `Config.Output` is the env-only mirror; `main` does not consult it.
 
 `--join` / `ENSEMBLE_JOIN` (dev only, D20) is a single comma-separated string
 of `host:gossipPort` entries; `Load` splits on `,`, trims whitespace, and drops

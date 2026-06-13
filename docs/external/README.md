@@ -11,7 +11,7 @@ so design decisions can cite a concrete prior art. Files were fetched on
 2026-06-09; upstream may have moved on — every file carries a provenance comment
 or a `## Sources` section with the original URL.
 
-For ensemble's *own* protocol, see [`../DUMB-CLIENT.md`](../DUMB-CLIENT.md) and
+For ensemble's *own* protocol, see [`../PLAYER.md`](../PLAYER.md) and
 the architecture docs under [`../arch/`](../arch/) (`F-clock.md`, `G-stream.md`,
 `D-audio.md`, `E-sink.md`).
 

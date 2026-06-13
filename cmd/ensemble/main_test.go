@@ -43,6 +43,44 @@ func TestParseOptionsOutputNull(t *testing.T) {
 	}
 }
 
+func TestParseOptionsOutputFlag(t *testing.T) {
+	for _, args := range [][]string{
+		{"--output", "null"},
+		{"--output=null"},
+	} {
+		opt, err := parseOptions(args, env(nil))
+		if err != nil {
+			t.Fatalf("args %v: %v", args, err)
+		}
+		if opt.Output != "null" {
+			t.Errorf("args %v: Output = %q, want null", args, opt.Output)
+		}
+		// --output must be stripped from the args forwarded to config.Load.
+		for _, a := range opt.cfgArgs {
+			if a == "--output" || a == "null" || a == "--output=null" {
+				t.Errorf("args %v: --output leaked into cfgArgs: %v", args, opt.cfgArgs)
+			}
+		}
+	}
+}
+
+// The flag overrides the ENSEMBLE_OUTPUT env fallback (flag > env > default).
+func TestParseOptionsOutputFlagBeatsEnv(t *testing.T) {
+	opt, err := parseOptions([]string{"--output", "alsa"}, env(map[string]string{"ENSEMBLE_OUTPUT": "null"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opt.Output != "alsa" {
+		t.Errorf("Output = %q, want alsa (flag beats env)", opt.Output)
+	}
+}
+
+func TestParseOptionsOutputMissingArg(t *testing.T) {
+	if _, err := parseOptions([]string{"--output"}, env(nil)); err == nil {
+		t.Fatal("expected error for --output without value")
+	}
+}
+
 func TestParseOptionsLogLevel(t *testing.T) {
 	opt, _ := parseOptions(nil, env(map[string]string{"ENSEMBLE_LOG": "debug"}))
 	if opt.LogLevel != "debug" {

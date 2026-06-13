@@ -1,0 +1,34 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "wire.c"
+        "config.c"
+        "clock.c"
+        "net_audio.c"
+        "player.c"
+        "opus_dec.c"
+        "i2s_out.c"
+        "servo.c"
+        "control.c"
+        "status.c"
+        "mdns_adv.c"
+        "encoder.c"
+        "volume.c"
+        "netif.c"
+        "console.c"
+    INCLUDE_DIRS "." "../boards"
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_timer
+        driver
+        esp_driver_i2s
+        esp_driver_pcnt
+        esp_driver_gpio
+        lwip
+        vfs
+        json
+        app_update
+)

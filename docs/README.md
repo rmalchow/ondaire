@@ -82,7 +82,7 @@ Configuration is via flags with env-var fallbacks:
 `ENSEMBLE_GOSSIP_PORT`, `--data` / `ENSEMBLE_DATA_DIR` (default `./data`),
 `--media` / `ENSEMBLE_MEDIA_DIR` (default `DATA_DIR/media`), `--name` (initial
 node name, only applied on first start).
-Additionally: `ENSEMBLE_OUTPUT` (env only) selects the PCM output backend by
+Additionally: `--output` / `ENSEMBLE_OUTPUT` selects the PCM output backend by
 name (§8.5; `auto` default | `alsa` where loadable | `exec` | `null` |
 `file:<path>`), and `--join` / `ENSEMBLE_JOIN` (dev only) seeds gossip with a
 comma-separated `host:gossipPort` list for multicast-less environments (tests).
@@ -169,19 +169,28 @@ state owned by other nodes); node records and playback stay unpersisted
 
 ## 5. Groups
 
-Groups are **derived, not stored**. The only stored fact is each node's own
-`following` field:
+Groups are **derived, not stored**. The only stored fact is each node's
+`following` field — which is the **player's** target (the node and its player are
+1:1, so the field rides the node record), not a property of the node-as-master:
 
-- `following == ""` → the node is **master of its own group**.
-- `following == M` → the node is a follower of node `M`.
+- `following == M` (a live master) → the node's **player** joins master `M`'s group.
+- `following == self` → the player plays its **own** group.
+- `following == ""` (Zero) → the **player is not following any master** — it is
+  **idle**, in no group. (A dead, unknown, or playback-node target is idle too.)
+
+Mastering a group is **intrinsic, not a function of `following`**: every alive
+gossiping node always masters its own group (1:1, group id == node id), even with
+no players attached. `following` only places the *player*; a playback-only node
+never masters a group.
 
 Derivation, recomputed by every node from the replicated state + liveness:
 
-- For each alive node `M` with `following == ""`: group
-  `members = {M} ∪ {n alive : n.following == M}`, `master = M`.
-- A node whose `following` points at a dead node, an unknown node, or a node
-  that is itself following someone, behaves as solo — and additionally
-  **resets its own `following` to ""** after a 10s grace period (self-heal).
+- Every alive gossiping (non-playback) node `M` masters group `M`: `master = M`,
+  `members = {n alive : n.following == M}` (so `M` is a member of its own group only
+  when `M.following == M`). A master with no players is a valid, assignable, idle zone.
+- A node whose `following` points at a dead node, an unknown node, a playback node,
+  or a node that is itself following someone → its **player is idle**, and it
+  additionally **resets its own `following` to ""** after a 10s grace period (self-heal).
 
 **Rejoin on return** (D45). Each node persists its `following` to `node.json` and
 re-seeds its own record with it at boot, gossiping it from the start exactly as if
@@ -189,8 +198,8 @@ it had been set live. So a node that temporarily disappears (reboot, crash, brie
 network drop) **rejoins its previous group automatically** when it comes back: if
 its old master is still alive and a master, the same derivation re-forms the group;
 if the old master is absent on return, the dangling follow is just a stale `following`,
-so the 10s self-heal grace fires and the node settles as its own solo group (and
-clears the persisted `following` back to `""`). No special rejoin path — the existing
+so the 10s self-heal grace fires, the player goes idle, and the persisted `following`
+clears back to `""` (the node still masters its own group as before). No special rejoin path — the existing
 derivation + self-heal do all of it. The grace is measured from when the node first
 *observes* the dangling follow, not from process start, so slow gossip convergence
 never insta-clears a follow that is merely still propagating.
@@ -398,7 +407,7 @@ added within v1 without breaking older receivers). A **future incompatible
 revision changes the magic byte**, not the header layout — so a single leading-
 byte check is both the framing sanity check and the version gate. This is what
 lets a *protocol-minimal* receiver (e.g. ESP32-S3 firmware, see
-`docs/DUMB-CLIENT.md`) interoperate without tracking the cluster: it implements
+`docs/PLAYER.md`) interoperate without tracking the cluster: it implements
 only the packet types it needs and drops the rest.
 
 **Settings are editable per group in the UI and persist with the master** (D47).

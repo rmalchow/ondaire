@@ -98,7 +98,7 @@ func parseRoles(s string) (master, playback bool) {
 	return master, playback
 }
 
-// parseCaps reads the playback capability TXT keys (DUMB-CLIENT §5). Missing keys
+// parseCaps reads the playback capability TXT keys (PLAYER §5). Missing keys
 // yield zero values (a conservative "can't do it").
 func parseCaps(txt map[string]string) Caps {
 	c := Caps{

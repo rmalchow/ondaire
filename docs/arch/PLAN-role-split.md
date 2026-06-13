@@ -1,7 +1,7 @@
 # Implementation plan — master/playback role split (D49–D57)
 
 Turns [DECISIONS.md](DECISIONS.md) D49–D57 and the revised
-[DUMB-CLIENT.md](../DUMB-CLIENT.md) (v2, master-driven playback) into a coding plan.
+[PLAYER.md](../PLAYER.md) (v2, master-driven playback) into a coding plan.
 **Pre-release latitude (D49 preamble): we may renumber wire types and reassign ports
 freely — no external client to keep compatible.**
 
@@ -32,10 +32,10 @@ structural change**. The new work is three seams:
 | Caps assembly (probe) | wired by K (main) per D3 |
 | REST/WS, `/api/cluster`, `/api/node` PATCH (volume/delay/device), follow | `internal/api/*` |
 | Config (node.json, env), port probing | `internal/config/*`, `internal/netx` |
-| Reference receiver | `cmd/dumbclient/main.go` |
+| Reference receiver | `cmd/player/main.go` |
 
 Today there are **two** playback paths: the full member (group engine → `internal/sink`
-+ `internal/stream` client, with servo/resampler/opus) and the standalone dumbclient
++ `internal/stream` client, with servo/resampler/opus) and the standalone player
 (PCM-only, no servo). D49/D52 collapse these to **one** playback component with two
 front-ends (local in-process, remote over the wire).
 
@@ -70,7 +70,7 @@ hasn't ruled on them and they shape Phases 2–3.
 - `internal/stream/wire.go`: add control types `0x30 ATTACH`, `0x31 DETACH`,
   `0x32 SETVOL`, `0x33 SETDELAY`, `0x34 SETCAP`, `0x40 STATUS`; add typed payload
   encode/decode (`AttachPayload`, `StatusPayload`, the 2-byte setters) per
-  DUMB-CLIENT §6; update the package comment to v2. **Unit tests** for round-trips.
+  PLAYER §6; update the package comment to v2. **Unit tests** for round-trips.
 - `internal/config`: a `Role` set (`master`,`playback`; default **both**), env
   `ENSEMBLE_ROLE`. Reserve/probe a `CONTROL_PORT` (default 9300) via `internal/netx`
   when the playback role is on. Role is runtime config, **not** a replicated field;
@@ -97,7 +97,7 @@ hasn't ruled on them and they shape Phases 2–3.
 
 - `internal/discovery`: `Config` gains `Role`, `ControlPort`, and a caps struct;
   `txtRecords` emits `role`, `control`, `codecs`, `rate`, `hwvol`, `delayms`, `queue`,
-  `input` (DUMB-CLIENT §5). A playback-only node advertises **no `gossip` port**.
+  `input` (PLAYER §5). A playback-only node advertises **no `gossip` port**.
 - `Peer`/`parse.go`: parse `role`, `control`, and caps; keep gossip/http/stream/source
   for masters. Reuse the D3 capability probe to fill the playback caps.
 - `internal/cluster` consume path: on a `Role=playback` peer, **do not join gossip** —
@@ -170,13 +170,13 @@ translate calibration confidence float → good/marginal/failed (`Calibrate.svel
 demote per-member volume sliders under the group slider (`GroupCard.svelte`).
 
 ### Phase 7 — reference client, tests, arch docs
-- `cmd/dumbclient`: add the **driven** mode (mDNS announce + CONTROL_PORT listener +
+- `cmd/player`: add the **driven** mode (mDNS announce + CONTROL_PORT listener +
   ATTACH-driven subscribe); keep `--source/--clock` fixed and `--node` self-directed as
   the §11 fallback. Stays stdlib-only.
 - e2e (K): master + Go playback-only node — discover, assign, sync, play to null sink;
   assert drift bounded, cold-start < 500 ms, volume/delay applied over the wire, STATUS
   flowing.
-- Update the affected arch docs (B/C/E/F/G/H/I/J) to the new model; DUMB-CLIENT.md is
+- Update the affected arch docs (B/C/E/F/G/H/I/J) to the new model; PLAYER.md is
   already revised.
 
 ## Sequencing

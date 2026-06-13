@@ -30,8 +30,8 @@ curl -fsSL https://ensemble.rand0m.me/get.sh | sudo bash
 
 It runs as root and:
 
-1. **Detects** your architecture (`amd64`, `arm64`, or `armv6` — the armv6 build
-   also runs on a 32-bit armv7 Pi) and downloads that `ensemble` build.
+1. **Detects** your architecture (`amd64` or `arm64`) and downloads that `ensemble`
+   build. (32-bit ARM is no longer supported — use Raspberry Pi OS 64-bit.)
 2. Installs it to **`/usr/local/lib/ensemble/ensemble`**, symlinked into
    `/usr/local/bin` so `ensemble` is on your `PATH`.
 3. Asks **"Install Spotify Connect support?"** — if yes, downloads the latest

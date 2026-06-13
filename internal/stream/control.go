@@ -6,7 +6,7 @@ import (
 	"net/netip"
 )
 
-// control.go is the v2 control-plane payload codec (DUMB-CLIENT.md §6, D49–D58):
+// control.go is the v2 control-plane payload codec (PLAYER.md §6, D49–D58):
 // the master→playback commands carried on the playback node's CONTROL_PORT and the
 // STATUS telemetry the playback node sends back. Each payload follows the common
 // 24-byte Header (wire.go); on control packets the Header's Gen/Seq/PTS are unused
@@ -14,7 +14,7 @@ import (
 // big-endian, matching the header. IPv4-only in v2 (LAN multiroom); IPv6 would be a
 // new ATTACH type, not a layout change.
 
-// Codec is the compact on-wire codec selector for ATTACH (DUMB-CLIENT §6.1),
+// Codec is the compact on-wire codec selector for ATTACH (PLAYER §6.1),
 // mirroring contracts.GroupSettings.Codec ("pcm" | "opus").
 type Codec uint8
 
@@ -52,7 +52,7 @@ const (
 // errBadControl is returned when a control payload is too short / malformed.
 var errBadControl = errors.New("stream: malformed control payload")
 
-// AttachPayload tells a playback node which stream to join (DUMB-CLIENT §6.1).
+// AttachPayload tells a playback node which stream to join (PLAYER §6.1).
 // Source/Clock are the master's SOURCE_PORT/STREAM_PORT endpoints (usually the same
 // IP). Both MUST be IPv4 (v2).
 type AttachPayload struct {
@@ -92,7 +92,7 @@ func DecodeAttach(p []byte) (AttachPayload, error) {
 	}, nil
 }
 
-// SetVolPayload sets software/hardware volume + mute (DUMB-CLIENT §6.2).
+// SetVolPayload sets software/hardware volume + mute (PLAYER §6.2).
 type SetVolPayload struct {
 	VolumePct uint8 // 0..100
 	Mute      bool
@@ -119,7 +119,7 @@ func DecodeSetVol(p []byte) (SetVolPayload, error) {
 }
 
 // SetDelayPayload sets the output-delay calibration in milliseconds, signed
-// (positive = device chain plays late → emit earlier; DUMB-CLIENT §6.2).
+// (positive = device chain plays late → emit earlier; PLAYER §6.2).
 type SetDelayPayload struct {
 	DelayMs int16
 }
@@ -137,7 +137,7 @@ func DecodeSetDelay(p []byte) (SetDelayPayload, error) {
 	return SetDelayPayload{DelayMs: int16(binary.BigEndian.Uint16(p[0:2]))}, nil
 }
 
-// SetCapPayload toggles a runtime capability (DUMB-CLIENT §6.2). CapID enumerates
+// SetCapPayload toggles a runtime capability (PLAYER §6.2). CapID enumerates
 // the toggleable capabilities; unknown ids MUST be ignored by the receiver.
 type SetCapPayload struct {
 	CapID uint8
@@ -188,7 +188,7 @@ const (
 	StatusFlagCalibrated = 0x04 // servo setpoint captured: DeviceDelayNs−PhaseErrNs is a stable constant (D65)
 )
 
-// StatusPayload is the playback node's telemetry to its master (DUMB-CLIENT §6.3),
+// StatusPayload is the playback node's telemetry to its master (PLAYER §6.3),
 // modeled on SlimProto STAT: enough for the master to spot a starving/drifting room
 // and feed the per-room health UI. NodeID is the 16-byte node id so the master can
 // correlate to the mDNS advert.

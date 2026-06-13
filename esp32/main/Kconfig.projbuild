@@ -1,0 +1,24 @@
+menu "ensemble playback node"
+
+    choice ENSEMBLE_BOARD
+        prompt "Target board"
+        default ENSEMBLE_BOARD_ESP32S3
+        help
+            Selects the default pin map and capabilities in boards/. Every value
+            is overridable at provisioning time over USB and stored in NVS, so one
+            image still fits many wirings — this only sets the power-on defaults.
+
+        config ENSEMBLE_BOARD_ESP32S3
+            bool "ESP32-S3-WROOM-1 / DevKitC-1"
+        config ENSEMBLE_BOARD_GENERIC
+            bool "Generic (compile-time pins, no board profile)"
+    endchoice
+
+    config ENSEMBLE_CONTROL_PORT
+        int "Default CONTROL_PORT (master -> playback commands)"
+        default 9300
+        help
+            UDP port advertised over mDNS where the master sends ATTACH / DETACH /
+            SETVOL etc. (PLAYER §4). Overridable in NVS.
+
+endmenu

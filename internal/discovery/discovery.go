@@ -41,7 +41,7 @@ var (
 type zeroconfServiceEntry = zeroconf.ServiceEntry
 
 // Peer is one discovered ensemble node, as advertised in its mDNS TXT record
-// (§3 / DUMB-CLIENT §5) plus the address the responder was reached on. It is the
+// (§3 / PLAYER §5) plus the address the responder was reached on. It is the
 // unit C consumes: a Master peer is gossip-joined; a playback-only peer (D50) is
 // represented as a non-gossiping member instead.
 //
@@ -65,10 +65,10 @@ type Peer struct {
 
 	// Playback fields (zero/empty when !Playback).
 	ControlPort int  // from TXT "control=" (master→playback commands, D58)
-	Caps        Caps // advertised capabilities (DUMB-CLIENT §5)
+	Caps        Caps // advertised capabilities (PLAYER §5)
 }
 
-// Caps are a playback node's advertised capabilities (DUMB-CLIENT §5). They inform
+// Caps are a playback node's advertised capabilities (PLAYER §5). They inform
 // the master/operator (e.g. a UI warning when assigning a pcm-only speaker to an
 // opus group); they never gate membership or fan-out (D51).
 type Caps struct {
@@ -209,7 +209,7 @@ func (d *Discovery) Close() error {
 	return nil
 }
 
-// txtRecords builds the advertised TXT key=value strings (§3 / DUMB-CLIENT §5).
+// txtRecords builds the advertised TXT key=value strings (§3 / PLAYER §5).
 // A master advertises its four ports; a (non-master) playback node advertises its
 // control port + capabilities. The `role` key is always present.
 func txtRecords(cfg Config) []string {

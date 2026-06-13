@@ -10,7 +10,7 @@ import (
 	"ensemble/internal/stream"
 )
 
-// statusInterval is the STATUS heartbeat cadence (DUMB-CLIENT §6.3).
+// statusInterval is the STATUS heartbeat cadence (PLAYER §6.3).
 const statusInterval = 1 * time.Second
 
 // The real CONTROL_PORT socket K injects must satisfy controlConn.
@@ -24,7 +24,7 @@ type controlConn interface {
 	SetReadDeadline(t time.Time) error
 }
 
-// Listener is the playback-side control plane (D58, DUMB-CLIENT §6): it reads
+// Listener is the playback-side control plane (D58, PLAYER §6): it reads
 // master→playback commands on the CONTROL_PORT, drives a Player, and emits STATUS
 // back to the master ~1 Hz. It is the front-end a non-gossiping playback node uses
 // instead of the group engine; both drive the identical Player (D61).
@@ -137,7 +137,7 @@ func (l *Listener) readLoop() {
 }
 
 // handle dispatches one decoded control packet. Pure w.r.t. sockets (unit-tested
-// directly). Unknown types are ignored (forward-compat, DUMB-CLIENT §2).
+// directly). Unknown types are ignored (forward-compat, PLAYER §2).
 func (l *Listener) handle(typ byte, payload []byte, from netip.AddrPort) {
 	switch typ {
 	case stream.TypeAttach:
@@ -199,7 +199,7 @@ func (l *Listener) onAttach(a stream.AttachPayload) {
 	if !changed {
 		return // soft-state heartbeat for an unchanged attachment: no-op
 	}
-	// ATTACH carries no gen (DUMB-CLIENT §6.1): subscribe at gen 0 and let the
+	// ATTACH carries no gen (PLAYER §6.1): subscribe at gen 0 and let the
 	// first audio frame / RECONFIG re-anchor upward, exactly as the group engine
 	// does on a master change (watch.go).
 	l.player.Attach(Attach{

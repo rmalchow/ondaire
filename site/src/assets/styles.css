@@ -526,6 +526,27 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
 .qs-flag { font-family: var(--mono); font-size: 13.5px; color: var(--accent); white-space: nowrap; }
 .qs-params span { color: var(--muted); font-size: 15px; }
 .qs-params em { color: var(--faint); font-style: normal; font-family: var(--mono); font-size: 12.5px; }
+
+/* config-flags reference table: param · env var · default · description */
+.qs-table { width: 100%; border-collapse: collapse; margin: 0 0 18px; font-size: 14px; }
+.qs-table th {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 0 18px 9px 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.qs-table td { padding: 9px 18px 9px 0; border-bottom: 1px solid var(--line); vertical-align: baseline; color: var(--muted); }
+.qs-table tr:last-child td { border-bottom: 0; }
+.qs-table td:nth-child(4) { width: 100%; }
+.qs-env, .qs-def { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+.qs-env { color: var(--accent-2); }
+.qs-def { color: var(--faint); }
 .qs-mlabel {
   font-family: var(--mono);
   font-size: 11px;
@@ -642,6 +663,16 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
   .qs-methods { grid-template-columns: 1fr; gap: 4px 0; }
   .qs-params span { margin-bottom: 8px; }
   .qs-mlabel { padding-top: 10px; }
+
+  /* Stack the config table into per-row cards — 4 columns don't fit a phone. */
+  .qs-table thead { display: none; }
+  .qs-table, .qs-table tbody, .qs-table tr, .qs-table td { display: block; width: auto; }
+  .qs-table tr { padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .qs-table tr:last-child { border-bottom: 0; }
+  .qs-table td { padding: 0 0 4px; border: 0; }
+  .qs-table td:nth-child(2)::before { content: "env  "; color: var(--faint); font-family: var(--mono); font-size: 11px; }
+  .qs-table td:nth-child(3)::before { content: "default  "; color: var(--faint); font-family: var(--mono); font-size: 11px; }
+  .qs-table td:nth-child(4) { padding-top: 4px; }
 }
 
 /* ── lightbox / screenshot carousel ─────────────────────────────────── */
@@ -812,6 +843,9 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
   border-radius: 0 8px 8px 0;
 }
 .dl-note code { color: var(--ink); }
+/* plain explanatory paragraph (e.g. the Docker "what it does" copy) */
+.dl-body { margin: 4px 0 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.dl-body code { font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
 /* binary tile footer: filename + SHA-256 on the left, the Download CTA on the right */
 .dl-card-foot {
   display: flex;
@@ -853,6 +887,9 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
   border-radius: 10px;
 }
 .dl-cmd code { font-family: var(--mono); font-size: 13px; color: var(--ink); word-break: break-all; }
+/* multiline run command: preserve the backslash-continued layout, top-align the copy button */
+.dl-cmd-multi { align-items: flex-start; }
+.dl-cmd-multi code { white-space: pre; word-break: normal; overflow-x: auto; line-height: 1.6; }
 .dl-copy {
   flex: none;
   border: 1px solid var(--line-2);
@@ -889,6 +926,99 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
 @media (max-width: 520px) {
   .dl-link-row { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
+
+/* ── ESP32 player teaser (download page) — becomes the flasher entry point ── */
+.dl-teaser {
+  padding: 22px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 16px;
+  background:
+    radial-gradient(130% 150% at 0% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
+    var(--panel);
+  box-shadow: 0 0 44px -26px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.dl-teaser-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.dl-teaser-head h2 { margin: 0; font-size: 19px; }
+.dl-soon {
+  flex: none;
+  font: 600 11px/1 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent-2) 40%, transparent);
+  background: color-mix(in srgb, var(--accent-2) 12%, transparent);
+}
+.dl-teaser-body { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
+
+/* installer card (download page) — same box as a download card, with a copy cmd */
+.dl-doc {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+  font-size: 13.5px;
+  text-decoration: none;
+}
+.dl-doc:hover { color: color-mix(in srgb, var(--accent) 80%, white); }
+.dl-doc .arrow { transition: transform 0.15s ease; }
+.dl-doc:hover .arrow { transform: translateX(3px); }
+
+/* common config flags — its own block UNDER the download cards */
+.dl-flags { margin-top: 44px; padding-top: 28px; border-top: 1px solid var(--line); }
+.dl-flags .sec-head { margin-bottom: 22px; }
+
+/* home Quickstart: a glowing CTA box under the three steps — motivating text on
+   the left, the Download button right-aligned. */
+.qs-cta {
+  margin-top: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 26px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: 16px;
+  background:
+    radial-gradient(140% 160% at 0% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 62%),
+    var(--panel);
+  box-shadow: 0 0 60px -22px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.qs-cta-text { margin: 0; color: var(--ink); font-size: 16px; line-height: 1.5; max-width: 60ch; }
+.qs-cta-btn { flex: none; }
+@media (max-width: 600px) {
+  .qs-cta { flex-direction: column; align-items: flex-start; gap: 16px; }
+}
+/* the measured-coherence sub-header inside the Under-The-Hood section */
+.tech-proof-head { margin-top: 72px; }
+
+/* installer walkthrough: an expandable, commented get.sh inside the installer card */
+.dl-script { margin-top: 4px; }
+.dl-script summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 13.5px;
+}
+.dl-script summary::-webkit-details-marker { display: none; }
+.dl-script summary::before { content: "▸"; display: inline-block; transition: transform 0.15s ease; }
+.dl-script[open] summary::before { transform: rotate(90deg); }
+.dl-script summary:hover { color: color-mix(in srgb, var(--accent) 80%, white); }
+.dl-code {
+  margin: 12px 0 10px;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.dl-code code { font-family: var(--mono); color: var(--ink); white-space: pre; }
 
 /* ── praise / testimonials (fictional) ───────────────────────────────────── */
 .quote-grid {

@@ -82,9 +82,9 @@ developer docs:
 
 - **[`docs/esp32.md`](../../esp32.md)** — the ESP32-S2 node design spec (firmware,
   hardware, the thin-node membership model, the web flasher).
-- **[`docs/DUMB-CLIENT.md`](../../DUMB-CLIENT.md)** — the audio wire protocol any
+- **[`docs/PLAYER.md`](../../PLAYER.md)** — the audio wire protocol any
   thin client implements, with a reference client in
-  [`cmd/dumbclient`](../../../cmd/dumbclient).
+  [`cmd/player`](../../../cmd/player).
 
 ---
 

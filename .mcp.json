@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "od": {
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "exec",
+        "-i",
+        "-e",
+        "OD_DAEMON_URL=http://127.0.0.1:7456",
+        "open-design",
+        "node",
+        "apps/daemon/dist/cli.js",
+        "mcp"
+      ]
+    }
+  }
+}

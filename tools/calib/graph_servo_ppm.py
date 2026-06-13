@@ -87,13 +87,20 @@ def main():
     ap.add_argument("--pi-high", required=True)
     ap.add_argument("--out", default="results/servo_ppm")
     ap.add_argument("--label", default="commanded ppm vs measured inter-speaker offset & rate, 10 min")
+    ap.add_argument("--skip-min", type=float, default=1.0,
+                    help="drop the first N minutes (clock/thermal settling) before analysis")
     args = ap.parse_args()
 
     t, ppm_lo, ppm_hi = parse_stats(args.stats_log, args.pi_low, args.pi_high)
+    # Cut the settling transient: clocks lock + buffers fill in the first ~minute.
+    sk = t >= args.skip_min
+    t, ppm_lo, ppm_hi = t[sk], ppm_lo[sk], ppm_hi[sk]
     ppm_diff = ppm_hi - ppm_lo
 
     off_raw, tm_raw = tones.analyze(tones.read_wav_stereo(args.wav))
     off, tm = despike(off_raw, tm_raw)
+    sk2 = tm >= args.skip_min
+    off, tm = off[sk2], tm[sk2]
     # robust offset(t) on a 20 s grid, then its rate (µs/s = ppm)
     nb = max(6, int((tm.max() - tm.min()) * 60 / 20))
     tb, ob = bin_median(tm, off, nb)

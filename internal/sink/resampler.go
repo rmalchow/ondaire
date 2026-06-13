@@ -6,10 +6,17 @@ import (
 	"ensemble/internal/stream"
 )
 
-// resampler converts a stream of input PCM frames into output frames at a
-// fractional playback rate (≈ 1.0, nudged by the servo's ppm correction). It is
-// a 4-tap Catmull-Rom interpolator with a fractional read cursor that persists
-// across frame boundaries, run independently per channel (interleaved L/R).
+// resampler bridges the master-clock input stream to the local DAC's rate. Each
+// call consumes EXACTLY one input frame (FrameSamples of master-paced content) and
+// produces a caller-chosen number of output samples `outLen`, interpolated with a
+// 4-tap Catmull-Rom kernel run independently per channel (interleaved L/R).
+//
+// This is the rate actuator (PLAN-playout-rate-lock): the servo holds the output
+// device queue at its setpoint by choosing outLen. outLen > FrameSamples upsamples
+// (stretches one frame of content over more DAC samples → feeds a faster DAC);
+// outLen < FrameSamples downsamples. Because input consumption is fixed at one
+// frame, the carry never drifts and there is no whole-frame discharge — the rate
+// correction is the output COUNT, realized at single-sample granularity.
 //
 // Catmull-Rom for fractional position t∈[0,1) between samples p1 and p2, with
 // neighbours p0 (before) and p3 (after):
@@ -19,72 +26,60 @@ import (
 //	             + (2*p0 - 5*p1 + 4*p2 - p3)*t^2
 //	             + (-p0 + 3*p1 - 3*p2 + p3)*t^3 )
 //
-// Output sample k reads input position cursor += step, step = 1/rate,
-// rate = 1 + ppm/1e6.
+// Output sample k reads input position leadPad + k*step, step = FrameSamples/outLen.
 //
-// Bookkeeping (§3.4): the resampler keeps a small carry of the most recent input
-// samples plus a fractional cursor. Each call it appends the new input frame to
-// the carry, emits exactly FrameSamples interpolated outputs, then drops the
-// whole input samples it consumed and keeps the leftover fraction as the new
-// cursor — so the cursor stays bounded in [0,1) and the per-frame ±ppm
-// correction is realized as the occasional extra/fewer input sample consumed at
-// a boundary, glitch-free because the carry samples are always contiguous reals.
+// Bookkeeping: the carry holds [leadPad history][previous frame]; each call appends
+// the new frame (so the previous frame's tail has real p2/p3 lookahead), emits
+// outLen interpolated samples of the PREVIOUS frame, then drops that whole frame —
+// one frame (20 ms) of latency, well within bufferMs. The seam always has a real
+// 4-tap window, so no per-frame clamp (the old 50 Hz buzz).
 type resampler struct {
-	// carry holds leftover input samples per channel from prior frames, ahead of
-	// the current frame's samples. We keep at least leadPad leading samples so the
-	// first interpolations of each frame have valid p0..p3 neighbours.
+	// carry holds [leadPad history][one held frame] of input samples per channel.
+	// We keep leadPad leading samples so p0 (pos-1) is valid at the seam.
 	carry  [stream.Channels][]int32
-	cursor float64 // fractional read position within carry (samples/ch)
-	rate   float64 // current playback rate (1 + ppm/1e6)
 	primed bool
 
 	out  []byte
 	work [stream.Channels][]int32 // reusable per-channel input scratch
 
-	// Grounded resample accounting (per-channel sample units, = time): every
-	// sample the rate correction actually adds to or removes from the stream is
-	// counted here, at the two sites where it really happens — the carry-overflow
-	// 2→1 merge (rate>1) and the underflow 2→3 interpolation (rate<1), ONE sample
-	// at a time. NOT the commanded ppm: this is what reached the DAC. At tens of
-	// ppm this ticks ~1/sec, so the running total tracks the commanded correction
-	// (≈ ∫ppm·dt) rather than a rare whole-frame flush. Cumulative for the
-	// resampler's life (survives reset/gen-change) so the API exposes a total.
-	injected uint64 // samples interpolated into the output (sustained rate < 1)
-	dropped  uint64 // samples merged out of the output (sustained rate > 1)
+	// Realized rate-match accounting (per-channel sample units, = time): the net
+	// samples the rate correction added to (injected) or removed from (dropped) the
+	// output stream, = Σ(outLen − FrameSamples). NOT the commanded ppm: this is what
+	// reached the DAC. Cumulative for the resampler's life (survives reset) so the
+	// API exposes a running total; once the servo locks it tracks the DAC offset.
+	injected uint64 // samples added to the output (outLen > FrameSamples)
+	dropped  uint64 // samples removed from the output (outLen < FrameSamples)
 }
 
-// leadPad is how many leading carry samples we always keep so p0 (cursor-1) and
-// the Catmull-Rom window are valid at the seam.
+// leadPad is how many leading carry samples we always keep so p0 (pos-1) and the
+// Catmull-Rom window are valid at the seam.
 const leadPad = 3
 
-// carryTarget is the lookahead the resampler holds (one frame past leadPad); the
-// per-frame trim drives the carry length toward it. maxTrim caps how many input
-// samples the trim sheds/adds in one frame (spread as a step nudge) so a transient
-// recovers over a few frames instead of one audible jump.
-const (
-	carryTarget = leadPad + stream.FrameSamples
-	maxTrim     = 8 // ≤ 8/960 ≈ 0.8% one-frame rate ramp
-)
+// maxOutDelta bounds |outLen − FrameSamples| per frame: ±16 samples ≈ ±1.6%, far
+// beyond any real crystal, but caps a transient/garbage command to a gentle ramp.
+const maxOutDelta = 16
 
 func newResampler() *resampler {
-	r := &resampler{rate: 1, out: make([]byte, stream.FrameBytes)}
+	r := &resampler{out: make([]byte, (stream.FrameSamples+maxOutDelta)*stream.Channels*stream.BytesPerSmpl)}
 	for ch := 0; ch < stream.Channels; ch++ {
-		r.carry[ch] = make([]int32, 0, stream.FrameSamples+leadPad+4)
+		r.carry[ch] = make([]int32, 0, 2*stream.FrameSamples+leadPad+4)
 		r.work[ch] = make([]int32, stream.FrameSamples)
 	}
 	return r
 }
 
-// setRate sets the resampling ratio from a ppm correction.
-func (r *resampler) setRate(ppm float64) {
-	r.rate = 1 + ppm/1e6
-}
-
-// process consumes input frame `in` (exactly FrameBytes) and returns exactly
-// one output frame (FrameBytes). The persistent fractional cursor and carry make
-// the seam continuous and the 1-in/1-out cadence exact.
-func (r *resampler) process(in []byte) []byte {
+// process consumes input frame `in` (exactly FrameBytes) and returns `outLen`
+// output samples per channel (outLen clamped to FrameSamples ± maxOutDelta). The
+// number of input samples consumed is always exactly FrameSamples — outLen sets
+// the resample ratio (FrameSamples/outLen), not the input consumption.
+func (r *resampler) process(in []byte, outLen int) []byte {
 	const n = stream.FrameSamples
+	if outLen < n-maxOutDelta {
+		outLen = n - maxOutDelta
+	} else if outLen > n+maxOutDelta {
+		outLen = n + maxOutDelta
+	}
+	outBytes := outLen * stream.Channels * stream.BytesPerSmpl
 
 	// Decode the input frame into per-channel scratch.
 	for i := 0; i < n; i++ {
@@ -96,13 +91,10 @@ func (r *resampler) process(in []byte) []byte {
 	}
 
 	if !r.primed {
-		// First frame: there is no lookahead yet, so we cannot interpolate its
-		// tail (p2/p3 would need the *next* frame and clamping them clicks every
-		// seam — the 50 Hz buzz). Seed [leadPad history][this frame] as the
-		// HELD lookahead and pass this frame through unchanged (rate ≈ 1 during
-		// the servo's warmup anyway). From the next call on, each emitted frame
-		// has a full real 4-tap window — one frame (20 ms) of resampler latency,
-		// well within bufferMs.
+		// First frame: seed [leadPad history][this frame] as the held lookahead and
+		// emit silence (one-time 20 ms startup latency, masked by the playout buffer).
+		// From the next call on, each output frame is the PREVIOUS input frame, fully
+		// resampled with a real 4-tap window at every seam.
 		for ch := 0; ch < stream.Channels; ch++ {
 			r.carry[ch] = r.carry[ch][:0]
 			s0 := r.work[ch][0]
@@ -111,58 +103,27 @@ func (r *resampler) process(in []byte) []byte {
 			}
 			r.carry[ch] = append(r.carry[ch], r.work[ch]...)
 		}
-		r.cursor = float64(leadPad)
 		r.primed = true
-		// No lookahead frame yet → emit one frame of silence (a one-time 20 ms
-		// startup latency, masked by the playout buffer). From the next call on
-		// each output frame is the PREVIOUS input frame, fully resampled with a
-		// real 4-tap window at every seam.
-		for i := range r.out {
+		for i := 0; i < outBytes; i++ {
 			r.out[i] = 0
 		}
-		return r.out
+		return r.out[:outBytes]
 	}
 
-	// Carry-centering trim. Under the strict one-frame-in / one-frame-out contract
-	// a sustained rate ≠ 1 drifts the carry LENGTH (the integer part of the rate
-	// error; the fraction lives in the cursor). Left alone it builds toward a
-	// whole-frame dump — the old 20 ms "sawtooth" resync. Instead, when the
-	// lookahead is a whole sample off its one-frame target, consume one (or, on a
-	// transient, a few) extra/fewer input samples THIS frame — but spread it across
-	// all 960 outputs as a ±k/FrameSamples step nudge, NOT a buffer splice. The
-	// correction is a few-µs rate ramp the Catmull-Rom path renders smoothly (no
-	// seam glitch), applied only when a whole sample is actually owed; at rate==1 on
-	// target the nudge is 0 → clean pass-through. injected/dropped count the samples
-	// this realizes, so the telemetry tracks the commanded ppm, not a rare flush.
-	nudge := len(r.carry[0]) - carryTarget
-	if nudge > maxTrim {
-		nudge = maxTrim
-	} else if nudge < -maxTrim {
-		nudge = -maxTrim
-	}
-	if nudge > 0 {
-		r.dropped += uint64(nudge) // samples merged out of the stream (rate > 1)
-	} else if nudge < 0 {
-		r.injected += uint64(-nudge) // samples interpolated into the stream (rate < 1)
-	}
-
-	// Steady state: carry holds [leadPad][previous frame]. Append the new frame
-	// so the previous frame's tail now has real p2/p3 from this frame, then emit
-	// the previous frame's worth of output. The new frame becomes next call's
-	// held lookahead.
+	// Steady state: carry holds [leadPad][previous frame]. Append the new frame so
+	// the previous frame's tail has real p2/p3, emit outLen samples spanning the
+	// previous frame's content, then drop that whole frame.
 	for ch := 0; ch < stream.Channels; ch++ {
 		r.carry[ch] = append(r.carry[ch], r.work[ch]...)
 	}
 
-	// step = servo rate plus the carry-centering nudge (spread over the frame).
-	step := 1.0/r.rate + float64(nudge)/float64(stream.FrameSamples)
-
+	step := float64(n) / float64(outLen)
 	for ch := 0; ch < stream.Channels; ch++ {
 		buf := r.carry[ch]
 		last := len(buf) - 1
-		for k := 0; k < n; k++ {
-			pos := r.cursor + float64(k)*step
-			idx := int(pos) // index of p1 in carry
+		for k := 0; k < outLen; k++ {
+			pos := float64(leadPad) + float64(k)*step
+			idx := int(pos)
 			t := pos - float64(idx)
 			p0 := atIdx(buf, idx-1, last)
 			p1 := atIdx(buf, idx, last)
@@ -175,37 +136,30 @@ func (r *resampler) process(in []byte) []byte {
 		}
 	}
 
-	// Advance the cursor by one output frame's worth of reading, then drop the
-	// whole input samples consumed, keeping the fractional leftover. We retain
-	// leadPad samples before the new cursor so p0..p3 stay valid at the seam.
-	r.cursor += float64(n) * step
-	consumed := int(r.cursor) - leadPad // whole samples we can safely discard
-	if consumed < 0 {
-		consumed = 0
-	}
+	// Consume exactly one input frame (the one we just rendered), keeping the
+	// leadPad tail as history for the next seam. The held lookahead is the new frame.
 	for ch := 0; ch < stream.Channels; ch++ {
 		buf := r.carry[ch]
-		if consumed > len(buf) {
-			consumed = len(buf)
-		}
-		// shift down by `consumed`
-		copy(buf, buf[consumed:])
-		r.carry[ch] = buf[:len(buf)-consumed]
+		copy(buf, buf[n:])
+		r.carry[ch] = buf[:len(buf)-n]
 	}
-	r.cursor -= float64(consumed)
 
-	return r.out
+	if d := outLen - n; d > 0 {
+		r.injected += uint64(d)
+	} else if d < 0 {
+		r.dropped += uint64(-d)
+	}
+	return r.out[:outBytes]
 }
 
-// sampleStats returns the cumulative grounded resample counts (per-channel
-// sample units): samples duplicated into, and dropped from, the output stream.
+// sampleStats returns the cumulative realized rate-match counts (per-channel
+// sample units): samples added to, and removed from, the output stream.
 func (r *resampler) sampleStats() (injected, dropped uint64) {
 	return r.injected, r.dropped
 }
 
-// atIdx returns buf[i], clamping to the buffer ends (the cursor never strays
-// more than ~0.5 sample past the data because rate ≈ 1 and we keep leadPad
-// leading samples).
+// atIdx returns buf[i], clamping to the buffer ends (the read window stays within
+// the held frame + leadPad, so clamping only ever touches the final lookahead tap).
 func atIdx(buf []int32, i, last int) int32 {
 	if i < 0 {
 		i = 0
@@ -243,12 +197,11 @@ func clampInt16(v float64) int16 {
 	return int16(v)
 }
 
-// reset clears history + cursor (new session / gen).
+// reset clears history for a new session / gen. The lifetime inject/drop totals
+// survive (the API exposes a running total).
 func (r *resampler) reset() {
 	for ch := 0; ch < stream.Channels; ch++ {
 		r.carry[ch] = r.carry[ch][:0]
 	}
-	r.cursor = 0
 	r.primed = false
-	r.rate = 1
 }

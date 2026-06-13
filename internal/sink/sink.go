@@ -39,8 +39,9 @@ type Playout struct {
 	originSeq  uint64
 	originPTS  int64
 	originSet  bool
-	consumed   int64 // cumulative output samples/ch written to the backend
-	restartHit bool  // RESTART already fired this starvation episode
+	consumed   int64   // cumulative output samples/ch written to the backend
+	outCarry   float64 // fractional output-length accumulator: turns the servo ppm into ±1-sample steps on outLen
+	restartHit bool    // RESTART already fired this starvation episode
 
 	clock           contracts.Clock
 	out             contracts.Backend
@@ -180,6 +181,7 @@ func (p *Playout) Reset(gen uint32) {
 	p.stats.RatePPM = 0
 	p.stats.Buffered = 0
 	p.consumed = 0
+	p.outCarry = 0
 	p.restartHit = false
 	p.originSet = false
 	p.armed = true
@@ -483,7 +485,6 @@ func (p *Playout) loop() {
 				p.stats.DeviceDelayNs = dDelay // D63 telemetry: surfaced via Stats()→STATUS
 			}
 			ppm := p.servo.observe(p.consumed, mNow, dDelay, dok)
-			p.rs.setRate(ppm)
 			p.stats.RatePPM = ppm
 			// phaseErr: the device queue's deviation from its calibrated setpoint
 			// (dDelay − setpoint), in ns — the per-node playout phase the master diffs
@@ -558,9 +559,16 @@ func (p *Playout) loop() {
 			in = p.silence
 		}
 
-		out := p.rs.process(in)
+		// Rate actuator (PLAN-playout-rate-lock): turn the servo's ppm into a variable
+		// output length. outLen = FrameSamples·(1+ppm/1e6); the fractional part carries
+		// so the correction is realized as occasional ±1-sample steps. Writing outLen
+		// samples/slot is what actually moves the device queue the servo measures.
+		p.outCarry += float64(stream.FrameSamples) * p.servo.ratePPM() * 1e-6
+		extra := int(p.outCarry)
+		p.outCarry -= float64(extra)
+		out := p.rs.process(in, stream.FrameSamples+extra)
 		p.gain.apply(out)
-		p.consumed += stream.FrameSamples
+		p.consumed += int64(stream.FrameSamples + extra)
 		p.jb.advance()
 		p.stats.Buffered = p.jb.len()
 		p.mu.Unlock()

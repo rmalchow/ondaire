@@ -14,7 +14,8 @@ import "ensemble/internal/stream"
 type servoConfig struct {
 	WarmUp   int64   // ns to wait before calibrating (queue fill + EMA settle)
 	QueueTau int64   // device-queue smoothing time constant, ns
-	Kq       float64 // gain: ppm of rate correction per sample of queue error
+	Kq       float64 // proportional gain: ppm per sample of queue error
+	Ki       float64 // integral gain: ppm per (sample·second) of accumulated error
 	ClampPPM float64 // output clamp, ± (a real crystal is well under this)
 	SlewPPM  float64 // max |Δoutput| per second, ppm/s
 }
@@ -23,9 +24,13 @@ func defaultServoConfig() servoConfig {
 	return servoConfig{
 		WarmUp:   3_000_000_000, // 3 s: let the device queue fill and the EMA settle
 		QueueTau: 2_000_000_000, // 2 s: smooths the Pi's ±10ms snd_pcm_delay jitter
-		Kq:       0.08,          // GENTLE (D64): 480 samples (10 ms) → ~38 ppm, never rails
-		ClampPPM: 300,           // ±0.03% — covers any real crystal; inaudible
-		SlewPPM:  20,            // ppm/s — gentle, no audible rate steps
+		Kq:       0.08,          // GENTLE proportional: 480 samples (10 ms) → ~38 ppm
+		Ki:       0.01,          // integral: parks queue error at 0 (no droop / ramp).
+		//                          Now valid because outLen actually moves the queue
+		//                          (PLAN-playout-rate-lock); a real crystal is a STEP
+		//                          disturbance the PI nulls — convergence in ~tens of s.
+		ClampPPM: 300, // ±0.03% — covers any real crystal; inaudible
+		SlewPPM:  20,  // ppm/s — gentle, no audible rate steps
 	}
 }
 
@@ -43,6 +48,7 @@ type rateServo struct {
 	ddRef      float64 // slow reference EMA (settle detection)
 	calibrated bool    // setpoint captured (warmup elapsed)
 	setpoint   float64 // target device-queue depth, samples
+	integral   float64 // ∫queueErr dt (sample·seconds), anti-windup clamped
 	outPPM     float64 // current correction, ppm (slew-limited, clamped)
 
 	// telemetry (read by the sink's 1 Hz stats line)
@@ -115,11 +121,25 @@ func (s *rateServo) observe(consumedSamples, masterNanos, deviceDelayNs int64, o
 		return s.outPPM // hold at 0 until calibrated
 	}
 
-	// GENTLE proportional control. Queue above setpoint ⇒ DAC draining slower than we
-	// fill ⇒ produce slower ⇒ negative ppm. Kq is small so ±10 ms queue jitter maps to
-	// tens of ppm, never the ±300 rail (that railing was the audible "stumbling").
+	// PI control. Queue above setpoint ⇒ DAC draining slower than we fill ⇒ produce
+	// slower ⇒ negative ppm. The actuator (sink output length) genuinely moves the
+	// queue (PLAN-playout-rate-lock), so the integral converges and parks the error
+	// at zero — no proportional droop, no ramp to the rail. Kq stays gentle so ±10 ms
+	// queue jitter maps to tens of ppm, not the ±300 clamp ("stumbling").
 	s.queueErr = s.ddEMA - s.setpoint
-	target := -s.cfg.Kq * s.queueErr
+	dtSec := float64(dtNs) / 1e9
+	s.integral += s.queueErr * dtSec
+	// Anti-windup: cap the integral's authority to the output clamp so it can never
+	// charge past what the clamp allows (and a transient unwinds promptly).
+	if s.cfg.Ki > 0 {
+		maxI := s.cfg.ClampPPM / s.cfg.Ki
+		if s.integral > maxI {
+			s.integral = maxI
+		} else if s.integral < -maxI {
+			s.integral = -maxI
+		}
+	}
+	target := -(s.cfg.Kq*s.queueErr + s.cfg.Ki*s.integral)
 	if target > s.cfg.ClampPPM {
 		target = s.cfg.ClampPPM
 	} else if target < -s.cfg.ClampPPM {
@@ -156,6 +176,7 @@ func (s *rateServo) reset() {
 	s.ddRef = 0
 	s.calibrated = false
 	s.setpoint = 0
+	s.integral = 0
 	s.outPPM = 0
 	s.queueErr = 0
 }

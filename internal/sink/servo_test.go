@@ -168,6 +168,23 @@ func TestServoGentleNeverRailsOnJitter(t *testing.T) {
 	}
 }
 
+func TestServoPILocksQueueErrorToZero(t *testing.T) {
+	// With integral action (default config) the loop parks the QUEUE ERROR at ~0 —
+	// no proportional droop — and the correction holds at the DAC drift instead of
+	// ramping. A P-only loop would sit at a standing error of −dacPPM/Kq
+	// (= −80/0.08 ≈ −1000 samples); the integral nulls it. (This is the loop the
+	// 2 h capture showed running away in production before outLen became the
+	// actuator; the sim models the now-correct closed loop.)
+	s := newRateServo(defaultServoConfig())
+	out := driveServoQueue(s, 80, 120000, 0) // +80 ppm DAC, ~40 min sim
+	if math.Abs(out-80) > 15 {
+		t.Fatalf("PI did not lock to +80 ppm: out=%.1f", out)
+	}
+	if math.Abs(s.queueErr) > 60 {
+		t.Fatalf("PI left a %.0f-sample queue droop; the integral should null it", s.queueErr)
+	}
+}
+
 func TestServoResetClears(t *testing.T) {
 	s := newRateServo(fastServoCfg())
 	driveServoQueue(s, 200, 2000, 0)

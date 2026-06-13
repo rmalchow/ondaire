@@ -27,113 +27,71 @@ func sampleLR(frame []byte, i int) (int16, int16) {
 	return l, r
 }
 
-// TestResamplerSampleCountsGrounded proves the injected/dropped counters reflect
-// REAL resample events: zero at nominal rate (no spurious counts), only drops when
-// the carry overflows (rate>1), only injects when it underflows (rate<1), and
-// drops happen in whole-frame units (the only place a frame is discarded).
-func TestResamplerSampleCountsGrounded(t *testing.T) {
-	feed := func(r *resampler, n int) {
+// TestResamplerOutputLength: process returns exactly the requested outLen samples
+// (clamped to ±maxOutDelta), regardless of the fixed FrameSamples input.
+func TestResamplerOutputLength(t *testing.T) {
+	r := newResampler()
+	in := makeFrame(func(i int) (int16, int16) { return int16(i), int16(i) })
+	for _, outLen := range []int{stream.FrameSamples, stream.FrameSamples + 1, stream.FrameSamples - 1, stream.FrameSamples + 5} {
+		out := r.process(in, outLen)
+		if len(out) != outLen*stream.Channels*stream.BytesPerSmpl {
+			t.Fatalf("outLen %d: got %d bytes, want %d", outLen, len(out), outLen*stream.Channels*stream.BytesPerSmpl)
+		}
+	}
+	// Out-of-range requests clamp, never panic / over-read the buffer.
+	if out := r.process(in, stream.FrameSamples+10_000); len(out) != (stream.FrameSamples+maxOutDelta)*stream.Channels*stream.BytesPerSmpl {
+		t.Fatalf("huge outLen not clamped: %d bytes", len(out))
+	}
+}
+
+// TestResamplerCountsGrounded: the realized rate-match counts reflect REAL output
+// surplus/deficit — zero at outLen==FrameSamples, only injects when outLen>frame,
+// only drops when outLen<frame, summing |outLen−FrameSamples|, cumulative across reset.
+func TestResamplerCountsGrounded(t *testing.T) {
+	feed := func(r *resampler, n, outLen int) {
 		for f := 0; f < n; f++ {
 			base := f * stream.FrameSamples
 			r.process(makeFrame(func(i int) (int16, int16) {
 				v := int16((base + i) % 1000)
 				return v, v
-			}))
+			}), outLen)
 		}
 	}
-	// Nominal rate: nothing is added or removed — guards must never fire.
+	// outLen == FrameSamples: nothing added/removed.
 	r := newResampler()
-	r.setRate(0)
-	feed(r, 400)
+	feed(r, 200, stream.FrameSamples)
 	if inj, drop := r.sampleStats(); inj != 0 || drop != 0 {
-		t.Fatalf("rate=1.0: injected=%d dropped=%d, want 0/0 (no spurious counts)", inj, drop)
+		t.Fatalf("outLen==frame: injected=%d dropped=%d, want 0/0", inj, drop)
 	}
-	// Sustained rate > 1 (DAC slow → carry fills): only DROPS, and now at
-	// SINGLE-sample granularity (no whole-frame flush). +5000 ppm — well above the
-	// servo's ±300 clamp so the trim works hard in the test.
+	// outLen > frame (upsample, feed a faster DAC): only INJECTS, 1 per frame.
 	r = newResampler()
-	r.setRate(5000)
-	feed(r, 800)
+	feed(r, 300, stream.FrameSamples+1)
 	inj, drop := r.sampleStats()
-	if drop == 0 || inj != 0 {
-		t.Fatalf("rate>1: injected=%d dropped=%d, want drop>0 inj=0", inj, drop)
+	if inj != 300 || drop != 0 { // first call primes (still counts: net applies post-prime)
+		// prime returns before the inject accounting, so 299 of the 300 count.
+		if !(inj == 299 && drop == 0) {
+			t.Fatalf("outLen>frame: injected=%d dropped=%d, want ≈299 inj, 0 drop", inj, drop)
+		}
 	}
-	// Sustained rate < 1 (DAC fast → carry drains): only INJECTS.
+	// outLen < frame: only DROPS.
 	r = newResampler()
-	r.setRate(-5000)
-	feed(r, 800)
+	feed(r, 300, stream.FrameSamples-1)
 	inj, drop = r.sampleStats()
-	if inj == 0 || drop != 0 {
-		t.Fatalf("rate<1: injected=%d dropped=%d, want inj>0 drop=0", inj, drop)
+	if drop == 0 || inj != 0 {
+		t.Fatalf("outLen<frame: injected=%d dropped=%d, want drop>0 inj=0", inj, drop)
 	}
-	// Counters are cumulative across a reset (lifetime total for the API).
-	before, _ := r.sampleStats()
+	// Counters survive reset (lifetime total for the API).
+	before := drop
 	r.reset()
-	if inj2, _ := r.sampleStats(); inj2 != before {
-		t.Fatalf("reset zeroed the lifetime counter: %d -> %d", before, inj2)
+	if _, d2 := r.sampleStats(); d2 != before {
+		t.Fatalf("reset zeroed the lifetime counter: %d -> %d", before, d2)
 	}
 }
 
-// TestResamplerNoSawtoothUnderSustainedDrift is the regression guard for the
-// whole-frame "sawtooth" resync. Under a sustained rate the correction must be
-// realized as a stream of single-sample nudges that pin the carry near one frame
-// — never a 2-frame buildup that discharges as a 20 ms step. Drive +200 ppm
-// through a continuous 1 kHz sine for many frames and assert: (a) the carry never
-// grows toward two frames, (b) the realized correction accrues smoothly (not in
-// 960-sized jumps), and (c) the reconstructed output has no curvature spike.
-func TestResamplerNoSawtoothUnderSustainedDrift(t *testing.T) {
+// TestResamplerUnitDelayedIdentity: at outLen==FrameSamples the resampler is a pure
+// 1-frame delay (frame 0 silence, output frame f == input frame f-1).
+func TestResamplerUnitDelayedIdentity(t *testing.T) {
 	r := newResampler()
-	r.setRate(200)
-	freq, amp := 1000.0, 9000.0
-	const frames = 4000
-	var out []int16
-	maxCarry := 0
-	for f := 0; f < frames; f++ {
-		base := f * stream.FrameSamples
-		in := makeFrame(func(i int) (int16, int16) {
-			v := int16(amp * math.Sin(2*math.Pi*freq*float64(base+i)/float64(stream.SampleRate)))
-			return v, v
-		})
-		o := r.process(in)
-		if l := len(r.carry[0]); l > maxCarry {
-			maxCarry = l
-		}
-		for i := 0; i < stream.FrameSamples; i++ {
-			l, _ := sampleLR(o, i)
-			out = append(out, l)
-		}
-	}
-	// (a) carry pinned near one frame — the old code let it reach ~2 frames, then dumped.
-	if maxCarry > leadPad+stream.FrameSamples+maxTrim+2 {
-		t.Fatalf("carry grew to %d (target %d) — whole-frame buildup not prevented",
-			maxCarry, leadPad+stream.FrameSamples)
-	}
-	// (b) correction accrued, single-sample granular, ≈ 200 ppm · FrameSamples · frames.
-	_, drop := r.sampleStats()
-	want := uint64(200e-6 * float64(stream.FrameSamples*frames))
-	if drop < want/2 || drop > want*2 {
-		t.Fatalf("dropped=%d, want ≈%d single-sample corrections", drop, want)
-	}
-	// (c) no seam/sawtooth glitch anywhere over the sustained run.
-	start := 2 * stream.FrameSamples
-	var maxCurv float64
-	for k := start + 1; k < len(out)-1; k++ {
-		c := math.Abs(float64(out[k+1]) - 2*float64(out[k]) + float64(out[k-1]))
-		if c > maxCurv {
-			maxCurv = c
-		}
-	}
-	if maxCurv > 400 {
-		t.Fatalf("curvature spike %.0f under sustained drift — correction not smooth", maxCurv)
-	}
-}
-
-func TestResamplerUnitRateDelayedIdentity(t *testing.T) {
-	// At rate 1 the resampler is a pure 1-frame delay: output frame f equals
-	// input frame f-1 (frame 0 is silence). The one-frame lookahead is what
-	// gives every seam a real 4-tap window.
-	r := newResampler()
-	r.setRate(0)
 	var frames [][]byte
 	for f := 0; f < 5; f++ {
 		base := f * stream.FrameSamples
@@ -145,7 +103,7 @@ func TestResamplerUnitRateDelayedIdentity(t *testing.T) {
 	var outs [][]byte
 	for _, in := range frames {
 		o := make([]byte, stream.FrameBytes)
-		copy(o, r.process(in))
+		copy(o, r.process(in, stream.FrameSamples))
 		outs = append(outs, o)
 	}
 	for i := 0; i < stream.FrameBytes; i++ {
@@ -164,25 +122,12 @@ func TestResamplerUnitRateDelayedIdentity(t *testing.T) {
 	}
 }
 
-func TestResamplerOutputFrameSize(t *testing.T) {
-	r := newResampler()
-	r.setRate(300)
-	in := makeFrame(func(i int) (int16, int16) { return int16(i), int16(i) })
-	out := r.process(in)
-	if len(out) != stream.FrameBytes {
-		t.Fatalf("output %d bytes, want %d", len(out), stream.FrameBytes)
-	}
-}
-
+// TestResamplerNoSeamGlitch is the regression test for the 50 Hz seam buzz: with a
+// sustained rate correction (outLen ≠ FrameSamples) the reconstructed output of a
+// continuous 1 kHz sine must have NO curvature spike at the frame boundaries.
 func TestResamplerNoSeamGlitch(t *testing.T) {
-	// THE regression test for the 50 Hz seam buzz: with the servo active
-	// (rate ≠ 1), the OLD resampler clamped p2/p3 at every frame end (no
-	// lookahead), kinking the waveform once per 20 ms frame. Reconstruct the
-	// full output of a continuous 1 kHz sine and assert the curvature (second
-	// difference) has NO spike at the frame boundaries — a clean resample has
-	// smooth curvature everywhere.
 	r := newResampler()
-	r.setRate(250) // servo-class correction → non-trivial fractional cursor
+	const outLen = stream.FrameSamples + 1 // sustained upsample (servo-class)
 	freq, amp := 1000.0, 9000.0
 	const frames = 12
 	var out []int16
@@ -192,15 +137,13 @@ func TestResamplerNoSeamGlitch(t *testing.T) {
 			v := int16(amp * math.Sin(2*math.Pi*freq*float64(base+i)/float64(stream.SampleRate)))
 			return v, v
 		})
-		o := r.process(in)
-		for i := 0; i < stream.FrameSamples; i++ {
+		o := r.process(in, outLen)
+		for i := 0; i < outLen; i++ {
 			l, _ := sampleLR(o, i)
 			out = append(out, l)
 		}
 	}
-	// Skip the first 2 frames (silence + warmup seam). Curvature = x[k+1]-2x[k]+x[k-1].
-	// For a 1 kHz sine at 48 k the per-sample curvature peaks at amp*(2πf/Fs)^2 ≈ 154.
-	start := 2 * stream.FrameSamples
+	start := 2 * outLen
 	var maxCurv float64
 	for k := start + 1; k < len(out)-1; k++ {
 		c := math.Abs(float64(out[k+1]) - 2*float64(out[k]) + float64(out[k-1]))
@@ -208,8 +151,6 @@ func TestResamplerNoSeamGlitch(t *testing.T) {
 			maxCurv = c
 		}
 	}
-	// A clean sine's curvature is ~154; a seam clamp spikes it into the
-	// thousands. Allow generous headroom for interpolation/quantization.
 	if maxCurv > 400 {
 		t.Fatalf("curvature spike %.0f (clean sine ~154) — seam glitch present", maxCurv)
 	}
@@ -217,11 +158,10 @@ func TestResamplerNoSeamGlitch(t *testing.T) {
 
 func TestResamplerSilenceStaysSilence(t *testing.T) {
 	r := newResampler()
-	r.setRate(200)
 	silence := make([]byte, stream.FrameBytes)
 	for f := 0; f < 3; f++ {
-		out := r.process(silence)
-		for i := 0; i < stream.FrameBytes; i++ {
+		out := r.process(silence, stream.FrameSamples+1)
+		for i := 0; i < len(out); i++ {
 			if out[i] != 0 {
 				t.Fatalf("frame %d byte %d non-zero: %d", f, i, out[i])
 			}
@@ -231,12 +171,11 @@ func TestResamplerSilenceStaysSilence(t *testing.T) {
 
 func TestResamplerStereoIndependence(t *testing.T) {
 	r := newResampler()
-	r.setRate(0) // unity → 1-frame-delayed identity
 	in := makeFrame(func(i int) (int16, int16) {
 		return int16(i % 500), int16(-(i % 500))
 	})
-	r.process(in)        // frame 0 → silence
-	out := r.process(in) // frame 1 → frame 0 (this same input) delayed
+	r.process(in, stream.FrameSamples)        // frame 0 → silence
+	out := r.process(in, stream.FrameSamples) // frame 1 → frame 0 (this same input) delayed
 	for i := 0; i < stream.FrameSamples; i++ {
 		ol, or := sampleLR(out, i)
 		if ol != int16(i%500) || or != int16(-(i%500)) {
@@ -245,21 +184,19 @@ func TestResamplerStereoIndependence(t *testing.T) {
 	}
 }
 
-func TestResamplerCursorBounded(t *testing.T) {
-	// Over many frames at a sustained correction the cursor must stay bounded
-	// (the leftover fraction is kept; whole input samples are discarded). A
-	// run-away cursor would mean unbounded carry growth / precision loss.
+// TestResamplerCarryBounded: because input consumption is fixed at one frame, the
+// carry length is invariant at leadPad+FrameSamples regardless of outLen — no drift,
+// no growth, ever.
+func TestResamplerCarryBounded(t *testing.T) {
 	r := newResampler()
-	r.setRate(400)
 	in := makeFrame(func(i int) (int16, int16) { return int16(i % 777), int16(i % 777) })
+	r.process(in, stream.FrameSamples) // prime
 	for f := 0; f < 2000; f++ {
-		r.process(in)
-		if r.cursor < 0 || r.cursor >= float64(leadPad)+2 {
-			t.Fatalf("frame %d: cursor %.4f left bounded range", f, r.cursor)
-		}
+		outLen := stream.FrameSamples + (f%3 - 1) // cycle 959/960/961
+		r.process(in, outLen)
 		for ch := 0; ch < stream.Channels; ch++ {
-			if len(r.carry[ch]) > 2*stream.FrameSamples+leadPad+8 {
-				t.Fatalf("frame %d ch %d: carry grew to %d", f, ch, len(r.carry[ch]))
+			if len(r.carry[ch]) != leadPad+stream.FrameSamples {
+				t.Fatalf("frame %d ch %d: carry = %d, want %d (invariant)", f, ch, len(r.carry[ch]), leadPad+stream.FrameSamples)
 			}
 		}
 	}

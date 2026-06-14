@@ -240,13 +240,21 @@ func txtRecords(cfg Config) []string {
 	// Master advert (the default for a combined node and any legacy/zero Config).
 	// `name` lets a mDNS-only client (the Android companion app) label masters in its
 	// picker without an extra /api/status round-trip — matching the playback advert.
-	return append(recs,
+	recs = append(recs,
 		"name="+cfg.Name,
 		"gossip="+strconv.Itoa(cfg.GossipPort),
 		"http="+strconv.Itoa(cfg.HTTPPort),
 		"stream="+strconv.Itoa(cfg.StreamPort),
 		"source="+strconv.Itoa(cfg.SourcePort),
 	)
+	// A COMBINED node (Master AND Playback, D61) also plays via the control plane,
+	// so it advertises its control port alongside the master ports. Peers learn the
+	// full node's control endpoint from gossip too, but advertising it keeps the
+	// mDNS view consistent for mDNS-only clients.
+	if cfg.Playback && cfg.ControlPort > 0 {
+		recs = append(recs, "control="+strconv.Itoa(cfg.ControlPort))
+	}
+	return recs
 }
 
 // playbackOnly reports whether the node advertises as a wire-driven playback node:

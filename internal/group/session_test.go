@@ -11,7 +11,6 @@ func TestSessionReleasesInOrder(t *testing.T) {
 	self := idN(1)
 	r := newRig(self, 5, false)
 	r.cl.setSnap(soloSnap(self))
-	r.clk.offset = 1000 // LocalToMaster adds offset
 
 	if err := r.e.Play("song.wav"); err != nil {
 		t.Fatalf("Play: %v", err)
@@ -34,11 +33,15 @@ func TestSessionReleasesInOrder(t *testing.T) {
 	}
 }
 
-func TestSessionStartFromLocalToMaster(t *testing.T) {
+func TestSessionStartFromMasterClock(t *testing.T) {
 	self := idN(1)
 	r := newRig(self, 3, false)
 	r.cl.setSnap(soloSnap(self))
-	r.clk.offset = 500_000
+
+	// The engine OWNS the clock: startMaster == nowMaster() at install + lead. The
+	// rig pins nowMaster to its fake wall clock, so we know it exactly.
+	anchor := r.now.UnixNano()
+	wantStart := anchor + int64(r.e.p.LeadMs)*1_000_000
 
 	if err := r.e.Play("song.wav"); err != nil {
 		t.Fatalf("Play: %v", err)
@@ -46,9 +49,8 @@ func TestSessionStartFromLocalToMaster(t *testing.T) {
 	defer r.e.Close()
 	waitFor(t, time.Second, func() bool { return len(r.srv.snapshotReleases()) >= 1 }, "first release")
 
-	// first pts == startMaster == LocalToMaster(playInstant)+lead. We can't know
-	// the exact local instant, but the first pts must be >= offset (lead>0, local
-	// nanos>0) and the engine's sess.startMaster must equal the first pts.
+	// first pts == startMaster == nowMaster()+lead, and the engine's sess.startMaster
+	// must equal the first pts.
 	r.e.mu.Lock()
 	sess := r.e.sess
 	r.e.mu.Unlock()
@@ -60,8 +62,8 @@ func TestSessionStartFromLocalToMaster(t *testing.T) {
 	if first != startMaster {
 		t.Fatalf("first pts = %d, want startMaster %d", first, startMaster)
 	}
-	if startMaster <= r.clk.offset {
-		t.Fatalf("startMaster %d should exceed offset %d (lead added)", startMaster, r.clk.offset)
+	if startMaster != wantStart {
+		t.Fatalf("startMaster = %d, want nowMaster+lead %d", startMaster, wantStart)
 	}
 }
 

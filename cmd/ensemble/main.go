@@ -1,7 +1,14 @@
-// Command ensemble is the single self-organizing multiroom audio binary.
-// Every node runs this. main parses flags+env, binds the four ports, probes
-// host capabilities, builds the component graph bottom-up (S→A→B/C→F/G→E→H→I),
-// runs it, and tears it down in reverse on SIGINT/SIGTERM (piece K).
+// Command ensemble is the single self-organizing multiroom audio binary. Every
+// node runs this. main parses flags+env, loads config, then splits the node into
+// two clean subsystems started from one process (D49/D61): the PLAYER (clock
+// follower + subscriber + sink + control Listener + localPlayer, driven entirely
+// over the control plane) and the MASTER (cluster/gossip, discovery, source server,
+// group engine as a pure producer, clock SERVER, HTTP API, playback Driver). There
+// is no "same-node" special-casing — a combined node behaves as if `--role master`
+// and `--role playback` were two processes on one host, sharing only config, the
+// node identity, and this main. run() dispatches; buildPlayer + runCombined are the
+// two subsystem builders; each unwinds its own teardown stack in reverse on SIGINT/
+// SIGTERM (piece K), master before player.
 package main
 
 import (
@@ -179,16 +186,27 @@ func validateConfigFlags(args []string) error {
 	return nil
 }
 
-// run builds the component graph, starts it, blocks until ctx is cancelled, then
-// unwinds the shutdown stack in reverse. Returns the first fatal/shutdown error.
+// run is the top-level dispatcher. It loads config + the shared logger, then splits
+// the node into the requested subsystems (D49/D61): the PLAYER (clock follower +
+// subscriber + sink + control Listener + localPlayer, driven entirely over the
+// control plane) and the MASTER (cluster/gossip, discovery, source server, group
+// engine as a pure producer, clock SERVER, HTTP API, playback Driver). There is no
+// "same-node" special-casing — a combined node behaves exactly as if `--role master`
+// and `--role playback` were two processes on one host, sharing only config, the
+// node identity, and this main:
+//   - playback-only: the player subsystem alone (no gossip/API/source/engine).
+//   - master-only:   the master subsystem alone (no sink/follower/localPlayer).
+//   - combined:      BOTH, concurrently, under one signal-derived ctx. The master's
+//     Driver drives the LOCAL player over the control plane EXACTLY like a remote
+//     player; the player has no idea it is co-located.
 func run(ctx context.Context, opt options) (rerr error) {
 	// base carries no comp attr: components attach their own comp=… exactly
 	// once. main's own lines use log (comp=main).
 	base := newLogger(opt.LogLevel)
 	log := base.With("comp", "main")
 
-	// 1. config / node.json (A). Fatal on error — never mint a fresh id over a
-	//    corrupt file (§4).
+	// config / node.json (A). Fatal on error — never mint a fresh id over a
+	// corrupt file (§4).
 	cfg, err := config.Load(config.Options{Args: opt.cfgArgs})
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
@@ -200,14 +218,106 @@ func run(ctx context.Context, opt options) (rerr error) {
 		"output", outputLabel(opt.Output), "media", cfg.MediaDir, "logLevel", opt.LogLevel,
 	)
 
-	// role=playback (no master): a non-gossiping, receive-only node (D49/D50/D61).
-	// Minimal bring-up — no gossip, source server, group engine, or HTTP API; it is
-	// discovered and driven by a master over the control plane.
-	if cfg.Role.Playback && !cfg.Role.Master {
-		return runPlayback(ctx, opt, cfg, base)
-	}
+	switch {
+	case cfg.Role.Playback && !cfg.Role.Master:
+		// Playback-only (D49/D50/D61): a non-gossiping, receive-only node, discovered
+		// and driven by a master over the control plane. It owns its mDNS advert.
+		ph, perr := buildPlayer(ctx, opt, cfg, base, playerOptions{})
+		if perr != nil {
+			return perr
+		}
+		return ph.serve(ctx, log)
 
-	// A LIFO of teardown closures; unwound in reverse on shutdown (§3.3).
+	case cfg.Role.Master && !cfg.Role.Playback:
+		// Master-only: a pure controller/source. It gossips, sources audio, serves the
+		// API, and drives REMOTE playback nodes — but never plays locally (no sink,
+		// follower, or localPlayer). ControlPort=0 / Playback:false so the Driver never
+		// drives a local player.
+		return runCombined(ctx, opt, cfg, base, nil)
+
+	default:
+		// Combined (master AND playback). Bind/build the PLAYER first so its bound
+		// control port is known before the master constructs cluster.New (which snapshots
+		// ControlPort into the v1 self record) — see the ordering invariant in buildPlayer/
+		// runCombined. The player suppresses its own mDNS advert (the master advertises the
+		// whole node, carrying control=) and binds its stream B at cfg.StreamPort+1 with
+		// forced bind-or-increment, leaving the (possibly pinned) cfg.StreamPort free for
+		// the master's gossiped stream A. They share config, identity, and ONE disableState
+		// (D40), nothing else.
+		shared := newDisableState(cfg.Disabled)
+		ph, perr := buildPlayer(ctx, opt, cfg, base, playerOptions{
+			suppressMDNS:    true,
+			disabled:        shared,
+			streamBase:      cfg.StreamPort + 1,
+			streamIncrement: true,
+		})
+		if perr != nil {
+			return perr
+		}
+		return runCombined(ctx, opt, cfg, base, ph)
+	}
+}
+
+// playerOptions tunes the player subsystem builder for combined vs standalone use.
+type playerOptions struct {
+	// suppressMDNS skips the player's own mDNS playback advert. Set in combined mode,
+	// where the master advertises the whole node (carrying control=); a standalone
+	// playback-only node keeps its advert.
+	suppressMDNS bool
+	// disabled is the operator-disabled feature set (D40). In combined mode the
+	// dispatcher creates ONE and shares it with the master; standalone leaves it nil
+	// and the builder owns its own.
+	disabled *disableState
+	// streamBase overrides the stream-port bind base (0 = cfg.StreamPort). In combined
+	// mode the dispatcher sets it to cfg.StreamPort+1 so the player's stream B never
+	// collides with the master's stream A at cfg.StreamPort.
+	streamBase int
+	// streamIncrement forces the stream port to bind-or-increment even when
+	// --stream-port is pinned. The pin governs the MASTER's gossiped stream A; the
+	// player's stream B is an internal, never-gossiped detail, so in combined mode it
+	// must be free to increment off the master's port rather than fight for the pin.
+	streamIncrement bool
+}
+
+// playerHandle is a built-and-activated PLAYER subsystem plus the handles the master
+// needs to drive the LOCAL player like a remote one in combined mode. Its teardown
+// stack is owned here and unwound by serve (standalone) or by the combined dispatcher.
+type playerHandle struct {
+	stack    *shutdownStack
+	disc     *discovery.Discovery // nil when suppressed (combined) or --no-mdns
+	caps     contracts.Capabilities
+	host     string // resolved bind host for the banner ("0.0.0.0" on wildcard)
+	dataDir  string
+	nodeName string
+	nodeID   string
+
+	// Handles the master's API operates on (combined mode).
+	controlPort int             // the ACTUALLY-bound control port — gossiped by the master
+	streamPort  int             // the player's stream port B (NOT gossiped; for the banner only)
+	sink        *sink.Playout   // E: the REAL device sink
+	backend     device.Sink     // the raw output backend (for the cluster's active-kind report)
+	follower    *clock.Follower // F: clock follower (status offsets)
+	disabled    *disableState   // D40: shared with the master in combined mode
+	backendName string          // resolved output backend kind
+	outputSpec  string          // ENSEMBLE_OUTPUT spec (for the disable/enable swap)
+	outputDev   string          // configured output device
+}
+
+// buildPlayer builds and ACTIVATES the PLAYER subsystem (D49/D50/D61): it binds its
+// own stream port (B: clock probes + UDP audio) and a control port, then constructs
+// the mux, clock Follower, the resilient device sink, the subscriber+deliver path, a
+// localPlayer, and the control Listener — everything driven over the wire by a master
+// (loopback in combined mode). It does NOT gossip, source audio, run a group engine,
+// or serve HTTP (D56). On success the subsystem is running and the returned handle
+// carries its teardown stack plus the sink/follower/control-port the master needs.
+//
+// ORDERING INVARIANT (combined mode): the control port is bound HERE, before the
+// caller builds the master's cluster.New, so the master gossips the player's ACTUAL
+// control port (cluster.New snapshots ControlPort into the v1 self record). The
+// caller must build the player before the master.
+func buildPlayer(ctx context.Context, opt options, cfg *config.Config, base *slog.Logger, po playerOptions) (_ *playerHandle, rerr error) {
+	log := base.With("comp", "main")
+
 	stack := &shutdownStack{}
 	// On an EARLY (pre-ready) failure, unwind whatever we acquired so far.
 	defer func() {
@@ -218,8 +328,211 @@ func run(ctx context.Context, opt options) (rerr error) {
 		}
 	}()
 
-	// 2. Port binds — pinned (flag/env) ports bind EXACTLY or fail; unset ports
-	//    bind-or-increment (§2). Capture the ACTUAL bound port each.
+	// Stream port B (mux: clock probes + UDP audio). A player dials the master's
+	// source for TCP; it never listens, so the TCP half is closed immediately. In
+	// combined mode the base is cfg.StreamPort+1 with forced bind-or-increment so B
+	// never collides with the master's stream A (the pin governs A, not B).
+	streamBase := cfg.StreamPort
+	if po.streamBase != 0 {
+		streamBase = po.streamBase
+	}
+	streamExplicit := cfg.ExplicitPorts.Stream && !po.streamIncrement
+	streamTCP, streamUDP, streamPort, err := netx.BindTCPUDP(opt.Host, streamBase, bindTries(streamExplicit))
+	if err != nil {
+		return nil, portBindErr("stream", streamBase, streamExplicit, err)
+	}
+	_ = streamTCP.Close()
+	stack.push("stream socket", func(context.Context) error { _ = streamUDP.Close(); return nil })
+
+	// Control port (master→player commands). Control is UDP soft-state (D58); the
+	// TCP half is closed immediately. Bound BEFORE the master's cluster.New (see the
+	// ordering invariant above) so the gossiped ControlPort is this real port.
+	ctrlTCP, ctrlUDP, controlPort, err := netx.BindTCPUDP(opt.Host, cfg.ControlPort, bindTries(cfg.ExplicitPorts.Control))
+	if err != nil {
+		return nil, portBindErr("control", cfg.ControlPort, cfg.ExplicitPorts.Control, err)
+	}
+	_ = ctrlTCP.Close()
+	stack.push("control socket", func(context.Context) error { _ = ctrlUDP.Close(); return nil })
+
+	caps := capabilities(opt)
+	host := opt.Host
+	if host == "" {
+		host = "0.0.0.0"
+	}
+	log.Info("port bound", "service", "stream", "proto", "udp", "host", host, "port", streamPort)
+	log.Info("port bound", "service", "control", "proto", "udp", "host", host, "port", controlPort)
+
+	// Sink backend + playout, fed by the subscriber through the decode/deliver path.
+	// Resilient failover chain (D37): try every real output until one works.
+	backend, backendName, err := device.OpenResilient(opt.Output, cfg.OutputDevice, base)
+	if err != nil {
+		return nil, fmt.Errorf("sink backend %q: %w", opt.Output, err)
+	}
+	mux := stream.NewMux(streamUDP, base)
+	clockFol := clock.NewFollower(mux, base)
+	theSink := sink.New(sink.Config{
+		Backend:       backend,
+		Clock:         clockFol,
+		BufferMs:      contracts.DefaultBufferMs,
+		Volume:        cfg.Volume,
+		OutputDelayMs: cfg.OutputDelayMs,
+		Channel:       cfg.Channel,
+		Log:           base,
+	})
+
+	// Operator-disabled features (D40): shared with the master in combined mode,
+	// owned here standalone. Read by the deliver path + the sink-swap on enable/disable.
+	disabled := po.disabled
+	if disabled == nil {
+		disabled = newDisableState(cfg.Disabled)
+	}
+	subClient := stream.NewClient(stream.ClientConfig{
+		Mux:     mux,
+		Deliver: newDeliver(theSink, disabled, base),
+		Log:     base,
+	})
+
+	// The playout component (D61), driven over the wire by the control Listener.
+	player := playback.NewLocal(playback.Config{
+		Self:  cfg.NodeID,
+		Clock: clockFol,
+		Sub:   subClient,
+		Sink:  theSink,
+		ClockStats: func() (int64, int64, bool) {
+			st := clockFol.Stats()
+			return st.OffsetNs, st.RTTNs, st.Synced
+		},
+	})
+	listener := playback.NewListener(playback.ListenerConfig{Conn: ctrlUDP, Player: player, Log: base})
+
+	// mDNS playback advert (D50/D51): control port + capabilities, no gossip.
+	// Suppressed in combined mode — the master advertises the whole node.
+	var disc *discovery.Discovery
+	switch {
+	case po.suppressMDNS:
+		// combined: the master owns the single mDNS advert (carrying control=).
+	case cfg.NoMDNS:
+		log.Info("mDNS disabled (--no-mdns); playback node will not be discoverable")
+	default:
+		disc = discovery.New(discovery.Config{
+			ID:          cfg.NodeID,
+			Master:      false,
+			Playback:    true,
+			Name:        cfg.NodeName,
+			Version:     version,
+			ControlPort: controlPort,
+			Caps: discovery.Caps{
+				Codecs:         caps.Codecs,
+				MaxRate:        stream.SampleRate,
+				CanReportQueue: backendReportsQueue(backend),
+				Input:          containsStr(caps.Sources, "input"),
+			},
+			Log: base,
+		})
+	}
+
+	// Activate (teardown unwinds in reverse).
+	mux.Run()
+	stack.push("mux", func(context.Context) error { return mux.Close() })
+	clockFol.Start()
+	stack.push("clock follower", func(context.Context) error { return clockFol.Close() })
+	stack.push("sink", func(context.Context) error { return theSink.Close() })
+	stack.push("subscriber", func(context.Context) error { return subClient.Close() })
+	listener.Run()
+	stack.push("listener", func(context.Context) error { return listener.Close() })
+	if disc != nil {
+		disc.Run()
+		stack.push("discovery", func(context.Context) error { return disc.Close() })
+	}
+
+	return &playerHandle{
+		stack:       stack,
+		disc:        disc,
+		caps:        caps,
+		host:        host,
+		dataDir:     cfg.DataDir,
+		nodeName:    cfg.NodeName,
+		nodeID:      cfg.NodeID.String(),
+		controlPort: controlPort,
+		streamPort:  streamPort,
+		sink:        theSink,
+		backend:     backend,
+		follower:    clockFol,
+		disabled:    disabled,
+		backendName: backendName,
+		outputSpec:  opt.Output,
+		outputDev:   cfg.OutputDevice,
+	}, nil
+}
+
+// serve runs a STANDALONE player subsystem: print its banner + "ready", block until
+// ctx is cancelled, then unwind its own teardown stack. Combined mode does NOT call
+// this — the dispatcher owns lifecycle there.
+func (ph *playerHandle) serve(ctx context.Context, log *slog.Logger) (rerr error) {
+	printBanner(os.Stderr, fmt.Sprintf("ensemble %s — ready", version), [][2]string{
+		{"node", fmt.Sprintf("%s  (%s)", ph.nodeName, ph.nodeID)},
+		{"roles", "playback"},
+		{"bind", ph.host},
+		{"ports", fmt.Sprintf("control=%d  stream=%d  (tcp+udp; bind-or-increment)", ph.controlPort, ph.streamPort)},
+		{"paths", fmt.Sprintf("data=%s", ph.dataDir)},
+		{"output", ph.backendName},
+		{"codecs", strings.Join(ph.caps.Codecs, ", ")},
+		{"backends", strings.Join(ph.caps.Backends, ", ")},
+	})
+	log.Info("ready",
+		"version", version, "id", ph.nodeID, "name", ph.nodeName,
+		"role", "playback", "control", ph.controlPort, "stream", ph.streamPort,
+		"output", ph.backendName, "codecs", ph.caps.Codecs,
+	)
+
+	<-ctx.Done()
+	log.Info("shutting down")
+	sc, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if uerr := ph.stack.unwind(sc, log); uerr != nil {
+		rerr = uerr
+	}
+	ph.stack.fns = nil
+	return rerr
+}
+
+// runCombined builds and runs the MASTER subsystem, optionally co-located with an
+// already-built PLAYER (ph != nil). The master owns the single cluster/gossip identity
+// (cluster/discovery, source server, group engine as a pure PRODUCER, clock SERVER on
+// its own stream port A, HTTP API, playback Driver) — but NO sink, follower, or
+// localPlayer of its own. It blocks until ctx is cancelled or the HTTP server errors
+// fatally, then tears down: MASTER first (stops driving, writes idle, leaves cluster),
+// then the player (so a co-located player stops only after the master has detached).
+//
+// CRITICAL gossip wiring (combined): StreamPort = the MASTER's stream A (the clock
+// Server lives there; the Driver builds ATTACH.Clock from the gossiped StreamPort, so
+// the local player's Follower probes the master's clock — gossiping B would break local
+// clock sync silently). SourcePort = the master's own source port. ControlPort = the
+// PLAYER's bound control port (so the Driver drives + polls the local player over the
+// wire). Master-only (ph == nil): ControlPort=0, Playback:false, no sink wiring.
+func runCombined(ctx context.Context, opt options, cfg *config.Config, base *slog.Logger, ph *playerHandle) (rerr error) {
+	log := base.With("comp", "main")
+
+	stack := &shutdownStack{}
+	// On an EARLY (pre-ready) failure, unwind whatever the master acquired, then the
+	// player (if any) — master before player, the same order as the ready-path unwind.
+	defer func() {
+		if rerr != nil {
+			sc, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = stack.unwind(sc, log)
+			if ph != nil {
+				_ = ph.stack.unwind(sc, log)
+			}
+			cancel()
+		}
+	}()
+
+	// Master port binds — pinned (flag/env) ports bind EXACTLY or fail; unset ports
+	// bind-or-increment (§2). Capture the ACTUAL bound port each. The master's stream
+	// A hosts the clock SERVER; gossiped as StreamPort (see the wiring note above). In
+	// combined mode the player already took cfg.StreamPort+1 (forced increment), so the
+	// master binds the pinned/base cfg.StreamPort here — A and B never collide on one
+	// host, and a pinned --stream-port still lands the GOSSIPED stream A exactly.
 	streamTCP, streamUDP, streamPort, err := netx.BindTCPUDP(opt.Host, cfg.StreamPort, bindTries(cfg.ExplicitPorts.Stream))
 	if err != nil {
 		return portBindErr("stream", cfg.StreamPort, cfg.ExplicitPorts.Stream, err)
@@ -253,7 +566,18 @@ func run(ctx context.Context, opt options) (rerr error) {
 		return portBindErr("gossip", cfg.GossipPort, cfg.ExplicitPorts.Gossip, err)
 	}
 
-	// PORTS (§2): one consistent line per actually-bound port at startup.
+	// The control endpoint the node gossips: the PLAYER's bound control port in
+	// combined mode (so the Driver drives + polls the local player over the wire),
+	// or 0 in master-only mode (no local player to drive). Playback:true mirrors it.
+	controlPort := 0
+	playbackRole := false
+	if ph != nil {
+		controlPort = ph.controlPort
+		playbackRole = true
+	}
+
+	// PORTS (§2): one consistent line per actually-bound port at startup. The player's
+	// own stream/control lines were already logged by buildPlayer.
 	host := opt.Host
 	if host == "" {
 		host = "0.0.0.0"
@@ -265,11 +589,10 @@ func run(ctx context.Context, opt options) (rerr error) {
 	log.Info("port bound", "service", "source", "proto", "udp", "host", host, "port", sourcePort)
 	log.Info("port bound", "service", "gossip", "proto", "tcp+udp", "host", host, "port", gossipPort, "probeReleased", gossipReleased)
 
-	// 3. Addresses (§3.1). When bound to a SPECIFIC --host, only that address is
-	//    actually reachable, so advertise exactly it (critical on loopback dev/e2e:
-	//    advertising unbound interface CIDRs would make peers — and our own clock
-	//    self-dial — pick an address nothing listens on). On the wildcard bind,
-	//    advertise the node's real interface CIDRs (§3.1).
+	// Addresses (§3.1). When bound to a SPECIFIC --host, only that address is actually
+	// reachable, so advertise exactly it (critical on loopback dev/e2e: advertising
+	// unbound interface CIDRs would make peers — and our own clock self-dial — pick an
+	// address nothing listens on). On the wildcard bind, advertise interface CIDRs.
 	var addrs []string
 	if h := hostCIDR(opt.Host); h != "" {
 		addrs = []string{h}
@@ -277,53 +600,53 @@ func run(ctx context.Context, opt options) (rerr error) {
 		addrs = netx.InterfaceCIDRs()
 	}
 
-	// 4. Capabilities (D3/D32): $PATH probe + dlopen probes + static lists.
+	// Capabilities (D3/D32): $PATH probe + dlopen probes + static lists. A master-only
+	// node never plays locally, so it reports playback:false (no local Listener for the
+	// Driver to drive). A combined node keeps the host's real playback capability — its
+	// local player IS driven over the control plane.
 	caps := capabilities(opt)
-
-	// role=master (no playback piece): a pure controller/source. It still gossips,
-	// sources audio to other rooms, serves the API, and drives remote playback
-	// nodes — but never plays locally. Realized as the null sink + playback:false
-	// (D3): the playback piece is off, the master piece runs unchanged.
-	output := opt.Output
-	if !cfg.Role.Playback {
-		output = "null"
+	if ph == nil {
 		caps.Playback = false
-		log.Info("role=master: playback piece disabled (null sink, playback:false)")
+		log.Info("role=master: no local player (playback:false, control port 0)")
 	}
 
-	// 4b. Output-device enumeration (D37, §8.5): parse /proc/asound/pcm when the
-	//     alsa backend is loadable. Empty on hosts without ALSA/libasound.
+	// Output-device enumeration (D37, §8.5): parse /proc/asound/pcm when the alsa
+	// backend is loadable. Empty on hosts without ALSA/libasound.
 	outputDevices := device.ListOutputDevices()
 	log.Info("output devices", "devices", deviceIDs(outputDevices))
 
-	// 4c. Capture-device enumeration: PipeWire sources or ALSA capture PCMs,
-	//     offered as the device for `input:` (line-in) playback.
+	// Capture-device enumeration: PipeWire sources or ALSA capture PCMs, offered as the
+	// device for `input:` (line-in) playback.
 	inputDevices := audio.ListInputDevices()
 	log.Info("input devices", "count", len(inputDevices))
 
-	// 5. UDP mux over STREAM_PORT (not yet Run).
+	// UDP mux over the master's STREAM_PORT A (not yet Run). The clock SERVER lives on
+	// this mux — this is the endpoint the gossiped StreamPort points at.
 	mux := stream.NewMux(streamUDP, base)
 
-	// 6. Cluster (memberlist on the probed gossip port; impls StateStore). The
-	//    discovery Peers channel is consumed by the cluster's own join loop.
+	// Cluster (memberlist on the probed gossip port; impls StateStore). The discovery
+	// Peers channel is consumed by the cluster's own join loop. ControlPort is the
+	// PLAYER's bound port (combined) or 0 (master-only) — see the wiring note above.
 	var disc *discovery.Discovery
 	if cfg.NoMDNS {
 		log.Info("mDNS discovery disabled (--no-mdns); gossip relies on --join seeds")
 	} else {
 		disc = discovery.New(discovery.Config{
 			ID: cfg.NodeID,
-			// Role drives the advert (D49/D50): a master advertises its four ports;
-			// a playback-only node advertises control + caps. A combined node
-			// advertises as master (local playout is driven in-process, D61). The
-			// playback-only advert's ControlPort/Caps are wired with that bring-up.
-			Master:     cfg.Role.Master,
-			Playback:   cfg.Role.Playback,
-			GossipPort: gossipPort,
-			HTTPPort:   httpPort,
-			StreamPort: streamPort,
-			SourcePort: sourcePort,
-			Version:    version,
-			Log:        base,
+			// A master advertises its four ports; a combined node additionally advertises
+			// the PLAYER's control port (its local playout is driven over the control plane
+			// like any playback peer). A master-only node advertises Playback:false and
+			// controlPort 0, so the Driver never drives/polls a (nonexistent) local player.
+			Master:      true,
+			Playback:    playbackRole,
+			Name:        cfg.NodeName,
+			GossipPort:  gossipPort,
+			HTTPPort:    httpPort,
+			StreamPort:  streamPort,
+			SourcePort:  sourcePort,
+			ControlPort: controlPort,
+			Version:     version,
+			Log:         base,
 		})
 	}
 	var peers <-chan discovery.Peer
@@ -346,9 +669,10 @@ func run(ctx context.Context, opt options) (rerr error) {
 		InitialFollowing: cfg.Following,        // D45: rejoin previous group on return
 		Addrs:            addrs,
 		HTTPPort:         httpPort,
-		StreamPort:       streamPort,
+		StreamPort:       streamPort, // the master's stream A — the Driver builds ATTACH.Clock from this (D61 invariant)
 		SourcePort:       sourcePort,
 		GossipPort:       gossipPort,
+		ControlPort:      controlPort, // D61: the PLAYER's control port so the Driver drives+polls the local player over the wire
 		BindAddr:         opt.Host,
 		Peers:            peers,
 		StatePath:        filepath.Join(cfg.DataDir, "cluster.json"),
@@ -358,35 +682,22 @@ func run(ctx context.Context, opt options) (rerr error) {
 		return fmt.Errorf("cluster: %w", err)
 	}
 
-	// 7. Clock server (passive) + follower (contracts.Clock).
+	// Clock SERVER (passive) on the master's stream A mux. The master owns the cluster
+	// clock; it runs NO follower of its own — the local player (if any) follows over
+	// the control plane like a remote one.
 	clockSrv := clock.NewServer(mux, base)
 	clockSrv.Start() // registers 0x10 on the mux (idempotent, mux not yet running)
-	clockFol := clock.NewFollower(mux, base)
 
-	// 8. Sink backend + playout. ENSEMBLE_OUTPUT=null forces null (§8.5/D27).
-	//    Otherwise the output is the resilient failover chain: it tries every real
-	//    output (the configured device first) until one works, rotates on failure,
-	//    and rests with backoff after repeated whole-chain failures (D37).
-	backend, backendName, err := device.OpenResilient(output, cfg.OutputDevice, base)
-	if err != nil {
-		return fmt.Errorf("sink backend %q: %w", opt.Output, err)
+	// Report the player's chosen output backend so the UI can show it (combined). A
+	// master-only node has no sink; nothing to report.
+	if ph != nil {
+		cl.SetOutputBackend(ph.backendName)
+		if ar, ok := ph.backend.(device.ActiveReporter); ok {
+			ar.OnActive(func(kind string) { cl.SetOutputBackend(kind) })
+		}
 	}
-	cl.SetOutputBackend(backendName) // report the CHOSEN backend so the UI can show it
-	if ar, ok := backend.(device.ActiveReporter); ok {
-		// Surface the live output kind as the chain opens / rotates outputs.
-		ar.OnActive(func(kind string) { cl.SetOutputBackend(kind) })
-	}
-	theSink := sink.New(sink.Config{
-		Backend:       backend,
-		Clock:         clockFol,
-		BufferMs:      contracts.DefaultBufferMs,
-		Volume:        cfg.Volume,
-		OutputDelayMs: cfg.OutputDelayMs,
-		Channel:       cfg.Channel,
-		Log:           base,
-	})
 
-	// 9. Source server (master-side; idle until a session runs) on SOURCE_PORT.
+	// Source server (master-side; idle until a session runs) on SOURCE_PORT.
 	srcSrv := source.NewServer(source.Config{
 		Self: cfg.NodeID,
 		UDP:  srcUDP,
@@ -397,21 +708,17 @@ func run(ctx context.Context, opt options) (rerr error) {
 		OnStatus: cl.TouchPlaybackNode,
 	})
 
-	// 10. Subscriber client (member-side). The deliver closure decodes opus when
-	//     the payload is a compressed packet (not a full PCM frame), re-arms the
-	//     sink on a generation change, and pushes canonical PCM to the sink.
-	// Operator-disabled features (D40): a live, atomic set the local media/opus
-	// factories + deliver path consult so disabling opus/input refuses locally too
-	// (effective caps already gate new sessions cluster-wide).
-	disabled := newDisableState(cfg.Disabled)
+	// Operator-disabled features (D40): the master's media/opus factories consult this
+	// SAME set the player's deliver path + sink-swap use. Shared from the player in
+	// combined mode; master-only owns its own (no sink to swap, factories only).
+	var disabled *disableState
+	if ph != nil {
+		disabled = ph.disabled
+	} else {
+		disabled = newDisableState(cfg.Disabled)
+	}
 
-	subClient := stream.NewClient(stream.ClientConfig{
-		Mux:     mux,
-		Deliver: newDeliver(theSink, disabled, base),
-		Log:     base,
-	})
-
-	// 11. Media + opus factories (D's audio package), bound to MediaDir.
+	// Media + opus factories (D's audio package), bound to MediaDir.
 	media := mediaFactory{mediaDir: cfg.MediaDir, disabled: disabled}
 	var opusFac group.OpusFactory
 	if audio.OpusAvailable() {
@@ -420,18 +727,16 @@ func run(ctx context.Context, opt options) (rerr error) {
 		log.Debug("opus unavailable (libopus not loadable)")
 	}
 
-	// 12. Group engine (H).
+	// Group engine (H): a pure PRODUCER. It sources audio for the group it masters and
+	// reads master-time from clock.MonoNow() internally — it owns NO sink, subscriber,
+	// or clock follower (those belong to the PLAYER subsystem now).
 	engine := group.New(group.Params{
-		Cluster:  cl,
-		Media:    media,
-		Opus:     opusFac,
-		Source:   srcSrv,
-		Sub:      subClient,
-		Sink:     theSink,
-		Clock:    clockFol,
-		ClockCtl: clockFol,
-		Caps:     caps,
-		Log:      base,
+		Cluster: cl,
+		Media:   media,
+		Opus:    opusFac,
+		Source:  srcSrv,
+		Caps:    caps,
+		Log:     base,
 		// D45: persist every engine-driven follow change to node.json so this
 		// node rejoins its previous group after a temporary disappearance.
 		PersistFollowing: func(target id.ID) {
@@ -441,10 +746,10 @@ func run(ctx context.Context, opt options) (rerr error) {
 		},
 	})
 
-	// 12b. Spotify bridge manager (D57): owns the default Connect device plus one
-	//      go-librespot bridge per configured preset. Constructed now (no processes)
-	//      so the API can reconcile/rename it; started during ACTIVATE below. nil
-	//      when no go-librespot binary is present.
+	// Spotify bridge manager (D57): owns the default Connect device plus one
+	// go-librespot bridge per configured preset. Constructed now (no processes) so the
+	// API can reconcile/rename it; started during ACTIVATE below. nil when no
+	// go-librespot binary is present.
 	var spotMgr *spotify.Manager
 	if bin := audio.FindSpotifyBinary(); bin != "" {
 		spotMgr = spotify.NewManager(bin, cfg.DataDir, cfg.NodeName, engine, cl, base)
@@ -454,19 +759,21 @@ func run(ctx context.Context, opt options) (rerr error) {
 		spotifyCtl = spotMgr // typed-nil guard: a nil *Manager must stay a nil interface
 	}
 
-	// 13. API server (I) on the bound HTTP listener. Group is wired via an adapter
-	//     that forwards ctx and maps group errors to api sentinels.
+	// API server (I) on the bound HTTP listener. The sink-dependent fields operate on
+	// the PLAYER's real sink/follower in combined mode; in master-only mode there is no
+	// sink/follower, so Sink() returns nil (live-apply is a no-op), the apply closures
+	// are nil (persist+replicate only), and Stats reports engine-only telemetry.
 	distFS, err := fs.Sub(web.DistFS, "dist")
 	if err != nil {
 		distFS = nil
 	}
-	apiSrv := api.New(api.Config{
+	apiCfg := api.Config{
 		Cluster: cl,
 		Group:   &groupAdapter{e: engine, cl: cl},
 		Media:   api.NewMediaLister(cfg.MediaDir),
 		NodeCfg: cfg,
 		Spotify: spotifyCtl,
-		Stats:   statusStats(theSink, clockFol, engine),
+		Stats:   masterStatusStats(ph, engine),
 		PlaybackStatuses: func() []api.PlaybackStat {
 			m := srcSrv.Statuses()
 			out := make([]api.PlaybackStat, 0, len(m))
@@ -493,9 +800,6 @@ func run(ctx context.Context, opt options) (rerr error) {
 			}
 			return out
 		},
-		Sink:              func() api.SinkControl { return theSink },
-		ApplyOutputDevice: applyOutputDevice(backendName, theSink, base),
-		ApplyDisabled:     applyDisabled(disabled, output, cfg.OutputDevice, theSink, base),
 		Ports: api.PortsResp{
 			HTTP:   httpPort,
 			Stream: streamPort,
@@ -505,12 +809,20 @@ func run(ctx context.Context, opt options) (rerr error) {
 		Listener: httpLn,
 		DistFS:   distFS,
 		Log:      base,
-	})
+	}
+	if ph != nil {
+		// Wire the live-apply paths to the PLAYER's real sink (combined). The Driver
+		// points the local player at this node's clock (stream A) + source endpoints, so
+		// the API operating on ph.sink operates on the real, co-located device.
+		apiCfg.Sink = func() api.SinkControl { return ph.sink }
+		apiCfg.ApplyOutputDevice = applyOutputDevice(ph.backendName, ph.sink, base)
+		apiCfg.ApplyDisabled = applyDisabled(disabled, ph.outputSpec, ph.outputDev, ph.sink, base)
+	}
+	apiSrv := api.New(apiCfg)
 
-	// 14. SEED + ACTIVATE. Closers are pushed in acquisition order so the LIFO
-	//     unwind (§3.3) tears down in the intended reverse: disc → api → engine →
-	//     subscriber → source → sink → clock → cluster → mux. engine before
-	//     cluster so the master writes idle before we Leave.
+	// ACTIVATE. Closers are pushed in acquisition order so the LIFO unwind (§3.3) tears
+	// down in the intended reverse: disc → api → engine → source → cluster → mux. engine
+	// before cluster so the master writes idle before we Leave.
 	mux.Run()
 	stack.push("mux", func(context.Context) error { return mux.Close() })
 
@@ -525,17 +837,8 @@ func run(ctx context.Context, opt options) (rerr error) {
 		}
 	}
 
-	clockFol.Start()
-	stack.push("clock follower", func(context.Context) error { return clockFol.Close() })
-
-	stack.push("sink", func(context.Context) error { return theSink.Close() })
-
 	srcSrv.Run()
 	stack.push("source server", func(context.Context) error { return srcSrv.Close() })
-
-	// Subscriber client owns its own loops; the engine BYEs it via Close, but we
-	// also close it directly to stop receive loops after the engine has stopped.
-	stack.push("subscriber", func(context.Context) error { return subClient.Close() })
 
 	go engine.Run(ctx)
 	stack.push("engine", func(context.Context) error { return engine.Close() })
@@ -549,13 +852,13 @@ func run(ctx context.Context, opt options) (rerr error) {
 		stack.push("spotify", func(context.Context) error { return spotMgr.Close() })
 	}
 
-	// Master-side control driver (D59/D62): drives the non-gossiping playback nodes
-	// assigned to the group THIS node masters, over the control plane. It sends from
-	// the source UDP socket (the node's STATUS comes back to that same endpoint).
-	// D65: feed the driver each playback node's calibrated device-queue depth so it
-	// can equalize cross-room buffering. The stable per-room device-queue depth is
-	// recovered from STATUS as DeviceDelayNs−PhaseErrNs; only fresh,
-	// recently-heard rooms are included.
+	// Master-side control driver (D59/D62): drives the playback nodes assigned to the
+	// group THIS node masters — including the LOCAL player in combined mode, over the
+	// control plane (loopback) EXACTLY like a remote one. It sends from the source UDP
+	// socket (the node's STATUS comes back to that same endpoint).
+	// D65: feed the driver each playback node's calibrated device-queue depth so it can
+	// equalize cross-room buffering. The stable per-room device-queue depth is recovered
+	// from STATUS as DeviceDelayNs−PhaseErrNs; only fresh, recently-heard rooms count.
 	pbDelays := func() map[id.ID]playback.RoomDelay {
 		st := srcSrv.Statuses()
 		out := make(map[id.ID]playback.RoomDelay, len(st))
@@ -577,9 +880,10 @@ func run(ctx context.Context, opt options) (rerr error) {
 	stack.push("playback driver", func(context.Context) error { return pbDriver.Close() })
 
 	// Member-side 1 Hz playing stats: one INFO line/second while the local sink is
-	// actively playing (idle → silent). The master side is logged by H (it owns
-	// the session); here we own the sink/clock/subscriber directly.
-	go memberStatsLoop(ctx, theSink, clockFol, subClient, base)
+	// actively playing (idle → silent). Only meaningful with a co-located player.
+	if ph != nil {
+		go memberStatsLoop(ctx, ph.sink, ph.follower, base)
+	}
 
 	if disc != nil {
 		disc.Run()
@@ -590,27 +894,42 @@ func run(ctx context.Context, opt options) (rerr error) {
 	go func() { apiErr <- apiSrv.Start() }()
 	stack.push("api", func(sc context.Context) error { return apiSrv.Shutdown(sc) })
 
-	printBanner(os.Stderr, fmt.Sprintf("ensemble %s — ready", version), [][2]string{
+	// Banner. Combined summarizes BOTH subsystems (master ports + the player's
+	// stream-B/control); master-only shows just the master ports.
+	bannerRows := [][2]string{
 		{"node", fmt.Sprintf("%s  (%s)", cfg.NodeName, cfg.NodeID.String())},
 		{"roles", cfg.Role.String()},
 		{"bind", host},
 		{"ports", fmt.Sprintf("http=%d  stream=%d  source=%d  gossip=%d  (tcp+udp; bind-or-increment)", httpPort, streamPort, sourcePort, gossipPort)},
-		{"paths", fmt.Sprintf("data=%s  media=%s", cfg.DataDir, cfg.MediaDir)},
-		{"output", backendName},
-		{"codecs", strings.Join(caps.Codecs, ", ")},
-		{"sources", strings.Join(caps.Sources, ", ")},
-		{"backends", strings.Join(caps.Backends, ", ")},
-		{"spotify", spotifyBannerValue(cfg.NodeName)},
-	})
+	}
+	if ph != nil {
+		bannerRows = append(bannerRows, [2]string{"player", fmt.Sprintf("stream=%d  control=%d", ph.streamPort, ph.controlPort)})
+	}
+	output := "—  (no local player)"
+	if ph != nil {
+		output = ph.backendName
+	}
+	bannerRows = append(bannerRows,
+		[2]string{"paths", fmt.Sprintf("data=%s  media=%s", cfg.DataDir, cfg.MediaDir)},
+		[2]string{"output", output},
+		[2]string{"codecs", strings.Join(caps.Codecs, ", ")},
+		[2]string{"sources", strings.Join(caps.Sources, ", ")},
+		[2]string{"backends", strings.Join(caps.Backends, ", ")},
+		[2]string{"spotify", spotifyBannerValue(cfg.NodeName)},
+	)
+	printBanner(os.Stderr, fmt.Sprintf("ensemble %s — ready", version), bannerRows)
 
 	log.Info("ready",
 		"version", version,
 		"id", cfg.NodeID.String(), "name", cfg.NodeName,
 		"http", httpPort, "stream", streamPort, "source", sourcePort, "gossip", gossipPort,
-		"output", backendName, "media", cfg.MediaDir, "playback", caps.Playback,
+		"control", controlPort,
+		"output", output, "media", cfg.MediaDir, "playback", caps.Playback,
 	)
 
-	// 15. Wait for shutdown signal or a fatal API error.
+	// Wait for shutdown signal or a fatal API error (combined: the master's HTTP error
+	// is fatal and cancels both subsystems via the shared ctx — once we unwind, ctx is
+	// already cancelled or we are exiting, so the player's loops stop too).
 	select {
 	case <-ctx.Done():
 		log.Info("shutting down")
@@ -620,158 +939,22 @@ func run(ctx context.Context, opt options) (rerr error) {
 		}
 	}
 
-	// Reset the deferred early-unwind path: from here we unwind unconditionally
-	// with a fresh, bounded context.
+	// Reset the deferred early-unwind path: from here we unwind unconditionally with a
+	// fresh, bounded context. Master FIRST (stops driving, writes idle, leaves cluster),
+	// THEN the co-located player (so it detaches only after the master has stopped
+	// driving it).
 	sc, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if uerr := stack.unwind(sc, log); uerr != nil && rerr == nil {
 		rerr = uerr
 	}
-	// Prevent the deferred early-unwind from double-running.
 	stack.fns = nil
-	return rerr
-}
-
-// runPlayback is the standalone PLAYBACK-PIECE bring-up (D49/D50/D61): a
-// non-gossiping, receive-only node. It runs the clock follower + subscriber + sink
-// behind a localPlayer, exposes a control Listener on CONTROL_PORT, and announces
-// itself over mDNS as a playback node. A master discovers and drives it (ATTACH/
-// SETVOL/SETDELAY). It never gossips, sources audio, runs a group engine, or serves
-// an HTTP API (D56) — the master piece is entirely absent from this process.
-func runPlayback(ctx context.Context, opt options, cfg *config.Config, base *slog.Logger) (rerr error) {
-	log := base.With("comp", "main")
-
-	stack := &shutdownStack{}
-	defer func() {
-		if rerr != nil {
-			sc, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = stack.unwind(sc, log)
-			cancel()
+	if ph != nil {
+		if uerr := ph.stack.unwind(sc, log); uerr != nil && rerr == nil {
+			rerr = uerr
 		}
-	}()
-
-	// Sockets: STREAM_PORT (mux: clock probes + UDP audio) and CONTROL_PORT
-	// (master→playback commands). No HTTP, source, or gossip ports.
-	streamTCP, streamUDP, streamPort, err := netx.BindTCPUDP(opt.Host, cfg.StreamPort, bindTries(cfg.ExplicitPorts.Stream))
-	if err != nil {
-		return portBindErr("stream", cfg.StreamPort, cfg.ExplicitPorts.Stream, err)
+		ph.stack.fns = nil
 	}
-	_ = streamTCP.Close() // a playback node dials the master's source for TCP; it never listens
-	stack.push("stream socket", func(context.Context) error { _ = streamUDP.Close(); return nil })
-
-	ctrlTCP, ctrlUDP, controlPort, err := netx.BindTCPUDP(opt.Host, cfg.ControlPort, bindTries(cfg.ExplicitPorts.Control))
-	if err != nil {
-		return portBindErr("control", cfg.ControlPort, cfg.ExplicitPorts.Control, err)
-	}
-	_ = ctrlTCP.Close() // control is UDP soft-state (D58)
-	stack.push("control socket", func(context.Context) error { _ = ctrlUDP.Close(); return nil })
-
-	caps := capabilities(opt)
-	log.Info("port bound", "service", "stream", "proto", "udp", "port", streamPort)
-	log.Info("port bound", "service", "control", "proto", "udp", "port", controlPort)
-
-	// Sink backend + playout, fed by the subscriber through the decode/deliver path.
-	// Resilient failover chain (D37): try every real output until one works.
-	backend, backendName, err := device.OpenResilient(opt.Output, cfg.OutputDevice, base)
-	if err != nil {
-		return fmt.Errorf("sink backend %q: %w", opt.Output, err)
-	}
-	mux := stream.NewMux(streamUDP, base)
-	clockFol := clock.NewFollower(mux, base)
-	theSink := sink.New(sink.Config{
-		Backend:       backend,
-		Clock:         clockFol,
-		BufferMs:      contracts.DefaultBufferMs,
-		Volume:        cfg.Volume,
-		OutputDelayMs: cfg.OutputDelayMs,
-		Channel:       cfg.Channel,
-		Log:           base,
-	})
-	disabled := newDisableState(cfg.Disabled)
-	subClient := stream.NewClient(stream.ClientConfig{
-		Mux:     mux,
-		Deliver: newDeliver(theSink, disabled, base),
-		Log:     base,
-	})
-
-	// The playout component (D61), driven over the wire by the control Listener.
-	player := playback.NewLocal(playback.Config{
-		Self:  cfg.NodeID,
-		Clock: clockFol,
-		Sub:   subClient,
-		Sink:  theSink,
-		ClockStats: func() (int64, int64, bool) {
-			st := clockFol.Stats()
-			return st.OffsetNs, st.RTTNs, st.Synced
-		},
-	})
-	listener := playback.NewListener(playback.ListenerConfig{Conn: ctrlUDP, Player: player, Log: base})
-
-	// mDNS playback advert (D50/D51): control port + capabilities, no gossip.
-	var disc *discovery.Discovery
-	if cfg.NoMDNS {
-		log.Info("mDNS disabled (--no-mdns); playback node will not be discoverable")
-	} else {
-		disc = discovery.New(discovery.Config{
-			ID:          cfg.NodeID,
-			Master:      false,
-			Playback:    true,
-			Name:        cfg.NodeName,
-			Version:     version,
-			ControlPort: controlPort,
-			Caps: discovery.Caps{
-				Codecs:         caps.Codecs,
-				MaxRate:        stream.SampleRate,
-				CanReportQueue: backendReportsQueue(backend),
-				Input:          containsStr(caps.Sources, "input"),
-			},
-			Log: base,
-		})
-	}
-
-	// Activate (teardown unwinds in reverse).
-	mux.Run()
-	stack.push("mux", func(context.Context) error { return mux.Close() })
-	clockFol.Start()
-	stack.push("clock follower", func(context.Context) error { return clockFol.Close() })
-	stack.push("sink", func(context.Context) error { return theSink.Close() })
-	stack.push("subscriber", func(context.Context) error { return subClient.Close() })
-	listener.Run()
-	stack.push("listener", func(context.Context) error { return listener.Close() })
-	if disc != nil {
-		disc.Run()
-		stack.push("discovery", func(context.Context) error { return disc.Close() })
-	}
-
-	pbHost := opt.Host
-	if pbHost == "" {
-		pbHost = "0.0.0.0"
-	}
-	printBanner(os.Stderr, fmt.Sprintf("ensemble %s — ready", version), [][2]string{
-		{"node", fmt.Sprintf("%s  (%s)", cfg.NodeName, cfg.NodeID.String())},
-		{"roles", "playback"},
-		{"bind", pbHost},
-		{"ports", fmt.Sprintf("control=%d  stream=%d  (tcp+udp; bind-or-increment)", controlPort, streamPort)},
-		{"paths", fmt.Sprintf("data=%s", cfg.DataDir)},
-		{"output", backendName},
-		{"codecs", strings.Join(caps.Codecs, ", ")},
-		{"backends", strings.Join(caps.Backends, ", ")},
-	})
-
-	log.Info("ready",
-		"version", version, "id", cfg.NodeID.String(), "name", cfg.NodeName,
-		"role", "playback", "control", controlPort, "stream", streamPort,
-		"output", backendName, "codecs", caps.Codecs,
-	)
-
-	<-ctx.Done()
-	log.Info("shutting down")
-	sc, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if uerr := stack.unwind(sc, log); uerr != nil && rerr == nil {
-		rerr = uerr
-	}
-	stack.fns = nil
 	return rerr
 }
 
@@ -1037,8 +1220,9 @@ func newDeliver(sk contracts.Sink, disabled *disableState, log *slog.Logger) str
 // memberStatsLoop emits the member-side 1 Hz playing-stats line (comp=sink)
 // while the local sink is actively playing. It ticks every second and logs only
 // when playout advanced (played/silence moved) since the previous tick, so an
-// idle node stays quiet. Returns when ctx is cancelled.
-func memberStatsLoop(ctx context.Context, sk *sink.Playout, fol *clock.Follower, sub *stream.Client, log *slog.Logger) {
+// idle node stays quiet. Returns when ctx is cancelled. Driven by the PLAYER's
+// sink + clock follower (combined mode); a master-only node has neither.
+func memberStatsLoop(ctx context.Context, sk *sink.Playout, fol *clock.Follower, log *slog.Logger) {
 	sl := log.With("comp", "sink")
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
@@ -1058,7 +1242,6 @@ func memberStatsLoop(ctx context.Context, sk *sink.Playout, fol *clock.Follower,
 		prevPlayed, prevSilence = ss.Played, ss.Silence
 
 		cs := fol.Stats()
-		ct := sub.Counters()
 		sl.Info("playing",
 			"side", "member",
 			"played", ss.Played,
@@ -1069,9 +1252,6 @@ func memberStatsLoop(ctx context.Context, sk *sink.Playout, fol *clock.Follower,
 			"synced", ss.Synced,
 			"offsetNs", cs.OffsetNs,
 			"rttNs", cs.RTTNs,
-			"delivered", ct.Delivered,
-			"recovered", ct.Recovered,
-			"lost", ct.Lost,
 		)
 	}
 }
@@ -1193,18 +1373,18 @@ func applyDisabled(state *disableState, outputSpec, dev string, sk *sink.Playout
 	}
 }
 
-// statusStats builds the GET /api/status closure from the sink (E), clock
-// follower (F), and engine (H — source stats only while a session runs, D19).
-func statusStats(sk contracts.Sink, fol *clock.Follower, eng *group.Engine) func() api.StatusStats {
+// masterStatusStats builds the GET /api/status closure for the master subsystem.
+// In combined mode it reports the co-located PLAYER's sink (E) + clock follower (F)
+// telemetry plus the engine's source stats (H — only while a session runs, D19). In
+// master-only mode (ph == nil) there is NO sink or follower, so it reports engine-only
+// stats (zero sink/clock), which the API renders fine.
+func masterStatusStats(ph *playerHandle, eng *group.Engine) func() api.StatusStats {
 	return func() api.StatusStats {
-		fs := fol.Stats()
-		st := api.StatusStats{
-			Sink: sk.Stats(),
-			Clock: api.ClockStat{
-				Synced:   fs.Synced,
-				OffsetNs: fs.OffsetNs,
-				RTTNs:    0,
-			},
+		var st api.StatusStats
+		if ph != nil {
+			fs := ph.follower.Stats()
+			st.Sink = ph.sink.Stats()
+			st.Clock = api.ClockStat{Synced: fs.Synced, OffsetNs: fs.OffsetNs, RTTNs: 0}
 		}
 		if src, ok := eng.SourceStats(); ok {
 			st.Source = &src

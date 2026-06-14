@@ -141,6 +141,12 @@ func TestDriverDetachesIdleGroup(t *testing.T) {
 	if !hasType(hs, stream.TypeDetach) {
 		t.Fatal("idle group should DETACH the assigned node")
 	}
+	// Config is the node's state, not a property of playback: volume + channel are
+	// asserted even while the group is idle, so a volume change takes effect at once
+	// (not only once the group starts playing).
+	if !hasType(hs, stream.TypeSetVol) {
+		t.Fatal("idle group should still push SETVOL (config is not gated by playing)")
+	}
 }
 
 func TestDriverDetachesUnassignedNode(t *testing.T) {

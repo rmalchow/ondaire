@@ -97,15 +97,6 @@
   </span>
   <span class="spacer"></span>
   <div class="header-right">
-    {#if route === "nodes"}
-      <a class="iconlink" href="#/" title="Back to rooms" aria-label="Back to rooms">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="8,3 4,7 8,11" /><line x1="4" y1="7" x2="11" y2="7" /></svg>
-      </a>
-    {:else}
-      <a class="iconlink" href="#/nodes" title="Nodes" aria-label="Nodes">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="2.2" /><path d="M7 1.5v1.2M7 11.3v1.2M1.5 7h1.2M11.3 7h1.2M3.22 3.22l.85.85M9.93 9.93l.85.85M3.22 10.78l.85-.85M9.93 4.07l.85-.85" /></svg>
-      </a>
-    {/if}
     <NodeSwitcher snapshot={cluster.snapshot} {self} {statusLevel} {statusTitle} />
   </div>
 </header>
@@ -115,6 +106,20 @@
 {/if}
 
 <Toast />
+
+<h1 class="page-switch">
+  <a
+    href="#/"
+    class="switch-item"
+    class:active={route !== "nodes"}
+    aria-current={route !== "nodes" ? "page" : undefined}>rooms</a>
+  <span class="switch-sep" aria-hidden="true">|</span>
+  <a
+    href="#/nodes"
+    class="switch-item"
+    class:active={route === "nodes"}
+    aria-current={route === "nodes" ? "page" : undefined}>nodes</a>
+</h1>
 
 {#if route === "nodes"}
   <Nodes snapshot={cluster.snapshot} {self} />

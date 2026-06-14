@@ -63,8 +63,13 @@ type NodeRecord struct {
 
 	// PlaybackNode marks a non-gossiping, wire-driven playback node (D50/D59):
 	// this record is a PROXY injected by a discovering master from the node's mDNS
-	// advert, not self-owned. ControlPort is where the master sends control-plane
-	// commands (D58). Normal gossiping nodes leave these zero.
+	// advert, not self-owned. Normal gossiping nodes leave PlaybackNode zero.
+	//
+	// ControlPort is where the control plane sends commands (D58). It is set for
+	// BOTH a proxied playback node AND a self-owned full node that runs a control
+	// Listener (D61) — its own Driver drives its local playout over the wire, so
+	// the master appears in its own sync-health. Zero only for a node with no
+	// control endpoint.
 	PlaybackNode bool `json:"playbackNode,omitempty"`
 	ControlPort  int  `json:"controlPort,omitempty"`
 

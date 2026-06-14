@@ -3,21 +3,12 @@ package group
 import (
 	"errors"
 	"strings"
-	"time"
 
 	"ensemble/internal/contracts"
 	"ensemble/internal/dl"
 	"ensemble/internal/id"
 	"ensemble/internal/stream"
 )
-
-// clockWaitTimeout bounds how long Play waits for the local clock follower to
-// sync before stamping pts (§7). A master follows its own clock server over the
-// network like any member (its real advertised address), syncing in ~1 s.
-const clockWaitTimeout = 2 * time.Second
-
-// clockWaitPoll is the retry cadence while waiting for clock sync.
-const clockWaitPoll = 50 * time.Millisecond
 
 // Play starts playback of uri on this node's group (§6/§8.2). Master-only.
 //
@@ -208,10 +199,10 @@ func (e *Engine) republishLocked() {
 	e.lastBeat = e.now()
 }
 
-// installSession negotiates the codec, builds the opus encoder, waits for clock
-// sync, then installs src as the running session under e.mu, replacing any prior
-// one (§8.6). src is already open (and, for a queue, primed). uri is the session
-// label (a queue's now-playing URI is taken from the source per frame).
+// installSession negotiates the codec, builds the opus encoder, then installs src
+// as the running session under e.mu, replacing any prior one (§8.6). src is
+// already open (and, for a queue, primed). uri is the session label (a queue's
+// now-playing URI is taken from the source per frame).
 func (e *Engine) installSession(uri string, src MediaSource) error {
 	live := src.Live()
 	pacing := "pull"
@@ -264,15 +255,9 @@ func (e *Engine) installSession(uri string, src MediaSource) error {
 		e.log.Info("opus encoder created")
 	}
 
-	// Clock readiness: stamp startMaster in master time (§7). Retry-wait.
-	startMaster, ok := e.waitForClock()
-	if !ok {
-		_ = src.Close()
-		if enc != nil {
-			_ = enc.Close()
-		}
-		return ErrNotSynced
-	}
+	// Stamp startMaster in master time (§7): the master OWNS the clock, so
+	// master-time now == clock.MonoNow() exactly.
+	startMaster := e.nowMaster()
 
 	// Install the new session (under lock). Replace any running one.
 	e.mu.Lock()
@@ -315,12 +300,9 @@ func (e *Engine) installSession(uri string, src MediaSource) error {
 		"uri", uri, "gen", gen, "codec", settings.Codec, "transport", settings.Transport,
 		"bufferMs", settings.BufferMs, "leadMs", e.p.LeadMs, "live", live)
 
-	// Drive THIS node's player: if it follows its own group it hears the new session
-	// immediately; if its player is elsewhere (crosswise), it stays there and the
-	// reconcile loop drives it. drivePlayerLocked reads the live session for the
-	// self-target case.
-	e.drivePlayerLocked(mv)
-
+	// This node's own player learns of the new session over the control plane (its
+	// Driver sees the published playback record → ATTACH), identically to a remote
+	// player; the engine no longer self-drives it.
 	e.p.Cluster.SetPlayback(groupID, sess.playbackRecord(e.now(), e.p.Source.Stats()))
 	e.lastBeat = e.now()
 
@@ -368,10 +350,11 @@ func (e *Engine) RefreshPlayback() {
 
 // Pause freezes the running session (D39). Master-only. The media source and the
 // session/gen stay alive; the release loop stops emitting (position frozen). The
-// replicated playback record flips to state="paused", which the member-side
-// session gating (watch.go) treats as NOT playing — so members BYE the source and
-// Disarm their sinks, and the master leaves its own subscription too. The
-// release ticker keeps ticking purely to keep the goroutine alive; no frames flow.
+// replicated playback record flips to state="paused", which the wire-driven
+// control plane (the per-node Driver) treats as NOT playing — so every assigned
+// node, including this master itself, gets a DETACH that BYEs the source and
+// disarms its sink. The release ticker keeps ticking purely to keep the goroutine
+// alive; no frames flow.
 // 409 ErrNotPlaying if nothing is playing or it is already paused.
 func (e *Engine) Pause() error {
 	e.mu.Lock()
@@ -388,13 +371,6 @@ func (e *Engine) Pause() error {
 		s.pausedSec = 0
 	}
 	s.paused.Store(true)
-	// Re-drive our own player now (the session is paused → if we play our own group,
-	// detach immediately rather than waiting for a reconcile).
-	snap := e.p.Cluster.Snapshot()
-	mv := myGroup(snap, e.self)
-	if mv.found {
-		e.drivePlayerLocked(mv)
-	}
 	e.p.Source.StopSession() // tell any still-attached subscribers to drop (RECONFIG/stop)
 	e.p.Cluster.SetPlayback(s.groupID, s.playbackRecord(e.now(), contracts.SourceStats{}))
 	e.lastBeat = e.now()
@@ -403,19 +379,15 @@ func (e *Engine) Pause() error {
 }
 
 // Resume un-freezes a paused session (D39). Master-only. It bumps the generation
-// and re-anchors sessionStart to LocalToMaster(now)+lead — pts restart contiguous-
+// and re-anchors sessionStart to nowMaster()+lead — pts restart contiguous-
 // monotonic under the NEW gen (the frame index resets; the source continues from
 // where it stopped, so audio is contiguous though pts restart with the gen). For
 // LIVE sources the readahead already dropped what arrived while paused, so resume
-// returns at the live edge. Re-arms the source session, re-points local plumbing,
-// resumes the ticker, and writes state="playing". 409 ErrNotPaused if not paused.
+// returns at the live edge. Re-arms the source session, resumes the ticker, and
+// writes state="playing". 409 ErrNotPaused if not paused.
 func (e *Engine) Resume() error {
-	// Clock readiness for the fresh sessionStart (master follows its own clock
-	// server over the network; ~ms once synced).
-	startMaster, ok := e.waitForClock()
-	if !ok {
-		return ErrNotSynced
-	}
+	// Fresh sessionStart in master time: the master OWNS the clock (§7).
+	startMaster := e.nowMaster()
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -426,14 +398,12 @@ func (e *Engine) Resume() error {
 		return ErrNotPaused
 	}
 	s := e.sess
-	snap := e.p.Cluster.Snapshot()
-	mv := myGroup(snap, e.self)
-	if !mv.found {
-		return ErrNotSynced
+	if mv := myGroup(e.p.Cluster.Snapshot(), e.self); !mv.found {
+		return ErrNotSynced // self not derived yet; transient, retry
 	}
 
 	s.paused.Store(false)
-	e.restartSessionLocked(mv, startMaster)
+	e.restartSessionLocked(startMaster)
 	e.log.Info("playback resumed", "uri", s.uri, "gen", e.gen)
 	return nil
 }
@@ -441,10 +411,11 @@ func (e *Engine) Resume() error {
 // restartSessionLocked re-anchors the running session at the source's CURRENT
 // position under a fresh generation: bump gen, re-stamp startMaster, signal run()
 // to reset its frame index, re-arm the source session (RECONFIG → members drop
-// their buffer and re-prime from here), drive the local player, and republish.
-// Shared by Resume and Seek. Caller holds e.mu; e.sess is non-nil and NOT paused;
-// mv is this node's view; startMaster is a fresh clock reading.
-func (e *Engine) restartSessionLocked(mv myView, startMaster int64) {
+// their buffer and re-prime from here), and republish. The local player picks up
+// the new gen over the control plane like a remote player. Shared by Resume and
+// Seek. Caller holds e.mu; e.sess is non-nil and NOT paused; startMaster is a
+// fresh master-clock reading.
+func (e *Engine) restartSessionLocked(startMaster int64) {
 	s := e.sess
 	e.gen++
 	gen := e.gen
@@ -452,7 +423,6 @@ func (e *Engine) restartSessionLocked(mv myView, startMaster int64) {
 	s.startMaster.Store(startMaster + int64(e.p.LeadMs)*1_000_000)
 	s.anchorSeq.Add(1) // signal run() to reset its frame index to 0 under the new gen
 	e.p.Source.StartSession(gen, stream.ParseTransport(s.transport), s.bufferMs)
-	e.drivePlayerLocked(mv)
 	e.p.Cluster.SetPlayback(s.groupID, s.playbackRecord(e.now(), e.p.Source.Stats()))
 	e.lastBeat = e.now()
 }
@@ -465,10 +435,7 @@ func (e *Engine) Seek(positionSec float64) error {
 	if positionSec < 0 {
 		positionSec = 0
 	}
-	startMaster, ok := e.waitForClock()
-	if !ok {
-		return ErrNotSynced
-	}
+	startMaster := e.nowMaster()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
@@ -492,12 +459,10 @@ func (e *Engine) Seek(positionSec float64) error {
 		e.log.Info("queue seek (paused)", "positionSec", positionSec)
 		return nil
 	}
-	snap := e.p.Cluster.Snapshot()
-	mv := myGroup(snap, e.self)
-	if !mv.found {
-		return ErrNotSynced
+	if mv := myGroup(e.p.Cluster.Snapshot(), e.self); !mv.found {
+		return ErrNotSynced // self not derived yet; transient, retry
 	}
-	e.restartSessionLocked(mv, startMaster)
+	e.restartSessionLocked(startMaster)
 	e.log.Info("queue seek", "positionSec", positionSec, "gen", e.gen)
 	return nil
 }
@@ -539,25 +504,6 @@ func (e *Engine) onSessionEnd(s *session, reason endReason) {
 	s.closeSrc()
 	e.p.Cluster.SetPlayback(groupID, contracts.Playback{State: "idle"})
 	e.log.Info("playback ended (EOF)", "uri", s.uri)
-}
-
-// waitForClock returns the master-clock "now" once the clock is synced,
-// retrying up to clockWaitTimeout. ok=false if it never syncs (transient
-// ErrNotSynced). Uses Clock.MasterNow() — NEVER LocalToMaster(wall-clock):
-// the offset is measured against the follower's own monotonic clock, so
-// injecting any other timebase shifts every pts by the inter-process
-// start-delta (the same-host lag-by-|offset| bug).
-func (e *Engine) waitForClock() (masterNanos int64, ok bool) {
-	deadline := e.now().Add(clockWaitTimeout)
-	for {
-		if m, k := e.p.Clock.MasterNow(); k {
-			return m, true
-		}
-		if !e.now().Before(deadline) {
-			return 0, false
-		}
-		time.Sleep(clockWaitPoll)
-	}
 }
 
 // negotiateCodecLocked computes the EFFECTIVE codec for a session over the group
@@ -614,10 +560,10 @@ func membersLackingCodec(snap contracts.Snapshot, mv myView, codec string) []str
 // supports it (D33 mid-session renegotiation). Only opus→pcm downgrades happen
 // automatically; upgrades wait for the next play/settings change. The restart
 // mirrors a live settings change: bump gen, drop the encoder, re-arm the source
-// session, broadcast RECONFIG (members reconnect), re-point local plumbing, and
-// rewrite the playback record — all resuming from the current position (the media
-// source keeps reading where it was; only pts restart under the new gen). Caller
-// holds e.mu; e.sess is non-nil and not paused.
+// session, broadcast RECONFIG (members reconnect), and rewrite the playback record
+// — all resuming from the current position (the media source keeps reading where
+// it was; only pts restart under the new gen). Caller holds e.mu; e.sess is
+// non-nil and not paused.
 func (e *Engine) renegotiateLocked(snap contracts.Snapshot, mv myView) {
 	s := e.sess
 	if s.codec != "opus" {
@@ -631,7 +577,7 @@ func (e *Engine) renegotiateLocked(snap contracts.Snapshot, mv myView) {
 		"lacking", "["+strings.Join(lacking, " ")+"]", "midSession", true)
 
 	// Downgrade in place: drop the encoder (run() publishes raw PCM next tick),
-	// bump gen, re-arm the source + local plumbing, broadcast RECONFIG.
+	// bump gen, re-arm the source, broadcast RECONFIG.
 	if prev := s.setEnc(nil); prev != nil {
 		_ = prev.Close()
 	}
@@ -640,8 +586,8 @@ func (e *Engine) renegotiateLocked(snap contracts.Snapshot, mv myView) {
 	gen := e.gen
 	s.gen.Store(gen)
 	e.p.Source.StartSession(gen, stream.ParseTransport(s.transport), s.bufferMs)
-	// The player is driven by reconcile (drivePlayerLocked) right after this returns,
-	// picking up the new gen if we play our own group.
+	// The local player picks up the new gen over the control plane (its Driver sees
+	// the republished record), identically to a remote player.
 	e.p.Cluster.SetPlayback(s.groupID, s.playbackRecord(e.now(), e.p.Source.Stats()))
 	e.lastBeat = e.now()
 	e.log.Info("session renegotiated to pcm", "uri", s.uri, "gen", gen)

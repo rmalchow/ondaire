@@ -149,43 +149,6 @@ func TestPlayReplacesRunningSession(t *testing.T) {
 	}
 }
 
-func TestPlayWaitsForClockSync(t *testing.T) {
-	self := idN(1)
-	r := newRig(self, 3, false)
-	r.cl.setSnap(soloSnap(self))
-	r.clk.setOK(false)
-	// Flip to synced shortly.
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		r.clk.setOK(true)
-	}()
-	if err := r.e.Play("song.wav"); err != nil {
-		t.Fatalf("Play: %v", err)
-	}
-	r.e.Close()
-}
-
-func TestPlayUnsyncedTimesOut(t *testing.T) {
-	self := idN(1)
-	r := newRig(self, 3, false)
-	r.cl.setSnap(soloSnap(self))
-	r.clk.setOK(false)
-	// Use the fake now to expire the wait fast: advance past clockWaitTimeout.
-	go func() {
-		for i := 0; i < 200; i++ {
-			r.advance(50 * time.Millisecond)
-			time.Sleep(time.Millisecond)
-		}
-	}()
-	err := r.e.Play("song.wav")
-	if !errors.Is(err, ErrNotSynced) {
-		t.Fatalf("err = %v, want ErrNotSynced", err)
-	}
-	if r.e.gen != 0 {
-		t.Fatal("gen consumed despite no sync")
-	}
-}
-
 func TestPlayOpusEncodes(t *testing.T) {
 	self := idN(1)
 	r := newRig(self, 4, false)

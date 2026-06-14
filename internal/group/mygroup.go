@@ -11,9 +11,9 @@ import (
 //   - `group` is the group this node MASTERS (Master == self, always 1:1). It is
 //     what this node SOURCES when it plays; its Members are the players that follow
 //     this node. Used for Play/Stop/settings/codec-negotiation/heartbeat.
-//   - `target` is the group this node's PLAYER plays — group(self.Following). It
-//     drives the clock/subscriber/sink. hasTarget is false when Following is Zero or
-//     points at a dead/unknown/non-master node (the player is then IDLE).
+//   - `target` is the group this node's PLAYER plays — group(self.Following). Used
+//     for composition + playing-stats logging. hasTarget is false when Following is
+//     Zero or points at a dead/unknown/non-master node (the player is then IDLE).
 //
 // found == false when self has no NodeView or its own group isn't derived yet
 // (transient): callers skip reconcile for that tick.

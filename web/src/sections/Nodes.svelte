@@ -14,7 +14,6 @@
 </script>
 
 <section class="section">
-  <h2>Nodes</h2>
   {#if nodes.length === 0}
     <div class="empty">No nodes yet.</div>
   {:else}

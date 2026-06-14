@@ -149,16 +149,13 @@ func (d *Driver) reconcile(snap contracts.Snapshot) {
 		byID[n.ID] = n
 	}
 
-	// Liveness poll (D60): ping EVERY known playback node on its control port —
+	// Liveness poll (D60/D61): ping EVERY node that exposes a control endpoint —
 	// assigned to us or not, playing or idle — so it replies with STATUS (→ source
-	// server → TouchPlaybackNode). This is the authoritative liveness signal for a
-	// known node and keeps an idle node (following no one) alive + re-addable; mDNS
-	// only does first discovery, whose re-announce cadence we don't control. One
-	// tiny datagram per node per tick.
+	// server → TouchPlaybackNode → srcSrv.statuses). controlEndpoint() returns false
+	// when ControlPort==0, so a plain non-playback node is skipped. A full node now
+	// carries its own ControlPort (D61), so this also polls SELF over loopback → the
+	// master appears in its own sync-health. One tiny datagram per node per tick.
 	for _, n := range snap.Nodes {
-		if !n.PlaybackNode {
-			continue
-		}
 		if ep, ok := controlEndpoint(n); ok {
 			pollStatus(d.w, ep)
 		}
@@ -181,8 +178,13 @@ func (d *Driver) reconcile(snap contracts.Snapshot) {
 		playing = myGroup.Playback.State == "playing"
 		settings = myGroup.Settings
 		for _, mid := range myGroup.Members {
-			if nv, ok := byID[mid]; ok && nv.PlaybackNode {
-				assigned[mid] = nv
+			// Drive any assigned member that exposes a control endpoint (D61): a
+			// gossiping full node (incl. SELF, driven over loopback) OR a
+			// non-gossiping playback node. controlEndpoint() gates on ControlPort.
+			if nv, ok := byID[mid]; ok {
+				if _, cok := controlEndpoint(nv); cok {
+					assigned[mid] = nv
+				}
 			}
 		}
 	}
@@ -213,6 +215,18 @@ func (d *Driver) reconcile(snap contracts.Snapshot) {
 			dr = &drive{player: NewRemote(d.w, ep, d.log), dst: ep}
 			d.active[nid] = dr
 		}
+		// Configuration is the NODE's state, NOT a property of playback (D54): assert
+		// volume + channel every tick whether or not the group is playing, so a
+		// volume/channel change takes effect immediately even on an idle group. The
+		// listener dedups, so a steady value re-applies only once.
+		dr.player.SetVolume(volPct(nv.Volume), false)
+		dr.player.SetChannel(chanModeByte(nv.Channel)) // dual-mono select; sink dedups
+		// Output delay is the NODE's property (its fixed device latency), set at
+		// startup from node.json and persisted there. The master must NOT push it
+		// routinely — that would clobber the node's own value with the proxied
+		// record's default (0), which is exactly the regression that broke sync.
+		// Calibration is the one exception (a deliberate, measured one-shot) and
+		// rides its own path, not this heartbeat.
 		if playing && epOK {
 			dr.player.Attach(Attach{
 				Source:    source,
@@ -221,18 +235,10 @@ func (d *Driver) reconcile(snap contracts.Snapshot) {
 				Transport: stream.ParseTransport(settings.Transport),
 				BufferMs:  settings.BufferMs,
 			})
-			dr.player.SetVolume(volPct(nv.Volume), false)
-			dr.player.SetChannel(chanModeByte(nv.Channel)) // dual-mono select; re-asserted each tick, sink dedups
-			// Output delay is the NODE's property (its fixed device latency), set at
-			// startup from node.json and persisted there. The master must NOT push it
-			// routinely — that would clobber the node's own value with the proxied
-			// record's default (0), which is exactly the regression that broke sync.
-			// Calibration is the one exception (a deliberate, measured one-shot) and
-			// rides its own path, not this heartbeat.
 		} else {
-			// Group idle (or endpoints unknown): keep the node idle. The session-end
-			// RECONFIG already idled its player; DETACH is the authoritative form and
-			// is idempotent.
+			// Group idle (or endpoints unknown): keep the node idle (DETACH is the
+			// authoritative, idempotent idle form) — but volume/channel above still
+			// applied, so the node is correctly configured for its next session.
 			dr.player.Detach()
 		}
 	}

@@ -54,6 +54,13 @@ func parseEntry(e *zeroconfServiceEntry, self id.ID) (Peer, bool) {
 		p.Master = true
 		p.Name = txt["name"] // masters advertise it too (for the mDNS-only Android picker)
 		p.GossipPort, p.HTTPPort, p.StreamPort, p.SourcePort = gossip, http, stream, source
+		// A COMBINED node (master + playback, D61) also advertises a control port; it
+		// plays via the control plane like any playback peer. Optional on a master
+		// advert (a master-only node omits it).
+		if control, ok := parsePort(txt["control"]); ok {
+			p.Playback = true
+			p.ControlPort = control
+		}
 	case playback:
 		// A playback node must carry a control port; ports/caps follow (D50/D51).
 		control, ok := parsePort(txt["control"])

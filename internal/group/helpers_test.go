@@ -1,7 +1,6 @@
 package group
 
 import (
-	"net/netip"
 	"sync"
 	"time"
 
@@ -15,10 +14,6 @@ type testRig struct {
 	cl  *fakeCluster
 	med *fakeMedia
 	srv *fakeSourceServer
-	sub *fakeSubscriber
-	snk *fakeSink
-	clk *fakeClock
-	cc  *fakeClockCtl
 	op  *fakeOpusFactory
 
 	nowMu sync.Mutex
@@ -34,24 +29,17 @@ func newRig(self id.ID, srcFrames int, live bool) *testRig {
 		cl:  newFakeCluster(self),
 		med: &fakeMedia{src: &fakeSource{remaining: srcFrames, live: live}},
 		srv: &fakeSourceServer{},
-		sub: &fakeSubscriber{},
-		snk: &fakeSink{},
-		clk: &fakeClock{ok: true},
-		cc:  &fakeClockCtl{},
 		op:  &fakeOpusFactory{},
 		now: time.Unix(1_700_000_000, 0),
 	}
 	r.e = New(Params{
-		Cluster:  r.cl,
-		Media:    r.med,
-		Opus:     r.op,
-		Source:   r.srv,
-		Sub:      r.sub,
-		Sink:     r.snk,
-		Clock:    r.clk,
-		ClockCtl: r.cc,
-		Caps:     contracts.Capabilities{Codecs: []string{"pcm"}},
-		now:      r.nowFn(),
+		Cluster:   r.cl,
+		Media:     r.med,
+		Opus:      r.op,
+		Source:    r.srv,
+		Caps:      contracts.Capabilities{Codecs: []string{"pcm"}},
+		now:       r.nowFn(),
+		nowMaster: r.nowMasterFn(),
 		PersistFollowing: func(t id.ID) {
 			r.persistMu.Lock()
 			r.persisted = append(r.persisted, t)
@@ -59,6 +47,17 @@ func newRig(self id.ID, srcFrames int, live bool) *testRig {
 		},
 	})
 	return r
+}
+
+// nowMasterFn is the deterministic master-clock seam: the engine OWNS the clock,
+// so master-time now is just the rig's fake wall clock in nanos. This makes
+// startMaster predictable (startMaster == nowMaster() at install time).
+func (r *testRig) nowMasterFn() func() int64 {
+	return func() int64 {
+		r.nowMu.Lock()
+		defer r.nowMu.Unlock()
+		return r.now.UnixNano()
+	}
 }
 
 // lastPersisted returns the most recent PersistFollowing target the engine drove.
@@ -143,10 +142,6 @@ func masterSnap(master id.ID, settings contracts.GroupSettings, members ...id.ID
 		})
 	}
 	return contracts.Snapshot{Nodes: nodes, Groups: groups}
-}
-
-func addrFor(n contracts.NodeView, port int) netip.AddrPort {
-	return netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), uint16(port))
 }
 
 // idN returns a deterministic non-zero ID for tests.

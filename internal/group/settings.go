@@ -68,9 +68,9 @@ func validateSettings(s contracts.GroupSettings, caps contracts.Capabilities) (c
 
 // SetSettings validates + writes group settings (master-only, §9.1) and applies
 // them LIVE (D23): bump generation, write the settings record, re-arm the source
-// ring, broadcast RECONFIG so subscribers re-read + resubscribe, and re-point the
-// local plumbing to (self,newGen). If a session is running it re-stamps under the
-// new gen mid-stream.
+// ring, and broadcast RECONFIG so subscribers re-read + resubscribe. If a session
+// is running it re-stamps under the new gen mid-stream; the local player picks up
+// the new gen over the control plane like a remote player.
 func (e *Engine) SetSettings(s contracts.GroupSettings) error {
 	v, err := validateSettings(s, e.p.Caps)
 	if err != nil {
@@ -107,6 +107,5 @@ func (e *Engine) SetSettings(s contracts.GroupSettings) error {
 	// Note: codec changes do not rebuild the running encoder mid-session — a codec
 	// change takes effect at the next Play. Transport/bufferMs apply live.
 	e.p.Source.StartSession(gen, stream.ParseTransport(v.Transport), v.BufferMs)
-	e.drivePlayerLocked(mv)
 	return nil
 }

@@ -125,22 +125,6 @@ type SourceServer interface {
 	Stats() contracts.SourceStats
 }
 
-// Subscriber is this node's member-side stream client (G internal/stream): it
-// subscribes to a master's SOURCE_PORT and delivers received frames to the
-// local sink (deliver wiring is K's, not H's). Method names follow *stream.Client
-// (D29). Subscribe is idempotent for an unchanged (addr,gen,transport).
-type Subscriber interface {
-	Subscribe(sourceAddr netip.AddrPort, gen uint32, t stream.Transport) error
-	Unsubscribe()
-}
-
-// ClockControl re-points the local clock follower at the current master clock
-// endpoint + generation (§7/D17). Implemented by *clock.Follower. The follower
-// discards samples and resyncs on any change; a same-target call is a no-op.
-type ClockControl interface {
-	SetMaster(dst netip.AddrPort, gen uint32)
-}
-
 // FollowClient (contracts.FollowClient, D16) drives takeover (§5.2): POST
 // /api/follow|/unfollow on peers. Concrete impl injected by the API piece (I).
 type FollowClient = contracts.FollowClient

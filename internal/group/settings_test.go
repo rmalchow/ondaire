@@ -139,16 +139,24 @@ func TestSetSettingsLiveMidSession(t *testing.T) {
 	defer r.e.Close()
 	waitFor(t, time.Second, func() bool { return len(r.srv.snapshotReleases()) >= 1 }, "first release")
 
+	genBefore := func() uint32 { r.e.mu.Lock(); defer r.e.mu.Unlock(); return r.e.gen }()
+	startsBefore := r.srv.startCount()
+
 	if err := r.e.SetSettings(contracts.GroupSettings{Codec: "pcm", Transport: "tcp", BufferMs: 200}); err != nil {
 		t.Fatalf("SetSettings: %v", err)
 	}
-	// The subscriber should have been re-pointed (extra Subscribe call) under the
-	// new gen.
-	waitFor(t, time.Second, func() bool {
-		subs := r.sub.snapshotSubs()
-		if len(subs) == 0 {
-			return false
-		}
-		return subs[len(subs)-1].gen == r.e.gen
-	}, "subscriber re-pointed to new gen")
+	// A live settings change bumps the gen and re-arms the source ring under the new
+	// gen/transport/buffer; the local player picks it up over the control plane (no
+	// in-engine repoint anymore).
+	genAfter := func() uint32 { r.e.mu.Lock(); defer r.e.mu.Unlock(); return r.e.gen }()
+	if genAfter <= genBefore {
+		t.Fatalf("live settings did not bump gen: %d -> %d", genBefore, genAfter)
+	}
+	if r.srv.startCount() <= startsBefore {
+		t.Fatalf("live settings did not re-arm the source: %d -> %d", startsBefore, r.srv.startCount())
+	}
+	st, ok := r.srv.lastStart()
+	if !ok || st.gen != genAfter || st.bufferMs != 200 {
+		t.Fatalf("source re-arm = %+v, want gen %d bufferMs 200", st, genAfter)
+	}
 }

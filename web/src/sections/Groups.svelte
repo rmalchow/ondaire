@@ -16,7 +16,6 @@
 </script>
 
 <section class="section">
-  <h2>Rooms</h2>
   {#if groups.length === 0}
     <div class="empty">No rooms yet.</div>
   {:else}

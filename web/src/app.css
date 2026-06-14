@@ -142,26 +142,46 @@ a {
 .status-pill.bad::before {
   background: var(--danger);
 }
-.app-header .iconlink {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
+/* page switcher: the big "rooms | nodes" headline doubles as the page nav. The
+   active page reads in full white with a static mint underline bar (styled to
+   look like the marketing nav links, but not the grow-on-hover mechanism); the
+   other word stays muted and just brightens on hover. */
+.page-switch {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 500;
+  font-size: 38px;
+  text-transform: lowercase;
+  letter-spacing: -0.01em;
+  margin: 10px 0 30px;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.page-switch .switch-item {
+  position: relative;
   color: var(--muted);
   text-decoration: none;
-  font-size: 16px;
-  line-height: 1;
+  transition: color 0.18s ease;
 }
-.app-header .iconlink:hover {
+.page-switch .switch-item:hover {
   color: var(--fg);
-  /* same accent glow as a selected room (GroupCard .selected) */
-  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
-    0 0 22px -6px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.page-switch .switch-item.active {
+  color: var(--fg);
+}
+.page-switch .switch-item.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -8px;
+  height: 2px;
+  background: var(--accent);
+}
+.page-switch .switch-sep {
+  color: var(--muted);
+  opacity: 0.3;
+  font-weight: 400;
 }
 
 /* sections / panels */
@@ -169,11 +189,14 @@ a {
   margin-bottom: 22px;
 }
 .section > h2 {
-  font-size: 15px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-  margin-bottom: 8px;
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 500;
+  font-size: 38px;
+  text-transform: lowercase;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  /* give the page headline room to breathe above and below */
+  margin: 10px 0 18px;
 }
 
 .card {

@@ -7,13 +7,14 @@ import (
 )
 
 // TestPauseFreezesAndResumeRearms exercises D39: pause freezes the session
-// (state=paused, source stopped, sink disarmed, gen alive) and resume bumps the
-// gen, re-anchors, and re-arms the source + sink.
+// (state=paused, source stopped, gen alive) and resume bumps the gen, re-anchors,
+// and re-arms the source. The local SINK disarm/re-arm now rides the wire-driven
+// control plane (the per-node Driver sees state!=playing → DETACH), not the
+// engine, so it is not asserted here.
 func TestPauseFreezesAndResumeRearms(t *testing.T) {
 	self := idN(1)
 	r := newRig(self, 1_000_000, false) // effectively endless pull source
 	r.cl.setSnap(soloSnap(self))
-	r.clk.offset = 500_000
 
 	if err := r.e.Play("song.wav"); err != nil {
 		t.Fatalf("Play: %v", err)
@@ -22,7 +23,6 @@ func TestPauseFreezesAndResumeRearms(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return len(r.srv.snapshotReleases()) >= 2 }, "releasing")
 
 	genBefore := func() uint32 { r.e.mu.Lock(); defer r.e.mu.Unlock(); return r.e.gen }()
-	disarmsBefore := r.snk.disarmCount()
 
 	// --- pause ---
 	if err := r.e.Pause(); err != nil {
@@ -31,9 +31,6 @@ func TestPauseFreezesAndResumeRearms(t *testing.T) {
 	pb, _ := r.cl.lastPlayback()
 	if pb.pb.State != "paused" {
 		t.Fatalf("state = %q, want paused", pb.pb.State)
-	}
-	if r.snk.disarmCount() <= disarmsBefore {
-		t.Fatalf("sink not disarmed on pause (disarms=%d)", r.snk.disarmCount())
 	}
 
 	// Releases must stop advancing while paused (allow the in-flight tick).

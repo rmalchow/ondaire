@@ -195,15 +195,32 @@ func TestTXTRecordsPlaybackOnly(t *testing.T) {
 }
 
 // A combined master+playback node advertises as a master (D61).
-func TestTXTRecordsCombinedAdvertisesMaster(t *testing.T) {
+// A COMBINED node (master + playback, D61) advertises as a master AND carries its
+// control port — its own local playout is driven over the control plane like any
+// playback peer, so peers (and itself) learn its control endpoint.
+func TestTXTRecordsCombinedAdvertisesMasterWithControl(t *testing.T) {
 	cfg := Config{ID: peerID, Master: true, Playback: true, GossipPort: 7946, HTTPPort: 8080, StreamPort: 9090, SourcePort: 9200, ControlPort: 9300}
 	got := txtRecords(cfg)
 	if got[1] != "role=master" {
 		t.Fatalf("combined node role = %q, want role=master", got[1])
 	}
+	var haveControl bool
 	for _, r := range got {
+		if r == "control=9300" {
+			haveControl = true
+		}
+	}
+	if !haveControl {
+		t.Fatalf("combined node must advertise its control port; got %v", got)
+	}
+}
+
+// A master-ONLY advert (no playback role / no control port) omits control=.
+func TestTXTRecordsMasterOnlyOmitsControl(t *testing.T) {
+	cfg := Config{ID: peerID, Master: true, GossipPort: 7946, HTTPPort: 8080, StreamPort: 9090, SourcePort: 9200}
+	for _, r := range txtRecords(cfg) {
 		if strings.HasPrefix(r, "control=") {
-			t.Fatal("combined node must not advertise a control port")
+			t.Fatalf("master-only advert must not carry a control port; got %q", r)
 		}
 	}
 }

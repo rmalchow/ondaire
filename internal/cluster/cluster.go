@@ -101,14 +101,15 @@ type Config struct {
 	// derivation + self-heal then re-form the old group or settle to solo.
 	InitialFollowing id.ID
 
-	Addrs      []string
-	HTTPPort   int
-	StreamPort int
-	SourcePort int
-	GossipPort int
-	BindAddr   string
-	Peers      <-chan discovery.Peer
-	Logger     *slog.Logger
+	Addrs       []string
+	HTTPPort    int
+	StreamPort  int
+	SourcePort  int
+	GossipPort  int
+	ControlPort int // bound CONTROL_PORT; gossiped so the self record advertises a control endpoint (D61)
+	BindAddr    string
+	Peers       <-chan discovery.Peer
+	Logger      *slog.Logger
 
 	// StatePath persists the long-lived lookup tables — group NAMES + SETTINGS —
 	// to this file (D41), loaded at New (before any join/merge) and saved debounced
@@ -177,6 +178,7 @@ func New(cfg Config) (*Cluster, error) {
 		StreamPort:       cfg.StreamPort,
 		SourcePort:       cfg.SourcePort,
 		GossipPort:       cfg.GossipPort,
+		ControlPort:      cfg.ControlPort,
 		Caps:             cfg.Caps,
 		Disabled:         append([]string(nil), cfg.Disabled...),
 		Following:        cfg.InitialFollowing,

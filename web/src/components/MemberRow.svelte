@@ -30,8 +30,10 @@
     class="btn icon-btn"
     onclick={() => leaveGroup(member)}
     title="remove from room"
-    aria-label="remove from room">✕</button
+    aria-label="remove from room"
   >
+    <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" aria-hidden="true"><line x1="2" y1="2" x2="8" y2="8" /><line x1="8" y1="2" x2="2" y2="8" /></svg>
+  </button>
 
   <!-- Source stats (master, playing): own line below on wide, hidden when narrow.
        Rams: silence is not a signal — show counts only when they mean something. -->
@@ -75,13 +77,17 @@
     min-width: 6rem;
   }
 
-  /* Leave control: icon-only, compact, pinned to the right of the first line. */
+  /* Leave control: icon-only, square 36px tap target, pinned to the right. */
   .icon-btn {
     order: 3;
     flex: 0 0 auto;
     margin-left: auto;
-    line-height: 1;
-    padding: 4px 7px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   /* Source stats on their own line below (full-width forces the wrap). */

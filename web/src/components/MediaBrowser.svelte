@@ -145,7 +145,9 @@
               onclick={() => queueFolder(folder)}
               title="add folder to queue"
               aria-label="add folder to queue"
-            >+</button>
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" aria-hidden="true"><line x1="5" y1="1" x2="5" y2="9" /><line x1="1" y1="5" x2="9" y2="5" /></svg>
+            </button>
           </div>
         {/each}
         {#each view.files as f (f.path)}
@@ -159,13 +161,17 @@
               onclick={() => queueFile(f)}
               title="add to queue"
               aria-label="add to queue"
-            >+</button>
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" aria-hidden="true"><line x1="5" y1="1" x2="5" y2="9" /><line x1="1" y1="5" x2="9" y2="5" /></svg>
+            </button>
             <button
               class="btn btn-play"
               onclick={() => playFile(f)}
               title="play here"
               aria-label="play here"
-            >▶</button>
+            >
+              <svg width="10" height="11" viewBox="0 0 10 11" fill="currentColor" aria-hidden="true"><polygon points="1,0.5 9.5,5.5 1,10.5" /></svg>
+            </button>
           </div>
         {/each}
       </div>
@@ -240,7 +246,7 @@
     max-height: 320px;
     overflow-y: auto;
     /* clear the scrollbar so the action buttons never sit under it */
-    padding-right: 10px;
+    padding-right: 14px;
   }
 
   /* file/folder name ellipsises so the action buttons never get pushed off-row */
@@ -276,9 +282,9 @@
   .btn-add,
   .btn-play {
     flex: 0 0 auto;
-    /* fixed box so both stay identical regardless of glyph font-size */
-    width: 32px;
-    height: 30px;
+    /* fixed square box so both stay identical regardless of icon */
+    width: 36px;
+    height: 36px;
     padding: 0;
     display: inline-flex;
     align-items: center;
@@ -289,14 +295,12 @@
   .btn-add {
     border-color: var(--accent);
     color: var(--accent);
-    font-size: 16px;
   }
   /* play: filled green with a dark triangle */
   .btn-play {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--bg);
-    font-size: 11px;
   }
   .btn-play:hover {
     border-color: var(--accent);

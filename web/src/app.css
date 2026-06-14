@@ -1,3 +1,12 @@
+/* the brand wordmark is "ensemble" set in Fraunces (self-hosted; shared with the
+   marketing site). Variable wght axis — only the wordmark uses it, at ~420. */
+@font-face {
+  font-family: "Fraunces";
+  src: url("./assets/fonts/fraunces-wght.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 :root {
   --bg: #11151a;
   --panel: #1a212b;
@@ -64,9 +73,12 @@ a {
   gap: 6px;
 }
 .app-header .wordmark {
-  display: block;
-  height: 22px;
-  width: auto;
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 420;
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--fg);
 }
 .app-header .brand-dot {
   width: 7px;
@@ -74,6 +86,9 @@ a {
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 10px var(--accent);
+  /* sit the dot on the wordmark's baseline rather than its optical center */
+  align-self: flex-end;
+  margin-bottom: 3px;
 }
 .app-header .spacer {
   flex: 1;
@@ -131,8 +146,8 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border-radius: 6px;
   border: 1px solid var(--border);
   color: var(--muted);
@@ -202,8 +217,13 @@ a {
   cursor: not-allowed;
 }
 .btn-danger {
+  border-color: color-mix(in srgb, var(--danger) 65%, black);
+  color: color-mix(in srgb, var(--danger) 65%, black);
+}
+.btn-danger:hover {
   border-color: var(--danger);
   color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--panel-2));
 }
 .btn-accent {
   border-color: var(--accent);
@@ -299,6 +319,8 @@ select {
 input[type="range"] {
   accent-color: var(--accent);
   width: 110px;
+  height: 20px;
+  cursor: pointer;
 }
 
 /* member rows inside a group card */
@@ -430,4 +452,24 @@ input[type="range"] {
   color: var(--muted);
   font-style: italic;
   padding: 6px 0;
+}
+
+/* Narrow viewports: the app container goes edge-to-edge so the selected room's
+   active playback band can bleed to the screen edges (PlaybackBar handles the
+   negative margins). Content keeps a 14px text inset via the header / headings /
+   cards so nothing actually touches the glass. */
+@media (max-width: 560px) {
+  #app {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .app-header {
+    padding-inline: 14px;
+  }
+  .section > h2 {
+    padding-inline: 14px;
+  }
+  .card {
+    padding-inline: 14px;
+  }
 }

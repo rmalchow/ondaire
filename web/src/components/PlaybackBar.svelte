@@ -14,6 +14,7 @@
     queuePlay,
     getQueue,
     seek,
+    base,
   } from "../lib/api.js";
 
   let { group, expanded = false } = $props();
@@ -69,6 +70,29 @@
   // the bar shows elapsed time only, no scrub track). Files report it from the
   // decoder, Spotify from go-librespot.
   let durationSec = $derived(meta && meta.durationSec ? meta.durationSec : 0);
+
+  // Cover art for the now-playing track (D57), shown in the bar's left slot.
+  // Spotify carries an absolute artUrl we load directly; a file carries no URL —
+  // only a hasArt hint — so we fetch the bytes from the MASTER's /cover endpoint
+  // (proxied like the queue), keyed by the track URI so it changes track-to-track
+  // and caches per track. When there's no art (or the fetch fails) the slot falls
+  // back to a CSS-only placeholder, keeping the bar's footprint identical.
+  let coverSrc = $derived.by(() => {
+    if (!active || !meta || !meta.hasArt) return "";
+    if (meta.artUrl) return meta.artUrl; // spotify: direct remote URL
+    if (pb.uri) return base(group.master) + "/cover?uri=" + encodeURIComponent(pb.uri);
+    return "";
+  });
+  let artFailed = $state(false);
+  let lastCover = "";
+  $effect(() => {
+    // reset the error latch whenever the source changes (new track / room).
+    if (coverSrc !== lastCover) {
+      lastCover = coverSrc;
+      artFailed = false;
+    }
+  });
+  let showCover = $derived(!!coverSrc && !artFailed);
 
   // Smooth position: the server reports positionSec only ~every 5 s (group
   // heartbeat) and a little stale, but position is realtime between events — so a
@@ -181,68 +205,95 @@
   }
 </script>
 
-<div class="playbar" class:active>
-  <span class="state-pill" class:playing class:paused>
-    {active ? (paused ? "paused" : "playing") : "idle"}
-  </span>
+<!-- One grid band per room: a fixed cover slot on the left, then the state pill +
+     now-playing + transport controls, the scrubber, and (selected, playing) the
+     queue. Idle, playing-no-queue, and playing-with-queue all keep the SAME left
+     slot + footprint — only the right column fills in, so cards never reflow. -->
+<div class="playbar" class:active class:idle={!active}>
+  {#if showCover}
+    <!-- the sharp art over a dimmed/blurred/cropped copy of itself, so any
+         letterboxing reads as a soft tint of the cover. Both <img>s hit one URL →
+         one fetch; onerror collapses to the placeholder. -->
+    <div class="cover">
+      <img class="cover-bg" src={coverSrc} alt="" aria-hidden="true" />
+      <img class="cover-art" src={coverSrc} alt="cover art" onerror={() => (artFailed = true)} />
+    </div>
+  {:else}
+    <!-- reserved cover slot: a CSS-only placeholder when there's no art (idle,
+         line-in, or a file with no embedded cover) keeps the footprint identical. -->
+    <div class="cover-placeholder" aria-hidden="true"></div>
+  {/if}
 
-  <div class="now">
-    {#if active}
-      <!-- a small source-type glyph identifies the source at a glance; the album
-           cover (when any) is the big art slot up in the card, not here. -->
-      {#if icon}
-        <span class="icon">{icon}</span>
+  <div class="pb-row">
+    <span class="state-pill" class:playing class:paused>
+      {active ? (paused ? "paused" : "playing") : "idle"}
+    </span>
+
+    <div class="now">
+      {#if active}
+        <!-- a small source-type glyph identifies the source at a glance. -->
+        {#if icon}
+          <span class="icon">{icon}</span>
+        {/if}
+        <span class="meta" title={pb.uri}>
+          <span class="track">{title}</span>
+          {#if subtitle}<span class="sub small">{subtitle}</span>{/if}
+        </span>
+      {:else}
+        <span class="meta">
+          <span class="track">—</span>
+          <span class="sub small">no track selected</span>
+        </span>
       {/if}
-      <span class="meta" title={pb.uri}>
-        <span class="track">{title}</span>
-        {#if subtitle}<span class="sub small">{subtitle}</span>{/if}
-      </span>
-    {/if}
+    </div>
+
+    <div class="controls">
+      <button
+        class="btn ctl"
+        disabled={!active}
+        onclick={ontoggle}
+        title={playing ? "pause" : "resume"}
+        aria-label={playing ? "pause" : "resume"}
+      >
+        {#if playing}
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" aria-hidden="true"><rect x="1" y="0.5" width="3.5" height="10" rx="0.5" /><rect x="6.5" y="0.5" width="3.5" height="10" rx="0.5" /></svg>
+        {:else}
+          <svg width="10" height="11" viewBox="0 0 10 11" fill="currentColor" aria-hidden="true"><polygon points="1,0.5 9.5,5.5 1,10.5" /></svg>
+        {/if}
+      </button>
+      <button
+        class="btn ctl"
+        disabled={!canNext}
+        onclick={onnext}
+        title="next"
+        aria-label="next"
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><polygon points="1,1 7,6 1,11" /><rect x="8.5" y="1" width="2.5" height="10" rx="0.5" /></svg>
+      </button>
+      <button
+        class="btn btn-danger ctl"
+        disabled={!active}
+        onclick={onstop}
+        title="stop"
+        aria-label="stop"
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true"><rect x="1" y="1" width="8" height="8" rx="1" /></svg>
+      </button>
+    </div>
   </div>
 
-  <div class="controls">
-    <button
-      class="btn ctl"
-      disabled={!active}
-      onclick={ontoggle}
-      title={playing ? "pause" : "resume"}
-      aria-label={playing ? "pause" : "resume"}
-    >
-      {playing ? "⏸" : "▶"}
-    </button>
-    <button
-      class="btn ctl"
-      disabled={!canNext}
-      onclick={onnext}
-      title="next"
-      aria-label="next"
-    >
-      ⏭
-    </button>
-    <button
-      class="btn btn-danger ctl"
-      disabled={!active}
-      onclick={onstop}
-      title="stop"
-      aria-label="stop"
-    >
-      ■
-    </button>
-  </div>
-</div>
-
-{#if active}
-  <!-- transport bar: elapsed · scrubber · total. Display-only for now (disabled);
-       seeking lands in a later pass. Sources with no known length (line-in, live
-       streams) show elapsed only and a disabled empty track. -->
+  <!-- transport: elapsed · scrubber · total — its own full-width row below the band
+       (area "bar"). Always present (disabled + 0:00 when idle) so the bar keeps an
+       identical footprint across states. Sources with no known length (line-in,
+       live streams) show elapsed only with a disabled track. -->
   <div class="transport">
-    <span class="t-time small">{position(dragging ? dragValue : displayPos)}</span>
+    <span class="t-time small">{active ? position(dragging ? dragValue : displayPos) : position(0)}</span>
     <input
       class="t-bar"
       type="range"
       min="0"
       max={durationSec || 1}
-      value={dragging ? dragValue : durationSec ? Math.min(displayPos, durationSec) : 0}
+      value={active ? (dragging ? dragValue : durationSec ? Math.min(displayPos, durationSec) : 0) : 0}
       step="0.1"
       disabled={!seekable}
       oninput={onSeekInput}
@@ -250,62 +301,178 @@
       title={seekable ? "seek" : "position"}
       aria-label="playback position"
     />
-    <span class="t-time small">{durationSec ? position(durationSec) : "live"}</span>
+    <span class="t-time small">{active ? (durationSec ? position(durationSec) : "live") : position(0)}</span>
   </div>
-{/if}
 
-{#if active && queueLen > 0 && !expanded}
-  <!-- collapsed: just the count on a non-selected card (queue list is noise there).
-       Uses the gossiped length — no fetch needed when the card isn't selected. -->
-  <div class="queue-collapsed small">{queueLen} in queue</div>
-{:else if active && queueLen > 0}
-  <!-- expanded queue: the upcoming tracks under the now-playing bar, scrolling
-       internally so ~10 are visible without growing the card unbounded. -->
-  <div class="queue">
-    <div class="queue-head small">Up next · {queueLen}</div>
-    <ul class="queue-list">
-      {#each queue as item, i (item.uri + ":" + i)}
-        <li class="queue-item">
-          <button
-            class="q-play"
-            onclick={() => onplay(i, item.uri)}
-            title="play now"
-            aria-label="play {queueTitle(item)} now"
-          >
-            <span class="q-idx small">{i + 1}</span>
-            <span class="q-meta">
-              <span class="q-title">{queueTitle(item)}</span>
-              {#if queueSub(item)}<span class="q-sub small">{queueSub(item)}</span>{/if}
-            </span>
-          </button>
-          <span class="spacer"></span>
-          <button
-            class="btn q-rm"
-            onclick={() => onremove(i, item.uri)}
-            title="remove from queue"
-            aria-label="remove from queue"
-          >−</button>
-        </li>
-      {/each}
-    </ul>
-  </div>
-{/if}
+  {#if active && queueLen > 0 && !expanded}
+    <!-- collapsed: just the count on a non-selected card (queue list is noise there).
+         Uses the gossiped length — no fetch needed when the card isn't selected. -->
+    <div class="queue-collapsed small">{queueLen} in queue</div>
+  {:else if active && queueLen > 0}
+    <!-- expanded queue: the upcoming tracks under the now-playing bar, scrolling
+         internally so ~10 are visible without growing the card unbounded. -->
+    <div class="queue">
+      <div class="queue-head small">Up next · {queueLen}</div>
+      <ul class="queue-list">
+        {#each queue as item, i (item.uri + ":" + i)}
+          <li class="queue-item">
+            <button
+              class="q-play"
+              onclick={() => onplay(i, item.uri)}
+              title="play now"
+              aria-label="play {queueTitle(item)} now"
+            >
+              <span class="q-idx small">{i + 1}</span>
+              <span class="q-meta">
+                <span class="q-title">{queueTitle(item)}</span>
+                {#if queueSub(item)}<span class="q-sub small">{queueSub(item)}</span>{/if}
+              </span>
+            </button>
+            <span class="spacer"></span>
+            <button
+              class="btn q-rm"
+              onclick={() => onremove(i, item.uri)}
+              title="remove from queue"
+              aria-label="remove from queue"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" aria-hidden="true"><line x1="2" y1="2" x2="8" y2="8" /><line x1="8" y1="2" x2="2" y2="8" /></svg>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+</div>
 
 <style>
-  /* fixed-height band: identical footprint playing vs idle (no reflow). Tints
-     when active so the playing room is obvious across the wall of cards. */
+  /* grid band: a fixed cover slot (col 1, spanning the band + scrubber rows) + the
+     content column (col 2: now-playing band on top, full-width scrubber below); the
+     queue spans full width under both. Identical footprint across idle / playing /
+     queued (no reflow). Active tints accent; idle tints a faint muted so the playing
+     room still stands out across the wall of cards. */
   .playbar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 44px;
-    padding: 4px 10px;
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    grid-template-areas:
+      "cov row"
+      "cov bar"
+      "que que";
+    column-gap: 14px;
+    row-gap: 6px;
+    align-items: start;
+    padding: 10px;
     border: 1px solid transparent;
     border-radius: 8px;
   }
   .playbar.active {
     background: color-mix(in srgb, var(--accent) 14%, transparent);
     border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  }
+  .playbar.idle {
+    background: color-mix(in srgb, var(--muted) 7%, transparent);
+    border-color: color-mix(in srgb, var(--muted) 22%, transparent);
+  }
+
+  /* cover slot (col 1): a fixed 100px square, top-aligned with the content. The
+     sharp art is centered over a dimmed/blurred/cropped copy of itself. */
+  .cover {
+    grid-area: cov;
+    width: 100px;
+    height: 100px;
+    align-self: start;
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .cover .cover-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: blur(12px) brightness(0.22) saturate(1.05);
+    transform: scale(1.15); /* over-scale so the blur never bleeds the edges in */
+  }
+  .cover .cover-art {
+    position: relative; /* above the backdrop */
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 6px;
+  }
+  /* reserved cover slot when there's no art: a CSS-only disc motif so the band
+     keeps its exact footprint instead of collapsing. */
+  .cover-placeholder {
+    grid-area: cov;
+    width: 100px;
+    height: 100px;
+    align-self: start;
+    border-radius: 8px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    display: grid;
+    place-items: center;
+  }
+  /* a generic vinyl record, drawn with gradients: a black grooved disc with a
+     diagonal specular sheen (::before), then a white center label with the
+     spindle hole (::after). Both stack centered in the same grid cell. */
+  .cover-placeholder::before {
+    content: "";
+    grid-area: 1 / 1;
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+    background:
+      /* specular sheen — two soft, opposed highlight arcs */
+      conic-gradient(
+        from 142deg,
+        rgba(255, 255, 255, 0) 0deg,
+        rgba(255, 255, 255, 0.22) 24deg,
+        rgba(255, 255, 255, 0) 58deg,
+        rgba(255, 255, 255, 0) 148deg,
+        rgba(255, 255, 255, 0.15) 180deg,
+        rgba(255, 255, 255, 0) 214deg,
+        rgba(255, 255, 255, 0) 360deg
+      ),
+      /* fine grooves */
+        repeating-radial-gradient(
+          circle at 50% 50%,
+          rgba(255, 255, 255, 0.05) 0 1px,
+          rgba(0, 0, 0, 0) 1px 3px
+        ),
+      /* disc body, slightly lit toward the top */
+        radial-gradient(circle at 50% 38%, #3a3a3a 0%, #141414 55%, #000 100%);
+    box-shadow:
+      0 2px 5px rgba(0, 0, 0, 0.55),
+      inset 0 0 6px rgba(0, 0, 0, 0.6);
+  }
+  .cover-placeholder::after {
+    content: "";
+    grid-area: 1 / 1;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    /* white label with a small spindle hole at the center */
+    background: radial-gradient(
+      circle at 50% 50%,
+      #6f6f6f 0 1.6px,
+      #f2f2f2 2.4px
+    );
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  }
+
+  /* the now-playing band (area "row"): state pill + track info + transport controls. */
+  .pb-row {
+    grid-area: row;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
   }
 
   /* state pill — solid + colored so the state reads at a glance */
@@ -364,12 +531,18 @@
     white-space: nowrap;
     color: var(--muted);
   }
-  /* transport scrubber row under the bar: elapsed · slider · total. */
+  /* idle: the em-dash placeholder track reads as muted, not as a real title. */
+  .playbar.idle .now .track {
+    color: var(--muted);
+  }
+
+  /* transport scrubber row (area "bar", full width below the band): elapsed · slider · total. */
   .transport {
+    grid-area: bar;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 2px 2px;
+    padding: 2px 0 0;
   }
   .t-time {
     flex: 0 0 auto;
@@ -381,7 +554,7 @@
   .t-bar {
     flex: 1 1 auto;
     min-width: 0;
-    height: 4px;
+    height: 20px;
     accent-color: var(--accent);
     cursor: pointer;
   }
@@ -389,19 +562,25 @@
     opacity: 0.7;
     cursor: default;
   }
+  /* idle: the reserved scrubber is faint + neutral, clearly inert. */
+  .playbar.idle .t-bar {
+    accent-color: var(--muted);
+    opacity: 0.4;
+  }
 
-  /* right: two equal-width controls, identical footprint in every state */
+  /* right: square 36px icon buttons, identical footprint in every state */
   .controls {
     flex: 0 0 auto;
     display: flex;
     gap: 6px;
   }
   .controls .ctl {
-    width: 42px;
-    padding: 6px 0;
-    text-align: center;
-    line-height: 1;
-    font-size: 15px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .controls .ctl:disabled {
     opacity: 0.4;
@@ -410,17 +589,23 @@
 
   /* collapsed queue summary (non-selected card): just the count, unobtrusive. */
   .queue-collapsed {
+    grid-area: que;
     color: var(--muted);
     padding: 0 2px 2px;
   }
 
   /* expanded queue under the bar: a bordered panel that scrolls internally so a
      long queue never grows the card; ~10 rows visible at a glance. */
+  /* the expanded queue is the bottom slab of the green band: full-width, bled into
+     the band's 10px padding, separated by an accent hairline rather than boxed. */
   .queue {
-    border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
-    border-radius: 8px;
-    background: var(--panel-2);
-    padding: 6px 8px;
+    grid-area: que;
+    margin: 0 -10px -10px;
+    border: none;
+    border-top: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+    border-radius: 0 0 7px 7px;
+    background: transparent;
+    padding: 8px 10px 6px;
   }
   .queue-head {
     color: var(--muted);
@@ -439,6 +624,8 @@
     /* ~10 rows then scroll */
     max-height: 280px;
     overflow-y: auto;
+    /* clear the scrollbar so the remove buttons never sit under it */
+    padding-right: 12px;
   }
   .queue-item {
     display: flex;
@@ -500,35 +687,69 @@
   }
   .q-rm {
     flex: 0 0 auto;
-    width: 28px;
-    padding: 2px 0;
-    text-align: center;
-    line-height: 1;
-    font-size: 15px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .q-rm:hover {
     border-color: var(--danger);
     color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 10%, var(--panel-2));
   }
 
-  /* Narrow viewports: stack into two rows — the ellipsised media info on top,
-     then the state pill + transport buttons below. Wide layout is unchanged. */
+  /* Narrow viewports: drop the cover and reflow to four stacked rows —
+     [pill · controls] / scrubber / track info / queue — and bleed the active
+     (green) band to the card (viewport) edges. The .pb-row wrapper dissolves
+     (display:contents) so its pill / info / controls place into the grid directly. */
   @media (max-width: 560px) {
     .playbar {
-      flex-wrap: wrap;
-      min-height: 0;
+      grid-template-columns: 1fr auto;
+      grid-template-areas:
+        "pill ctl"
+        "bar  bar"
+        "inf  inf"
+        "que  que";
+      column-gap: 10px;
       row-gap: 8px;
     }
-    .now {
-      order: 1;
-      flex-basis: 100%;
+    .cover,
+    .cover-placeholder {
+      display: none;
     }
-    .state-pill {
-      order: 2;
+    .pb-row {
+      display: contents;
     }
-    .controls {
-      order: 3;
-      margin-left: auto; /* buttons to the right, state pill to the left */
+    .pb-row > .state-pill {
+      grid-area: pill;
+      align-self: center;
+      justify-self: start;
+    }
+    .pb-row > .controls {
+      grid-area: ctl;
+      align-self: center;
+    }
+    .pb-row > .now {
+      grid-area: inf;
+      min-width: 0;
+    }
+    /* scrubber only — the time labels would crowd the narrow row */
+    .t-time {
+      display: none;
+    }
+    /* full-bleed the band (idle or active) + its queue to the card (viewport)
+       edges. Pairs with app.css dropping #app's side padding and insetting cards
+       by 14px. */
+    .playbar {
+      border-radius: 0;
+      margin-inline: -14px;
+      width: calc(100% + 28px);
+      padding-inline: 14px;
+    }
+    .playbar .queue {
+      margin-inline: -14px;
     }
   }
 </style>

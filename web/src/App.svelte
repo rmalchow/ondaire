@@ -8,9 +8,6 @@
   import Toast from "./components/Toast.svelte";
   import UnreachableBanner from "./components/UnreachableBanner.svelte";
   import NodeSwitcher from "./components/NodeSwitcher.svelte";
-  // wordmark-small.png is rendered near display size (crisp); wordmark.png is the
-  // full-size master, kept for future high-res use but not referenced here.
-  import wordmark from "./assets/wordmark-small.png";
 
   // self {id, name}; id/name seeded once from GET /api/status.
   let self = $state({ id: "", name: "", role: "" });
@@ -95,15 +92,19 @@
 
 <header class="app-header">
   <span class="brand-mark">
-    <img class="wordmark" src={wordmark} alt="ensemble" />
+    <span class="wordmark">ensemble</span>
     <span class="brand-dot"></span>
   </span>
   <span class="spacer"></span>
   <div class="header-right">
     {#if route === "nodes"}
-      <a class="iconlink" href="#/" title="Back to rooms" aria-label="Back to rooms">←</a>
+      <a class="iconlink" href="#/" title="Back to rooms" aria-label="Back to rooms">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="8,3 4,7 8,11" /><line x1="4" y1="7" x2="11" y2="7" /></svg>
+      </a>
     {:else}
-      <a class="iconlink" href="#/nodes" title="Nodes" aria-label="Nodes">⚙</a>
+      <a class="iconlink" href="#/nodes" title="Nodes" aria-label="Nodes">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="2.2" /><path d="M7 1.5v1.2M7 11.3v1.2M1.5 7h1.2M11.3 7h1.2M3.22 3.22l.85.85M9.93 9.93l.85.85M3.22 10.78l.85-.85M9.93 4.07l.85-.85" /></svg>
+      </a>
     {/if}
     <NodeSwitcher snapshot={cluster.snapshot} {self} {statusLevel} {statusTitle} />
   </div>

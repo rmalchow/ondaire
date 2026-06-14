@@ -85,8 +85,8 @@
         <span class="ep-name">{baseName}:</span>
         <EditableText value={ep.name} onsave={(v) => renameEndpoint(i, v)} placeholder="endpoint name" />
         <span class="spacer"></span>
-        <button class="btn btn-danger ep-remove" title="remove endpoint" onclick={() => removeEndpoint(i)}>
-          ✕
+        <button class="btn btn-danger ep-remove" title="remove endpoint" aria-label="remove endpoint" onclick={() => removeEndpoint(i)}>
+          <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" aria-hidden="true"><line x1="2" y1="2" x2="8" y2="8" /><line x1="8" y1="2" x2="2" y2="8" /></svg>
         </button>
       </div>
       {#if players.length === 0}
@@ -140,8 +140,12 @@
     flex: 1;
   }
   .ep-remove {
-    padding: 2px 8px;
-    line-height: 1;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .players {
     gap: 6px;

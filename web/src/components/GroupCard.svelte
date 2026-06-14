@@ -1,7 +1,7 @@
 <script>
   // One derived group (J arch §4): headline, playback bar, members, settings.
   import { nodeById, nameOf, addTargets, playerZone } from "../lib/derive.js";
-  import { assignToGroup, setGroupSettings, nodeSetVolume, base } from "../lib/api.js";
+  import { assignToGroup, setGroupSettings, nodeSetVolume } from "../lib/api.js";
   import PlaybackBar from "./PlaybackBar.svelte";
   import MemberRow from "./MemberRow.svelte";
   import MediaBrowser from "./MediaBrowser.svelte";
@@ -19,31 +19,6 @@
   let playerNames = $derived(
     members.filter((m) => m.id !== group.master).map((m) => nameOf(snapshot, m.id)),
   );
-  // Cover art for the now-playing track. Spotify carries an absolute artUrl we
-  // load directly; a file carries no URL — only a hasArt hint — so we fetch the
-  // bytes from the MASTER's /cover endpoint (proxied like the queue), keyed by the
-  // track URI so it changes track-to-track and caches per track. onerror collapses
-  // the slot if the fetch fails, so a stale hint never leaves a broken image.
-  let pb = $derived(group.playback || { state: "idle" });
-  let active = $derived(pb.state === "playing" || pb.state === "paused");
-  let meta = $derived(pb.metadata || null);
-  let coverSrc = $derived.by(() => {
-    if (!active || !meta || !meta.hasArt) return "";
-    if (meta.artUrl) return meta.artUrl; // spotify: direct remote URL
-    if (pb.uri) return base(group.master) + "/cover?uri=" + encodeURIComponent(pb.uri);
-    return "";
-  });
-  let artFailed = $state(false);
-  let lastCover = "";
-  $effect(() => {
-    // reset the error latch whenever the source changes (new track / room).
-    if (coverSrc !== lastCover) {
-      lastCover = coverSrc;
-      artFailed = false;
-    }
-  });
-  let showCover = $derived(!!coverSrc && !artFailed);
-
   let settings = $derived(group.settings || {});
   let codec = $derived(settings.codec ?? "opus");
   let transport = $derived(settings.transport ?? "udp");
@@ -187,10 +162,9 @@
   class:selected
   onclick={() => onselect && onselect(group.master)}
 >
-  <!-- now-block: headline + playback on the left, the big cover art on the right
-       (wide) or stacked above the bar (narrow). With no art the left column spans
-       full width — the auto cover column collapses to zero. -->
-  <div class="now-block" class:has-cover={showCover}>
+  <!-- now-block: headline above, then the playback bar (which carries its own
+       cover-art slot on the left). -->
+  <div class="now-block">
     <h3 class="headline" title="{masterName}: {playerNames.join(' + ') || 'no players'}">
       <span class="master">{masterName}</span><span class="colon">:</span>
       {#if playerNames.length}
@@ -203,16 +177,6 @@
     <div class="playbar-slot">
       <PlaybackBar {group} expanded={selected} />
     </div>
-
-    {#if showCover}
-      <!-- the sharp art centered over a dimmed/blurred/cropped copy of itself, so
-           any letterboxing reads as a soft tint of the cover rather than a flat box.
-           Both <img>s hit the same URL → one fetch. onerror collapses the slot. -->
-      <div class="cover">
-        <img class="cover-bg" src={coverSrc} alt="" aria-hidden="true" />
-        <img class="cover-art" src={coverSrc} alt="cover art" onerror={() => (artFailed = true)} />
-      </div>
-    {/if}
   </div>
 
   <div class="group-vol" title="group volume — scales every member proportionally">
@@ -322,97 +286,16 @@
       0 0 22px -6px color-mix(in srgb, var(--accent) 45%, transparent);
   }
 
-  /* now-block: the headline is always its own full-width line; .has-cover then
-     splits the row below it into the playback column (bar + transport + queue) and
-     a cover column that top-aligns with the "playing now" bar — NOT the headline. */
+  /* now-block: the room headline on its own line, then the playback bar below it.
+     The cover art lives INSIDE the bar (left slot), so the card itself just stacks. */
   .now-block {
-    display: grid;
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "head"
-      "bar";
-    row-gap: 6px;
-    align-items: start;
-  }
-  .now-block.has-cover {
-    grid-template-columns: 1fr auto;
-    grid-template-areas:
-      "head head"
-      "bar  cover";
-    column-gap: 14px;
-  }
-  .now-block > .headline {
-    grid-area: head;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
   }
   .now-block > .playbar-slot {
-    grid-area: bar;
-    min-width: 0; /* let the bar's own ellipsis work inside the grid track */
-  }
-  /* cover: a column that STRETCHES to the playback height (the queue scrolls
-     internally, so it's bounded), top-aligned with the bar. The sharp square art
-     is centered on a dimmed/blurred/cropped copy of itself — because the block is
-     taller than the art, the backdrop reads as a real stage above/below it, not a
-     thin rim. min-height keeps it generous even on a collapsed (queue-less) card. */
-  .now-block > .cover {
-    grid-area: cover;
-    align-self: stretch;
-    position: relative;
-    width: 212px;
-    min-height: 176px;
-    border-radius: 10px;
-    overflow: hidden;
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-  }
-  .cover .cover-bg {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    filter: blur(12px) brightness(0.22) saturate(1.05);
-    transform: scale(1.15); /* over-scale so the blur never bleeds the edges in */
-  }
-  .cover .cover-art {
-    position: relative; /* above the backdrop */
-    /* wide block is taller than wide → fill its width, stay square (the backdrop
-       fills the vertical slack). Narrow flips this below. */
-    width: 100%;
-    height: auto;
-    aspect-ratio: 1 / 1;
-    object-fit: cover;
-    border-radius: 6px;
-    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.75);
-  }
-
-  /* narrow: stack head → cover → bar. A fixed-height block WIDER than the art, so
-     the blurred backdrop shows on the sides and the art stays centered. */
-  @media (max-width: 560px) {
-    .now-block.has-cover {
-      grid-template-columns: 1fr;
-      grid-template-areas:
-        "head"
-        "cover"
-        "bar";
-      column-gap: 0;
-    }
-    .now-block > .cover {
-      width: 100%;
-      height: 240px;
-      min-height: 0;
-      align-self: start;
-      justify-self: stretch;
-    }
-    /* short, full-width block → the art fills the HEIGHT and the blurred backdrop
-       fills the horizontal slack on either side. */
-    .now-block > .cover .cover-art {
-      width: auto;
-      height: 100%;
-    }
+    min-width: 0; /* let the bar's own ellipsis work */
   }
 
   /* headline: "[master]: [players]" — the room's self-describing label. Node
@@ -483,6 +366,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    padding-block: 4px;
   }
   .group-vol .gv-label {
     color: var(--muted);
@@ -521,8 +405,8 @@
     display: grid;
     grid-template-columns: max-content 1fr;
     align-items: center;
-    gap: 10px 14px;
-    padding: 2px 2px 4px;
+    gap: 12px 14px;
+    padding: 4px 2px 6px;
   }
   .settings-grid .lbl {
     color: var(--muted);
@@ -552,5 +436,13 @@
     text-align: right;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* narrow: the focused room runs edge-to-edge (app.css drops the container's side
+     padding), so square its corners to sit flush against the screen. */
+  @media (max-width: 560px) {
+    .group-card.selected {
+      border-radius: 0;
+    }
   }
 </style>

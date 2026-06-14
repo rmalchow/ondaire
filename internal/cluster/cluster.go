@@ -61,8 +61,8 @@ type Cluster struct {
 	pbAssign map[id.ID]id.ID
 	// pbChannel is the same idea for the playback node's channel mode (nodeID →
 	// "stereo"|"L"|"R"), restored on re-discovery so it survives a master restart.
-	pbChannel map[id.ID]string
-	saveNotify   chan struct{} // test hook (nil in production)
+	pbChannel  map[id.ID]string
+	saveNotify chan struct{} // test hook (nil in production)
 
 	done chan struct{}
 	wg   sync.WaitGroup

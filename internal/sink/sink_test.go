@@ -620,40 +620,60 @@ func pushRunWall(p *Playout, clk *wallClock, gen uint32, seqs []uint64) {
 	}
 }
 
+// TestPlayoutWatchdogFiresRestartThenDisarms drives the starvation watchdog off
+// the VIRTUAL clock: starvation is detected from now()-lastPkt, so advancing the
+// vclock by hand is what crosses each watchdog interval. That makes the whole
+// sequence deterministic — in particular the "stays armed, then resume" step can
+// never race the second (disarm) interval, because virtual time only moves when
+// this test moves it. (An earlier wall-clock version flaked under CI load when the
+// resume push missed the real 60 ms window before disarm.) The real timer in
+// waitIdle only governs how soon the idle loop re-checks; drainUntil's budget
+// absorbs that. Watchdog is well above the ~60 ms of virtual time the initial
+// prime+play advances, so nothing auto-fires before the explicit add.
 func TestPlayoutWatchdogFiresRestartThenDisarms(t *testing.T) {
-	clk := newWallClock(true)
-	be := &wallBackend{}
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
 	var mu sync.Mutex
 	var restarts int
 	restart := func() { mu.Lock(); restarts++; mu.Unlock() }
+	getR := func() int { mu.Lock(); defer mu.Unlock(); return restarts }
+	const wd = 100 * time.Millisecond
 	p := New(Config{
 		Backend: be, Clock: clk, BufferMs: 150, Restart: restart, Volume: 1,
-		Watchdog: 60 * time.Millisecond, now: clk.now, servoCfg: fastServoCfg(),
+		Watchdog: wd, now: v.now, servoCfg: fastServoCfg(),
 	})
 	t.Cleanup(func() { p.Close() })
 	p.Reset(1)
-	pushRunWall(p, clk, 1, []uint64{0})
-	drainUntil(func() bool { return p.Stats().Played >= 1 })
+	pushRun(p, v, 1, []uint64{0})
+	if !drainUntil(func() bool { return p.Stats().Played >= 1 }) {
+		t.Fatal("seq 0 did not play")
+	}
 
-	getR := func() int { mu.Lock(); defer mu.Unlock(); return restarts }
 	// One watchdog interval of silence → RESTART fires once.
-	if !drainUntil(func() bool { return getR() == 1 }) {
+	v.add(int64(2 * wd))
+	if !drainUntil(func() bool { return getR() >= 1 }) {
 		t.Fatalf("watchdog did not fire RESTART: restarts=%d", getR())
 	}
-	// Sink stays armed after RESTART: resumed pushes still play.
+	// Sink stays armed after RESTART: a resumed push still plays. Virtual time is
+	// frozen here, so the disarm interval cannot race this.
 	before := be.count()
-	pushRunWall(p, clk, 1, []uint64{1, 2, 3})
+	pushRun(p, v, 1, []uint64{1})
 	if !drainUntil(func() bool { return be.count() > before }) {
 		t.Fatal("sink did not resume after RESTART")
 	}
-	// Sustained silence (a second watchdog interval after the RESTART) → disarm.
+	if getR() != 1 {
+		t.Fatalf("RESTART should fire once per armed session, got %d", getR())
+	}
+	// A second sustained-silence interval after the RESTART → disarm.
+	v.add(int64(2 * wd))
 	if !drainUntil(func() bool { _, armed := p.ArmedGen(); return !armed }) {
 		t.Fatal("watchdog did not disarm after a second starved interval")
 	}
 	// Re-arm via Reset resumes playout.
 	atDisarm := be.count()
 	p.Reset(2)
-	pushRunWall(p, clk, 2, []uint64{0, 1})
+	pushRun(p, v, 2, []uint64{0, 1})
 	if !drainUntil(func() bool { return be.count() > atDisarm }) {
 		t.Fatal("sink did not re-arm after Reset")
 	}

@@ -27,7 +27,7 @@ func chans(frame []byte) (l, r int16) {
 
 func TestChannelStageDualMono(t *testing.T) {
 	cases := []struct {
-		mode       string
+		mode         string
 		wantL, wantR int16
 	}{
 		{"stereo", 100, -200}, // untouched

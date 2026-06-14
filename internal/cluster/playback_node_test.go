@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"net/netip"
+	"path/filepath"
 	"testing"
 
 	"ensemble/internal/discovery"
@@ -251,7 +252,7 @@ func TestPatchPlaybackNode(t *testing.T) {
 	c.UpsertPlaybackNode(pbPeer(pid, 9300, "opus"))
 
 	name, vol, delay, master := "den", 0.5, 20, c.self
-	if !c.PatchPlaybackNode(pid, &name, &vol, &delay, &master) {
+	if !c.PatchPlaybackNode(pid, &name, &vol, &delay, &master, nil) {
 		t.Fatal("patch should succeed on a playback node")
 	}
 	r := recOf(c, pid)
@@ -264,7 +265,7 @@ func TestPatchPlaybackNode(t *testing.T) {
 		t.Fatalf("master-set name lost on re-discovery: %q", recOf(c, pid).Name)
 	}
 	// Refuses a gossiping (non-playback) node.
-	if c.PatchPlaybackNode(c.self, &name, nil, nil, nil) {
+	if c.PatchPlaybackNode(c.self, &name, nil, nil, nil, nil) {
 		t.Fatal("PatchPlaybackNode must refuse a non-playback node")
 	}
 }
@@ -279,5 +280,57 @@ func TestUpsertPlaybackNodeRejectsSelfAndZeroControl(t *testing.T) {
 	c.UpsertPlaybackNode(pbPeer(pid, 0, "opus")) // no control port
 	if recOf(c, pid) != nil {
 		t.Fatal("peer with no control port must be rejected")
+	}
+}
+
+// TestPlaybackAssignmentSurvivesMasterRestart is the regression guard for the bug
+// where a master restart silently dropped every playback node back to solo: the
+// proxy record is rebuilt from mDNS (which carries no assignment), so the operator
+// assignment must be persisted and restored on re-discovery (D59).
+func TestPlaybackAssignmentSurvivesMasterRestart(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "cluster.json")
+	self := id.New()
+	pid := id.New()
+	master := self // assign the playback node to the master's own group
+
+	// First master lifetime: discover the node, assign it, persist on Close.
+	c1, err := New(Config{Self: self, Name: "m", GossipPort: 7946, StatePath: statePath})
+	if err != nil {
+		t.Fatalf("New c1: %v", err)
+	}
+	c1.UpsertPlaybackNode(pbPeer(pid, 9300, "opus"))
+	if !c1.AssignPlaybackNode(pid, master) {
+		t.Fatal("AssignPlaybackNode returned false")
+	}
+	if got := recOf(c1, pid).Following; got != master {
+		t.Fatalf("assignment not applied: Following=%v want %v", got, master)
+	}
+	c1.Close() // final saveState writes playbackAssignments to statePath
+
+	// Second master lifetime (simulated restart): same statePath, fresh doc.
+	c2, err := New(Config{Self: self, Name: "m", GossipPort: 7946, StatePath: statePath})
+	if err != nil {
+		t.Fatalf("New c2: %v", err)
+	}
+	defer c2.Close()
+	if recOf(c2, pid) != nil {
+		t.Fatal("proxy must not exist before re-discovery")
+	}
+	// mDNS re-discovers the node — Following must be restored, not dropped to solo.
+	c2.UpsertPlaybackNode(pbPeer(pid, 9300, "opus"))
+	if got := recOf(c2, pid).Following; got != master {
+		t.Fatalf("assignment NOT restored after restart: Following=%v want %v (regression: playback node went solo)", got, master)
+	}
+
+	// Clearing the assignment removes it from persistence too.
+	if !c2.AssignPlaybackNode(pid, id.Zero) {
+		t.Fatal("clear assignment returned false")
+	}
+	c2.mu.Lock()
+	_, stillThere := c2.pbAssign[pid]
+	c2.mu.Unlock()
+	if stillThere {
+		t.Fatal("cleared assignment still present in pbAssign")
 	}
 }

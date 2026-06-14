@@ -96,6 +96,9 @@ export function setOutputDelay(nodeId, outputDelayMs) {
 export function setOutputDevice(nodeId, outputDevice) {
   return toasted(req("PATCH", base(nodeId) + "/node", { outputDevice }));
 }
+export function setChannel(nodeId, channel) {
+  return toasted(req("PATCH", base(nodeId) + "/node", { channel }));
+}
 export function testTone(nodeId) {
   return toasted(req("POST", base(nodeId) + "/tone"));
 }
@@ -146,6 +149,11 @@ export function nodeSetOutputDelay(node, outputDelayMs) {
   return node.playbackNode
     ? patchPlaybackNode({ node: node.id, outputDelayMs })
     : setOutputDelay(node.id, outputDelayMs);
+}
+export function nodeSetChannel(node, channel) {
+  return node.playbackNode
+    ? patchPlaybackNode({ node: node.id, channel })
+    : setChannel(node.id, channel);
 }
 export function assignToGroup(node, masterId) {
   return node.playbackNode

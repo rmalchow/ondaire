@@ -3,9 +3,9 @@
 A receive-only **ensemble playback node** on an ESP32 + an I2S DAC: it is
 discovered over mDNS, driven by a master over the v2 control plane, and plays a
 group's audio in lock-step like any other room. It implements the full wire
-protocol in [`../docs/PLAYER.md`](../docs/PLAYER.md) (the Go reference
+protocol in [`../docs/developer/player-protocol.md`](../docs/developer/player-protocol.md) (the Go reference
 is [`../cmd/player`](../cmd/player)); the firmware + hardware design is
-[`../docs/esp32.md`](../docs/esp32.md).
+[`../docs/developer/esp32.md`](../docs/developer/esp32.md).
 
 **Scope (v1):** full playback protocol + mDNS advertise + USB provisioning. No
 on-device HTTP, no master role, no SPA — Wi-Fi and all pin/DAC settings are
@@ -17,7 +17,7 @@ or any serial client.
 See [`devices/`](devices/) for pinout sheets and wiring references.
 
 - **Board:** a **PSRAM-equipped ESP32** — ESP32-S3-WROOM-1 (DevKitC-1) or a classic
-  ESP32-WROVER. Non-PSRAM parts are out of scope (see `docs/esp32.md`); other PSRAM
+  ESP32-WROVER. Non-PSRAM parts are out of scope (see `docs/developer/esp32.md`); other PSRAM
   chips are a board profile away — see *Adding a board* below.
 - **DAC:** PCM5102A over I2S (the purple GY-PCM5102 module; software volume).
 - **Encoder:** KY-040 / EC11 for local volume + mute (optional).
@@ -103,7 +103,7 @@ USB). Scriptable without the web page:
 
 ## Conformance
 
-The bar is the reference client + the e2e leg (`../scripts/e2e.sh`, `docs/esp32.md`
+The bar is the reference client + the e2e leg (`../scripts/e2e.sh`, `docs/developer/esp32.md`
 §8): subscribe to a live group, play in sync (no dropouts, sample-aligned within
 the buffer), survive `RECONFIG`/master change, and never join cluster membership
 or codec negotiation. Bench check: run a software member and the ESP node in one

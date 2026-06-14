@@ -44,6 +44,7 @@ const (
 	AttachLen   = 16  // §6.1
 	SetVolLen   = 2   // §6.2
 	SetDelayLen = 2   // §6.2
+	SetChanLen  = 1   // playout channel mode byte (0 stereo / 1 L / 2 R)
 	SetCapLen   = 2   // §6.2
 	SetEqLen    = 2   // D65: master-driven cross-room equalization delay
 	StatusLen   = 103 // §6.3 (87 + 8 SamplesInjected + 8 SamplesDropped)
@@ -137,6 +138,23 @@ func DecodeSetDelay(p []byte) (SetDelayPayload, error) {
 	return SetDelayPayload{DelayMs: int16(binary.BigEndian.Uint16(p[0:2]))}, nil
 }
 
+// SetChannelPayload sets the playout channel mode: 0 stereo (both), 1 left-only,
+// 2 right-only — a single channel played as dual-mono on both speakers.
+type SetChannelPayload struct {
+	Mode uint8
+}
+
+func (s SetChannelPayload) AppendTo(dst []byte) []byte {
+	return append(dst, s.Mode)
+}
+
+func DecodeSetChannel(p []byte) (SetChannelPayload, error) {
+	if len(p) < SetChanLen {
+		return SetChannelPayload{}, errBadControl
+	}
+	return SetChannelPayload{Mode: p[0]}, nil
+}
+
 // SetCapPayload toggles a runtime capability (PLAYER §6.2). CapID enumerates
 // the toggleable capabilities; unknown ids MUST be ignored by the receiver.
 type SetCapPayload struct {
@@ -185,7 +203,7 @@ func DecodeSetEqualize(p []byte) (SetEqualizePayload, error) {
 const (
 	StatusFlagSynced     = 0x01
 	StatusFlagPlaying    = 0x02
-	StatusFlagCalibrated = 0x04 // servo setpoint captured: DeviceDelayNs−PhaseErrNs is a stable constant (D65)
+	StatusFlagCalibrated = 0x04 // phase probe exists AND clock synced: DeviceDelayNs−PhaseErrNs is the stable per-room device-queue depth (D65)
 )
 
 // StatusPayload is the playback node's telemetry to its master (PLAYER §6.3),
@@ -204,12 +222,12 @@ type StatusPayload struct {
 	Played        uint64
 	Silence       uint64
 	Late          uint64
-	DeviceDelayNs int64 // measured output (device) latency, ns; 0 if the backend can't report it. The master diffs this across rooms to see inter-node skew (D63 telemetry).
-	PhaseErrNs    int64 // playout phase error vs the smoothed model, ns (D64 telemetry)
-	Calibrated    bool  // servo setpoint captured → DeviceDelayNs−PhaseErrNs is the stable per-room device-queue depth (D65; flag, not a payload field)
-	// Grounded resample accounting: cumulative samples the rate-servo actually
-	// duplicated into / dropped from the output (per-channel sample units) — the
-	// realized correction at the DAC, not the commanded RatePPM.
+	DeviceDelayNs int64 // device's queued audio (the phase reference), ns; 0 if the device can't report it. The master diffs this across rooms to see inter-node skew (D63 telemetry).
+	PhaseErrNs    int64 // play-head phase error vs the master clock, ns; ≈0 when locked (D64 telemetry)
+	Calibrated    bool  // phase probe exists AND clock synced → DeviceDelayNs−PhaseErrNs is the stable per-room device-queue depth (D65; flag, not a payload field)
+	// Grounded resample accounting: cumulative samples the phase-lock servo
+	// actually duplicated into / dropped from the output (per-channel sample
+	// units) — the realized correction at the DAC, not the commanded RatePPM.
 	SamplesInjected uint64
 	SamplesDropped  uint64
 }

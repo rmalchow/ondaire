@@ -222,6 +222,7 @@ func (d *Driver) reconcile(snap contracts.Snapshot) {
 				BufferMs:  settings.BufferMs,
 			})
 			dr.player.SetVolume(volPct(nv.Volume), false)
+			dr.player.SetChannel(chanModeByte(nv.Channel)) // dual-mono select; re-asserted each tick, sink dedups
 			// Output delay is the NODE's property (its fixed device latency), set at
 			// startup from node.json and persisted there. The master must NOT push it
 			// routinely — that would clobber the node's own value with the proxied

@@ -79,6 +79,10 @@ func (r *remotePlayer) SetEqualize(ms int) {
 	r.send(stream.TypeSetEq, stream.SetEqualizePayload{DelayMs: uint16(ms)}.AppendTo(nil))
 }
 
+func (r *remotePlayer) SetChannel(mode uint8) {
+	r.send(stream.TypeSetChan, stream.SetChannelPayload{Mode: mode}.AppendTo(nil))
+}
+
 func (r *remotePlayer) SetCap(capID uint8, on bool) {
 	r.send(stream.TypeSetCap, stream.SetCapPayload{CapID: capID, On: on}.AppendTo(nil))
 }

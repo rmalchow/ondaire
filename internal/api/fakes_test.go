@@ -91,6 +91,8 @@ func (f *fakeCluster) SetOutputDevice(d string) {
 	f.mu.Unlock()
 }
 
+func (f *fakeCluster) SetChannel(ch string) {}
+
 func (f *fakeCluster) SetDisabled(d []string) {
 	f.mu.Lock()
 	f.setDisabled = append(f.setDisabled, append([]string(nil), d...))
@@ -117,7 +119,7 @@ func (f *fakeCluster) AssignPlaybackNode(node, target id.ID) bool {
 	return true
 }
 
-func (f *fakeCluster) PatchPlaybackNode(node id.ID, name *string, volume *float64, delayMs *int, following *id.ID) bool {
+func (f *fakeCluster) PatchPlaybackNode(node id.ID, name *string, volume *float64, delayMs *int, following *id.ID, channel *string) bool {
 	f.mu.Lock()
 	f.patched = append(f.patched, node)
 	f.mu.Unlock()
@@ -341,6 +343,8 @@ func (n *fakeNodeConfig) SetOutputDevice(d string) error {
 	return n.deviceErr
 }
 
+func (n *fakeNodeConfig) SetChannel(ch string) error { return nil }
+
 func (n *fakeNodeConfig) SetDisabled(d []string) error {
 	n.mu.Lock()
 	n.disabled = append(n.disabled, append([]string(nil), d...))
@@ -375,6 +379,8 @@ func (s *fakeSink) SetGain(g float64) {
 	s.gains = append(s.gains, g)
 	s.mu.Unlock()
 }
+
+func (s *fakeSink) SetChannel(ch string) {}
 
 func (s *fakeSink) SetDelayOffset(nanos int64) {
 	s.mu.Lock()

@@ -6,6 +6,7 @@
     nodeRename,
     nodeSetVolume,
     nodeSetOutputDelay,
+    nodeSetChannel,
     setOutputDevice,
     setDisabled,
     testTone,
@@ -51,6 +52,28 @@
     const v = node.outputDelayMs ?? 0;
     if (!delayDragging) delayMs = v;
   });
+
+  // Channel mode (stereo / L / R, dual-mono): a pending draft the operator commits
+  // with ATTACH; RESET reverts to stereo. The APPLIED value is node.channel; the draft
+  // adopts it (via the effect) only while not mid-edit, so a 1 Hz snapshot doesn't
+  // clobber an in-progress pick — same shape as the hw-delay draft above.
+  let channelSel = $state("stereo");
+  let channelEditing = $state(false);
+  let appliedChannel = $derived(node.channel || "stereo");
+  let channelDirty = $derived(channelSel !== appliedChannel);
+  $effect(() => {
+    const v = node.channel || "stereo";
+    if (!channelEditing) channelSel = v;
+  });
+  function channelAttach() {
+    channelEditing = false;
+    nodeSetChannel(node, channelSel).catch(() => {});
+  }
+  function channelReset() {
+    channelEditing = false;
+    channelSel = "stereo";
+    nodeSetChannel(node, "stereo").catch(() => {});
+  }
 
   let delayTimer = null;
   function fireDelay() {
@@ -267,6 +290,23 @@
             aria-label="hw delay (ms)"
           />
           <span class="pct small">{delayMs} ms</span>
+        </span>
+      </div>
+      <div class="setting-row">
+        <span class="muted small setting-label" title="play a single channel as dual-mono (the chosen channel on both speakers)">channel</span>
+        <span class="row small">
+          <select bind:value={channelSel} onchange={() => (channelEditing = true)} aria-label="channel mode">
+            <option value="stereo">Stereo</option>
+            <option value="L">L (left)</option>
+            <option value="R">R (right)</option>
+          </select>
+          <button class="btn small" onclick={channelAttach}
+            disabled={!channelDirty}
+            title="apply the selected channel">attach</button>
+          <button class="btn small" onclick={channelReset}
+            disabled={appliedChannel === "stereo"}
+            title="revert to stereo">reset</button>
+          {#if appliedChannel !== "stereo"}<span class="muted small" title="currently applied">· {appliedChannel}</span>{/if}
         </span>
       </div>
     {/if}

@@ -20,6 +20,7 @@ type fakePlayer struct {
 	vols     []volCall
 	delays   []int
 	equalize []int
+	channels []uint8
 	caps     []capCall
 	status   stream.StatusPayload
 }
@@ -42,6 +43,12 @@ func (p *fakePlayer) SetVolume(pct uint8, mute bool) {
 	p.mu.Unlock()
 }
 func (p *fakePlayer) SetDelay(ms int) { p.mu.Lock(); p.delays = append(p.delays, ms); p.mu.Unlock() }
+func (p *fakePlayer) SetChannel(mode uint8) {
+	p.mu.Lock()
+	p.channels = append(p.channels, mode)
+	p.mu.Unlock()
+}
+
 func (p *fakePlayer) SetEqualize(ms int) {
 	p.mu.Lock()
 	p.equalize = append(p.equalize, ms)

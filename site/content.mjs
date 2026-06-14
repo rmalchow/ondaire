@@ -21,7 +21,7 @@ export const content = {
 
   // Header nav is a trimmed shortlist — every section still exists on the page.
   // (The "Flash a node" sub-page is still built — flash.html — but intentionally
-  // UNLINKED until the firmware passes the conformance bar; see docs/esp32.md.)
+  // UNLINKED until the firmware passes the conformance bar; see docs/developer/esp32.md.)
   nav: [
     { label: "Why", href: "#why" },
     { label: "Screenshots", href: "#screens" },
@@ -202,25 +202,25 @@ export const content = {
     eyebrow: "Measured, not promised",
     title: "We put a microphone in the room.",
     intro:
-      "Anyone can claim “perfect sync.” So we recorded two Raspberry-Pi speakers with a single microphone and measured the real acoustic gap between them — over twelve minutes, warts and all.",
+      "Anyone can claim “perfect sync.” So we recorded two Raspberry-Pi speakers with a single microphone and measured the real acoustic gap between them — ten minutes, every burst, warts and all.",
     items: [
       {
-        src: "assets/img/coherence_interspeaker.png",
-        alt: "Inter-speaker drift over 12 minutes: a smooth thermal curve staying within ±716 µs of zero.",
-        kicker: "Inter-speaker offset",
-        metric: "716 µs",
-        title: "Sub-millisecond, all session long",
+        src: "assets/img/sync_time.png",
+        alt: "Inter-speaker offset over a ten-minute run: a flat line hugging zero, the bulk of bursts inside ±0.1 ms and 99% inside ±0.4 ms.",
+        kicker: "Inter-speaker sync",
+        metric: "84 µs",
+        title: "Locked, the whole session",
         body:
-          "Across a twelve-minute run the two speakers held to 716 µs RMS — a smooth thermal drift as the sound cards warm up, not nervous jitter. Your ears fuse two arrivals into one source up to roughly five milliseconds (the precedence effect), so this sits comfortably inside “one sound.” Honest read: sub-millisecond most of the time, with a slow couple-of-milliseconds thermal wander at the extremes.",
+          "Across a ten-minute run the two speakers held a median 84 µs apart — flat, burst after burst, not the drift-and-snap of a loop fighting itself. Your ears fuse two arrivals into one source up to roughly five milliseconds (the precedence effect), so this sits deep inside “one sound.” Honest read: the graph has the slow sound-card warm-up drift removed — the master’s cross-room equalization tracks that out — so what you see is the moment-to-moment sync.",
       },
       {
-        src: "assets/img/compare.png",
-        alt: "Microphone-measured drift versus the servo's self-reported clock offset; the two barely correlate (r = +0.20).",
-        kicker: "Microphone vs the servo's own books",
-        metric: "r = 0.20",
-        title: "And we measured where it still falls short",
+        src: "assets/img/sync_cdf.png",
+        alt: "Cumulative distribution of the inter-speaker offset: 50% of bursts within 84 µs, 95% within 0.31 ms, 99.5% within 0.44 ms, none past half a millisecond.",
+        kicker: "How close, how often",
+        metric: "99.5% < 0.44 ms",
+        title: "Sub-half-millisecond, by the numbers",
         body:
-          "We overlaid what the microphone heard against what the players report to each other. They barely agree (r = +0.20): the clocks stay locked while the real drift hides in the sound-card output path, downstream of everything the servo can see. It's small enough to be inaudible — and it's exactly the gap on-demand acoustic calibration is built to close.",
+          "The whole distribution, not a cherry-picked peak: half the bursts land within 84 µs, 95% within 0.31 ms, 99.5% within 0.44 ms — and nothing crosses half a millisecond. Honest read: this is what a single microphone hears, so it already includes the room and the mic’s own ~150 µs of noise; the electrical sync between the cards is at least this tight, not looser.",
       },
     ],
   },
@@ -309,7 +309,7 @@ export const content = {
       "One small, static binary per device — pure Go, no runtime, no dependencies. Each archive is the build attached to the matching tagged release: verify its SHA-256, unpack it, and run ./ensemble. Prefer containers? Pull the master image with Spotify Connect built in.",
     // Teaser for the (in-progress) hardware-player support. This block will
     // eventually be the entry point to the browser flasher (flash.html); no link
-    // yet — the firmware isn't conformant. See docs/esp32.md + docs/PLAYER.md.
+    // yet — the firmware isn't conformant. See docs/developer/esp32.md + docs/developer/player-protocol.md.
     esp32: {
       badge: "Coming soon",
       title: "ESP32 players — support in progress",
@@ -468,7 +468,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
       { n: "3", title: "Confirm wiring", body: "Set the I2S and encoder pins (defaults match the wiring guide), then hit Test tone to verify the DAC." },
       { n: "4", title: "Reboot & play", body: "The node joins the LAN, the cluster discovers it, and it’s assignable to any group. Turn the knob for volume." },
     ],
-    docHref: `${REPO}/-/blob/main/docs/esp32.md`,
+    docHref: `${REPO}/-/blob/main/docs/developer/esp32.md`,
     docLabel: "Firmware & hardware guide",
   },
 

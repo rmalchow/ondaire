@@ -47,6 +47,9 @@ type Player interface {
 	// to match the slowest so speaker_time aligns. Idempotent (soft-state); only a
 	// changed value re-anchors playout.
 	SetEqualize(ms int)
+	// SetChannel sets the playout channel mode (0 stereo / 1 L / 2 R, dual-mono):
+	// a single channel played on both speakers. Idempotent (the sink dedups).
+	SetChannel(mode uint8)
 	// SetCap toggles a runtime capability by id (D54). A localPlayer (Go member)
 	// has no per-cap toggle here — capability disable rides the cluster record —
 	// so this is a no-op for it; a firmware player acts on it.
@@ -168,6 +171,37 @@ func (p *localPlayer) SetEqualize(ms int) {
 	}
 	if s, ok := p.sink.(interface{ SetEqualizeDelay(int64) }); ok {
 		s.SetEqualizeDelay(int64(ms) * 1_000_000)
+	}
+}
+
+// SetChannel forwards the channel mode to the sink (dual-mono select). Optional on
+// contracts.Sink: a sink without it ignores the setting (stays stereo).
+func (p *localPlayer) SetChannel(mode uint8) {
+	if s, ok := p.sink.(interface{ SetChannel(string) }); ok {
+		s.SetChannel(chanModeString(mode))
+	}
+}
+
+// chanModeString/chanModeByte map the on-wire mode byte ↔ the sink's string form.
+func chanModeString(m uint8) string {
+	switch m {
+	case 1:
+		return "L"
+	case 2:
+		return "R"
+	default:
+		return "stereo"
+	}
+}
+
+func chanModeByte(s string) uint8 {
+	switch s {
+	case "L":
+		return 1
+	case "R":
+		return 2
+	default:
+		return 0
 	}
 }
 

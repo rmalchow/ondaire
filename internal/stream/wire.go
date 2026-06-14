@@ -43,6 +43,7 @@ const (
 	TypeSetDelay  byte = 0x33 // master→pb output-delay ms (signed); payload SetDelayPayload
 	TypeSetCap    byte = 0x34 // master→pb enable/disable a capability; payload SetCapPayload
 	TypeSetEq     byte = 0x35 // master→pb cross-room device-buffer equalization delay ms (unsigned, added); payload SetEqualizePayload (D65)
+	TypeSetChan   byte = 0x36 // master→pb playout channel mode (0 stereo / 1 L / 2 R, dual-mono); payload SetChannelPayload
 	TypeStatus    byte = 0x40 // pb→master telemetry; payload StatusPayload
 	TypeStatusReq byte = 0x41 // master→pb liveness poll "send STATUS now"; no payload (D60)
 )

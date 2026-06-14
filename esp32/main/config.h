@@ -1,6 +1,6 @@
 // config.h — persistent node configuration (NVS namespace "ensemble"). Every
 // field has a board default (boards/board.h) so an unprovisioned board still
-// boots; the USB JSON console (console.c) overwrites them. See docs/esp32.md §5.
+// boots; the USB JSON console (console.c) overwrites them. See docs/developer/esp32.md §5.
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>

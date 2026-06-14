@@ -29,7 +29,7 @@ in sync — no server, no database, no config files, no cloud.
   sticks whenever that set reforms.
 
 > A node can also be a receive-only **player**: the wire protocol is small and
-> documented in [`docs/PLAYER.md`](docs/PLAYER.md) for firmware
+> documented in [`docs/developer/player-protocol.md`](docs/developer/player-protocol.md) for firmware
 > (e.g. an ESP32 + DAC), with a reference player in [`cmd/player`](cmd/player).
 
 ---
@@ -165,11 +165,14 @@ and streams it to every member (including itself) that has *subscribed* to its
 source port. Each member runs a clock follower and a jitter-buffered, rate-
 servo'd playout so the audio leaves every speaker at the same instant.
 
-Deeper docs live in [`docs/`](docs/): [`README.md`](docs/README.md) is the full
-spec, [`arch/`](docs/arch) has per-component design and the decision log,
-[`PLAYER.md`](docs/PLAYER.md) is the wire protocol,
-[`esp32.md`](docs/esp32.md) the ESP32-S2 hardware node, [`calibration.md`](docs/calibration.md)
-the acoustic coherence measurement & calibration, and [`RELEASING.md`](RELEASING.md) covers releases.
+Deeper docs live in [`docs/`](docs/), organized into four groups: the
+[user guide](docs/user/), the [architecture reference](docs/architecture/)
+(topic pages — wire protocol, clock sync, playout pipeline, sequence diagrams, …),
+the [developer docs](docs/developer/) (the [player wire protocol](docs/developer/player-protocol.md),
+the [ESP32 hardware node](docs/developer/esp32.md), and
+[acoustic calibration](docs/developer/calibration.md)), and a
+[reference section](docs/reference/) of external prior art.
+[`RELEASING.md`](RELEASING.md) covers releases.
 
 ## Measured coherence
 
@@ -186,11 +189,9 @@ common) playback-vs-microphone clock rate exactly and leaves only the
 `pi01`↔`pi02` offset. As a ground-truth check, a deliberate ~50 cm speaker move
 was recovered as 46 cm from the audio alone. The toolkit is pure Python in
 [`tools/calib/`](tools/calib/) (`lr_drift.py`, `compare_drift.py`); the full
-write-up is in [`docs/calibration.md`](docs/calibration.md).
+write-up is in [`docs/developer/calibration.md`](docs/developer/calibration.md).
 
 ### Inter-speaker offset: 716 µs RMS
-
-![Inter-speaker coherence drift](docs/img/coherence_interspeaker.png)
 
 The two speakers held to **716 µs RMS**, peak-to-peak ~2.7 ms. The curve is a
 smooth thermal "bowl" (sound-card crystals warming up), not fast jitter. The
@@ -199,8 +200,6 @@ ms, so this stays well inside the single-source range — sub-millisecond most o
 the session, with a slow multi-ms thermal excursion the rate-servo doesn't cancel.
 
 ### What the servo can't see
-
-![Microphone vs servo telemetry](docs/img/compare.png)
 
 Polling the master's per-node STATUS telemetry (`GET /api/playback/statuses`)
 during the same run, the players' self-reported clock-offset difference stays

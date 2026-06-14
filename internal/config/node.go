@@ -29,6 +29,21 @@ const (
 // defaultOutputDevice is the ALSA device selected when node.json omits it (D37).
 const defaultOutputDevice = "default"
 
+// defaultChannel is the playout channel mode when node.json omits it: "stereo"
+// (both channels). "L"/"R" play that single channel as dual-mono (D67-adjacent).
+const defaultChannel = "stereo"
+
+// normalizeChannel maps any input to a valid channel mode, defaulting unknown /
+// empty values to "stereo".
+func normalizeChannel(ch string) string {
+	switch ch {
+	case "L", "R":
+		return ch
+	default:
+		return defaultChannel
+	}
+}
+
 // disableableFeatures is the set an operator may disable per node (D40). The
 // store normalizes any persisted list down to this set, deduped + sorted.
 var disableableFeatures = map[string]bool{"playback": true, "opus": true, "input": true}
@@ -60,6 +75,7 @@ type NodeFile struct {
 	Volume        float64  `json:"volume"`        // playback gain 0.0–1.0, default 1.0 (D35)
 	OutputDelayMs int      `json:"outputDelayMs"` // hardware latency calibration, default 0, clamp ±500 (D36)
 	OutputDevice  string   `json:"outputDevice"`  // selected ALSA device id, default "default" (D37)
+	Channel       string   `json:"channel"`       // playout channel: "stereo" (default) | "L" | "R" (dual-mono)
 	Disabled      []string `json:"disabled"`      // operator-disabled features (D40): subset of {playback,opus,input}
 	Following     string   `json:"following"`     // last-known follow target as 32-hex (D45); "" == solo
 
@@ -75,6 +91,7 @@ type rawNodeFile struct {
 	Volume        *float64  `json:"volume"`
 	OutputDelayMs *int      `json:"outputDelayMs"`
 	OutputDevice  *string   `json:"outputDevice"`
+	Channel       *string   `json:"channel"`
 	Disabled      *[]string `json:"disabled"`
 	Following     *string   `json:"following"`
 
@@ -131,6 +148,7 @@ func (s *Store) LoadOrCreate(initialName string) (NodeFile, error) {
 		Volume:        defaultVolume,
 		OutputDelayMs: defaultDelayMs,
 		OutputDevice:  defaultOutputDevice,
+		Channel:       defaultChannel,
 	}
 	if raw.Volume != nil {
 		nf.Volume = *raw.Volume
@@ -140,6 +158,9 @@ func (s *Store) LoadOrCreate(initialName string) (NodeFile, error) {
 	}
 	if raw.OutputDevice != nil {
 		nf.OutputDevice = *raw.OutputDevice
+	}
+	if raw.Channel != nil {
+		nf.Channel = *raw.Channel
 	}
 	if raw.Disabled != nil {
 		nf.Disabled = *raw.Disabled
@@ -151,6 +172,7 @@ func (s *Store) LoadOrCreate(initialName string) (NodeFile, error) {
 	nf.Volume = clampVolume(nf.Volume)
 	nf.OutputDelayMs = clampDelayMs(nf.OutputDelayMs)
 	nf.OutputDevice = normalizeDevice(nf.OutputDevice)
+	nf.Channel = normalizeChannel(nf.Channel)
 	nf.Disabled = normalizeDisabled(nf.Disabled)
 	nf.Following = normalizeFollowing(nf.Following)
 	return nf, nil
@@ -169,6 +191,7 @@ func (s *Store) create(initialName string) (NodeFile, error) {
 		Volume:        defaultVolume,
 		OutputDelayMs: defaultDelayMs,
 		OutputDevice:  defaultOutputDevice,
+		Channel:       defaultChannel,
 	}
 	if err := s.write(nf); err != nil {
 		return NodeFile{}, err
@@ -210,6 +233,16 @@ func (s *Store) SetOutputDelayMs(nodeID id.ID, ms int) (NodeFile, error) {
 func (s *Store) SetOutputDevice(nodeID id.ID, device string) (NodeFile, error) {
 	return s.writeAtomic(nodeID, func(nf *NodeFile) {
 		nf.OutputDevice = normalizeDevice(device)
+	})
+}
+
+// SetChannel writes the playout channel mode ("stereo"|"L"|"R") while preserving
+// the other fields, via the same atomic replace. The id argument MUST equal the
+// persisted id (ErrIDImmutable on mismatch). The value is normalized (unknown →
+// "stereo") before write.
+func (s *Store) SetChannel(nodeID id.ID, ch string) (NodeFile, error) {
+	return s.writeAtomic(nodeID, func(nf *NodeFile) {
+		nf.Channel = normalizeChannel(ch)
 	})
 }
 

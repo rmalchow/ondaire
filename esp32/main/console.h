@@ -1,5 +1,5 @@
 // console.h — line-delimited JSON provisioning protocol over the USB-CDC console
-// (docs/esp32.md §6.2). The web flasher's "device settings" panel drives this to
+// (docs/developer/esp32.md §6.2). The web flasher's "device settings" panel drives this to
 // write Wi-Fi creds + I2S/encoder/DAC config and run a test tone. Also scriptable.
 //
 //   →  {"cmd":"get"}

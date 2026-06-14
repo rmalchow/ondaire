@@ -1,4 +1,4 @@
-// servo.h — drift telemetry + (optional) rate servo (PLAYER §9, docs/esp32.md
+// servo.h — drift telemetry + (optional) rate servo (player-protocol.md §9, docs/developer/esp32.md
 // §3.3). v1 measures the playout phase error and freezes a per-room device-delay
 // estimate (D63) the master can diff for cross-room EQ (D65); APLL actuation is
 // scaffolded but off by default (a clean glitch-free retune isn't available), so

@@ -2,7 +2,7 @@ package api
 
 import "ensemble/internal/contracts"
 
-// --- GET /api/status (DECISIONS.md D19) ------------------------------------
+// --- GET /api/status (D19) ------------------------------------
 
 // StatusResp is the GET /api/status envelope, pinned to D19. Field order/names
 // are part of the wire contract the SPA (J) codes against.
@@ -59,6 +59,7 @@ type NodePatchReq struct {
 	Volume           *float64                     `json:"volume,omitempty"`           // 0.0–1.0 (D35)
 	OutputDelayMs    *int                         `json:"outputDelayMs,omitempty"`    // ±500 ms (D36)
 	OutputDevice     *string                      `json:"outputDevice,omitempty"`     // ALSA device id (D37)
+	Channel          *string                      `json:"channel,omitempty"`          // "stereo" | "L" | "R" (dual-mono)
 	Disabled         *[]string                    `json:"disabled,omitempty"`         // subset of {playback,opus,input} (D40)
 	SpotifyEndpoints *[]contracts.SpotifyEndpoint `json:"spotifyEndpoints,omitempty"` // Spotify Connect presets (D57)
 }
@@ -101,6 +102,7 @@ type PatchPlaybackReq struct {
 	Volume        *float64 `json:"volume,omitempty"`        // 0.0–1.0 (D35)
 	OutputDelayMs *int     `json:"outputDelayMs,omitempty"` // ±500 (D36)
 	Following     *string  `json:"following,omitempty"`     // 32-hex master id; "" = idle
+	Channel       *string  `json:"channel,omitempty"`       // "stereo" | "L" | "R" (dual-mono)
 }
 
 // --- POST /api/group/name --------------------------------------------------

@@ -23,6 +23,8 @@ type Cluster interface {
 	SetOutputDelayMs(ms int)
 	// SetOutputDevice sets THIS node's selected ALSA output device (D37).
 	SetOutputDevice(device string)
+	// SetChannel sets THIS node's playout channel mode ("stereo"|"L"|"R").
+	SetChannel(channel string)
 	// SetDisabled sets THIS node's operator-disabled feature list (D40).
 	SetDisabled(disabled []string)
 	// SetSpotifyEndpoints replicates THIS node's Spotify Connect presets (D57).
@@ -38,7 +40,7 @@ type Cluster interface {
 	// (D59): name / volume / output-delay / group. A playback node has no HTTP API
 	// (D56), so these never proxy to the node — the master owns the record and the
 	// control driver pushes the knobs. Returns false if unknown / not playback.
-	PatchPlaybackNode(node id.ID, name *string, volume *float64, delayMs *int, following *id.ID) bool
+	PatchPlaybackNode(node id.ID, name *string, volume *float64, delayMs *int, following *id.ID, channel *string) bool
 	// Observe records that we received traffic from peer at ip (§3.1).
 	Observe(peer id.ID, ip netip.Addr)
 	// DialCandidates returns dial IPs for peer, ordered best-first per §3.1.
@@ -109,6 +111,7 @@ type NodeConfig interface {
 	SetVolume(v float64) error           // D35
 	SetOutputDelayMs(ms int) error       // D36
 	SetOutputDevice(d string) error      // D37
+	SetChannel(ch string) error          // playout channel "stereo"|"L"|"R"
 	SetDisabled(disabled []string) error // D40
 	// SetSpotifyEndpoints persists the presets and returns the NORMALIZED list
 	// (stable ids, deduped players) for the caller to replicate + reconcile (D57).
@@ -131,6 +134,7 @@ type Spotify interface {
 // SinkControl makes the live-apply step a no-op (persistence + replication still
 // happen).
 type SinkControl interface {
+	SetChannel(ch string)       // playout channel "stereo"|"L"|"R" (dual-mono)
 	SetGain(g float64)          // D35: g in [0.0, 1.0]
 	SetDelayOffset(nanos int64) // D36: outputDelayMs converted to ns
 	// TestTone plays a short local tone through the output backend (UI
@@ -165,17 +169,17 @@ type PlaybackStat struct {
 	Playing       bool    `json:"playing"`
 	OffsetNs      int64   `json:"offsetNs"`      // clock offset master−local
 	RTTNs         int64   `json:"rttNs"`         // smallest RTT in the clock window
-	RatePPM       float64 `json:"ratePPM"`       // servo rate correction
-	PhaseErrNs    int64   `json:"phaseErrNs"`    // playout phase error vs model
-	DeviceDelayNs int64   `json:"deviceDelayNs"` // measured output latency, 0 if unknown
+	RatePPM       float64 `json:"ratePPM"`       // phase-lock servo rate correction, (ratio−1)*1e6
+	PhaseErrNs    int64   `json:"phaseErrNs"`    // play-head phase error vs the master clock; ≈0 when locked
+	DeviceDelayNs int64   `json:"deviceDelayNs"` // device's queued audio (phase reference), 0 if unknown
 	Buffered      int     `json:"buffered"`      // jitter-buffer depth, frames
 	Played        uint64  `json:"played"`
 	Silence       uint64  `json:"silence"`
 	Late          uint64  `json:"late"`
 	Calibrated    bool    `json:"calibrated"`
-	// Grounded resample accounting: cumulative samples the rate-servo actually
-	// duplicated into / dropped from the output (per-channel sample units) — the
-	// realized DAC correction, not the commanded RatePPM.
+	// Grounded resample accounting: cumulative samples the phase-lock servo
+	// actually duplicated into / dropped from the output (per-channel sample
+	// units) — the realized DAC correction, not the commanded RatePPM.
 	SamplesInjected uint64 `json:"samplesInjected"`
 	SamplesDropped  uint64 `json:"samplesDropped"`
 	AgeMs           int64  `json:"ageMs"` // ms since last STATUS (staleness)

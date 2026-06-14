@@ -150,7 +150,7 @@ func (s *Server) handlePatchNode(c echo.Context) error {
 		return failCode(c, http.StatusBadRequest, "bad_request", "")
 	}
 	if req.Name == nil && req.Volume == nil && req.OutputDelayMs == nil &&
-		req.OutputDevice == nil && req.Disabled == nil && req.SpotifyEndpoints == nil {
+		req.OutputDevice == nil && req.Channel == nil && req.Disabled == nil && req.SpotifyEndpoints == nil {
 		return failCode(c, http.StatusBadRequest, "empty_patch", "")
 	}
 
@@ -168,6 +168,13 @@ func (s *Server) handlePatchNode(c echo.Context) error {
 		dev := strings.TrimSpace(*req.OutputDevice)
 		if dev == "" || len(dev) > 64 || !s.knownOutputDevice(dev) {
 			return failCode(c, http.StatusBadRequest, "bad_device", "")
+		}
+	}
+	if req.Channel != nil {
+		switch *req.Channel {
+		case "stereo", "L", "R":
+		default:
+			return failCode(c, http.StatusBadRequest, "bad_channel", "")
 		}
 	}
 	if req.Disabled != nil {
@@ -234,6 +241,18 @@ func (s *Server) handlePatchNode(c echo.Context) error {
 			s.cfg.ApplyOutputDevice(dev)
 		}
 		s.log.Info("node mutation", append(auditAttrs(c, "outputDevice"), "outputDevice", dev)...)
+	}
+	if req.Channel != nil {
+		ch := *req.Channel
+		if err := s.cfg.NodeCfg.SetChannel(ch); err != nil {
+			s.log.Warn("channel persist failed", "err", err)
+			return failCode(c, http.StatusInternalServerError, "internal_error", "")
+		}
+		s.cfg.Cluster.SetChannel(ch)
+		if sink := s.sink(); sink != nil {
+			sink.SetChannel(ch)
+		}
+		s.log.Info("node mutation", append(auditAttrs(c, "channel"), "channel", ch)...)
 	}
 	if req.Disabled != nil {
 		dis := *req.Disabled
@@ -377,6 +396,13 @@ func (s *Server) handlePatchPlayback(c echo.Context) error {
 	if req.OutputDelayMs != nil && (*req.OutputDelayMs < -500 || *req.OutputDelayMs > 500) {
 		return failCode(c, http.StatusBadRequest, "bad_delay", "")
 	}
+	if req.Channel != nil {
+		switch *req.Channel {
+		case "stereo", "L", "R":
+		default:
+			return failCode(c, http.StatusBadRequest, "bad_channel", "")
+		}
+	}
 	var following *id.ID
 	if req.Following != nil {
 		var t id.ID
@@ -387,7 +413,7 @@ func (s *Server) handlePatchPlayback(c echo.Context) error {
 		}
 		following = &t
 	}
-	if !s.cfg.Cluster.PatchPlaybackNode(node, req.Name, req.Volume, req.OutputDelayMs, following) {
+	if !s.cfg.Cluster.PatchPlaybackNode(node, req.Name, req.Volume, req.OutputDelayMs, following, req.Channel) {
 		return failCode(c, http.StatusNotFound, "not_a_playback_node", "")
 	}
 	s.log.Info("ui mutation", append(auditAttrs(c, "patchPlayback"), "node", req.Node)...)

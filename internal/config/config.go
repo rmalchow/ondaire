@@ -56,6 +56,7 @@ type Config struct {
 	Volume        float64  // playback software gain 0.0–1.0; default 1.0 (D35)
 	OutputDelayMs int      // hardware latency calibration; default 0, clamped ±500 (D36)
 	OutputDevice  string   // selected ALSA output device id; default "default" (D37)
+	Channel       string   // playout channel: "stereo" (default) | "L" | "R" (dual-mono)
 	Disabled      []string // operator-disabled features; subset of {playback,opus,input} (D40)
 	Following     id.ID    // last-known follow target; id.Zero == solo (D45)
 
@@ -200,6 +201,7 @@ func Load(opts Options) (*Config, error) {
 	cfg.Volume = nf.Volume
 	cfg.OutputDelayMs = nf.OutputDelayMs
 	cfg.OutputDevice = nf.OutputDevice
+	cfg.Channel = nf.Channel
 	cfg.Disabled = nf.Disabled
 	cfg.SpotifyEndpoints = nf.SpotifyEndpoints
 	// nf.Following is already normalized to "" or valid 32-hex by the store, so
@@ -269,6 +271,18 @@ func (c *Config) SetOutputDevice(device string) error {
 		return err
 	}
 	c.OutputDevice = nf.OutputDevice
+	return nil
+}
+
+// SetChannel persists the playout channel mode ("stereo"|"L"|"R") and atomically
+// rewrites node.json, updating c.Channel on success only. The value is normalized
+// (unknown → "stereo") before write.
+func (c *Config) SetChannel(ch string) error {
+	nf, err := c.store.SetChannel(c.NodeID, ch)
+	if err != nil {
+		return err
+	}
+	c.Channel = nf.Channel
 	return nil
 }
 

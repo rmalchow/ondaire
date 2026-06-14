@@ -747,7 +747,7 @@ function flashPage(builds) {
 <script>
 (function () {
   // Provision the node over Web Serial using the firmware's line-JSON protocol
-  // (docs/esp32.md §6.2): {"cmd":"get|set|test|reboot"}. Chrome/Edge only.
+  // (docs/developer/esp32.md §6.2): {"cmd":"get|set|test|reboot"}. Chrome/Edge only.
   var FIELDS = ["name","wifi_ssid","i2s_bclk","i2s_lrck","i2s_dout","i2s_mclk",
     "enc_a","enc_b","enc_sw","dac","codec","buffer_ms","control_port"];
   var NUM = ["i2s_bclk","i2s_lrck","i2s_dout","i2s_mclk","enc_a","enc_b","enc_sw","dac","codec","buffer_ms","control_port"];

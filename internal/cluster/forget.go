@@ -43,9 +43,12 @@ func (c *Cluster) ForgetNode(nid id.ID) error {
 	tomb := &TombstoneRecord{KilledVersion: killed, UpdatedAt: now}
 	c.doc.mergeTombstone(nid, tomb)
 	ownSnap := c.scrubOwnRefsLocked(nid)
+	delete(c.pbAssign, nid)  // D59: drop any persisted playback assignment for the forgotten node
+	delete(c.pbChannel, nid) // and its persisted channel mode
 	tombSnap := *tomb
 	c.mu.Unlock()
 
+	c.markDirty()
 	c.enqueueBroadcast(kindTombstone, nid, delta{Group: nid, Tombstone: &tombSnap})
 	if ownSnap != nil {
 		c.broadcastOwn(ownSnap)

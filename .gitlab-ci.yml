@@ -128,7 +128,7 @@ build-release:
 # producing a single merged flash image (fw/ensemble-fw-<board>.bin) the web
 # flasher serves. Branch/MR pipelines build only when esp32/** changed; tag
 # pipelines always build (firmware-release, never-expiring artifacts for the
-# release links + the site image). See esp32/ and docs/esp32.md.
+# release links + the site image). See esp32/ and docs/developer/esp32.md.
 .firmware-template:
   stage: build
   image: espressif/idf:release-v5.4

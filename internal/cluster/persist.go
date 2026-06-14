@@ -22,6 +22,16 @@ import (
 type clusterState struct {
 	Groups   map[id.ID]*GroupNameRecord     `json:"groups"`
 	Settings map[id.ID]*GroupSettingsRecord `json:"settings"`
+	// PlaybackAssignments persists which group each non-gossiping playback node is
+	// assigned to (nodeID → target, D59). Proxy records are runtime-only and rebuilt
+	// from mDNS on restart (which does NOT carry the assignment), so without this a
+	// master restart would silently drop every playback node back to solo. Held as
+	// master-local authoritative state (c.pbAssign) so it survives the window before
+	// the node is re-discovered; the proxy's Following is seeded from it on discovery.
+	PlaybackAssignments map[id.ID]id.ID `json:"playbackAssignments,omitempty"`
+	// PlaybackChannels persists each playback node's channel mode (nodeID →
+	// "stereo"|"L"|"R", D59), restored on re-discovery so a master restart keeps it.
+	PlaybackChannels map[id.ID]string `json:"playbackChannels,omitempty"`
 }
 
 // snapshotState clones the doc's override-names map and this node's OWN settings
@@ -43,6 +53,21 @@ func (c *Cluster) snapshotState() clusterState {
 	if v := c.doc.Settings[c.self]; v != nil {
 		cp := *v
 		st.Settings[c.self] = &cp
+	}
+	// D59: persist playback-node assignments from the authoritative master-local map
+	// (NOT derived from live proxies — those are empty until re-discovery after a
+	// restart, and deriving would overwrite the saved assignments with nothing).
+	if len(c.pbAssign) > 0 {
+		st.PlaybackAssignments = make(map[id.ID]id.ID, len(c.pbAssign))
+		for k, v := range c.pbAssign {
+			st.PlaybackAssignments[k] = v
+		}
+	}
+	if len(c.pbChannel) > 0 {
+		st.PlaybackChannels = make(map[id.ID]string, len(c.pbChannel))
+		for k, v := range c.pbChannel {
+			st.PlaybackChannels[k] = v
+		}
 	}
 	return st
 }

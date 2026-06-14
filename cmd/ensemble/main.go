@@ -34,6 +34,11 @@ import (
 	"ensemble/internal/netx"
 	"ensemble/internal/playback"
 	"ensemble/internal/sink"
+	"ensemble/internal/sink/device"
+	_ "ensemble/internal/sink/device/alsa"
+	_ "ensemble/internal/sink/device/exec"
+	_ "ensemble/internal/sink/device/file"
+	_ "ensemble/internal/sink/device/null"
 	"ensemble/internal/source"
 	"ensemble/internal/spotify"
 	"ensemble/internal/stream"
@@ -288,7 +293,7 @@ func run(ctx context.Context, opt options) (rerr error) {
 
 	// 4b. Output-device enumeration (D37, §8.5): parse /proc/asound/pcm when the
 	//     alsa backend is loadable. Empty on hosts without ALSA/libasound.
-	outputDevices := sink.ListOutputDevices()
+	outputDevices := device.ListOutputDevices()
 	log.Info("output devices", "devices", deviceIDs(outputDevices))
 
 	// 4c. Capture-device enumeration: PipeWire sources or ALSA capture PCMs,
@@ -332,6 +337,7 @@ func run(ctx context.Context, opt options) (rerr error) {
 		Volume:           cfg.Volume,
 		OutputDelayMs:    cfg.OutputDelayMs,
 		OutputDevice:     cfg.OutputDevice,
+		Channel:          cfg.Channel,
 		OutputDevices:    outputDevices,
 		InputDevices:     inputDevices,
 		Caps:             caps,
@@ -361,12 +367,12 @@ func run(ctx context.Context, opt options) (rerr error) {
 	//    Otherwise the output is the resilient failover chain: it tries every real
 	//    output (the configured device first) until one works, rotates on failure,
 	//    and rests with backoff after repeated whole-chain failures (D37).
-	backend, backendName, err := sink.OpenResilient(output, cfg.OutputDevice, base)
+	backend, backendName, err := device.OpenResilient(output, cfg.OutputDevice, base)
 	if err != nil {
 		return fmt.Errorf("sink backend %q: %w", opt.Output, err)
 	}
 	cl.SetOutputBackend(backendName) // report the CHOSEN backend so the UI can show it
-	if ar, ok := backend.(sink.ActiveReporter); ok {
+	if ar, ok := backend.(device.ActiveReporter); ok {
 		// Surface the live output kind as the chain opens / rotates outputs.
 		ar.OnActive(func(kind string) { cl.SetOutputBackend(kind) })
 	}
@@ -376,6 +382,7 @@ func run(ctx context.Context, opt options) (rerr error) {
 		BufferMs:      contracts.DefaultBufferMs,
 		Volume:        cfg.Volume,
 		OutputDelayMs: cfg.OutputDelayMs,
+		Channel:       cfg.Channel,
 		Log:           base,
 	})
 
@@ -546,8 +553,8 @@ func run(ctx context.Context, opt options) (rerr error) {
 	// assigned to the group THIS node masters, over the control plane. It sends from
 	// the source UDP socket (the node's STATUS comes back to that same endpoint).
 	// D65: feed the driver each playback node's calibrated device-queue depth so it
-	// can equalize cross-room buffering. The stable per-room constant is the servo
-	// setpoint, recovered from STATUS as DeviceDelayNs−PhaseErrNs; only fresh,
+	// can equalize cross-room buffering. The stable per-room device-queue depth is
+	// recovered from STATUS as DeviceDelayNs−PhaseErrNs; only fresh,
 	// recently-heard rooms are included.
 	pbDelays := func() map[id.ID]playback.RoomDelay {
 		st := srcSrv.Statuses()
@@ -665,7 +672,7 @@ func runPlayback(ctx context.Context, opt options, cfg *config.Config, base *slo
 
 	// Sink backend + playout, fed by the subscriber through the decode/deliver path.
 	// Resilient failover chain (D37): try every real output until one works.
-	backend, backendName, err := sink.OpenResilient(opt.Output, cfg.OutputDevice, base)
+	backend, backendName, err := device.OpenResilient(opt.Output, cfg.OutputDevice, base)
 	if err != nil {
 		return fmt.Errorf("sink backend %q: %w", opt.Output, err)
 	}
@@ -677,6 +684,7 @@ func runPlayback(ctx context.Context, opt options, cfg *config.Config, base *slo
 		BufferMs:      contracts.DefaultBufferMs,
 		Volume:        cfg.Volume,
 		OutputDelayMs: cfg.OutputDelayMs,
+		Channel:       cfg.Channel,
 		Log:           base,
 	})
 	disabled := newDisableState(cfg.Disabled)
@@ -767,10 +775,11 @@ func runPlayback(ctx context.Context, opt options, cfg *config.Config, base *slo
 	return rerr
 }
 
-// backendReportsQueue reports whether a sink backend can report its output-queue
-// depth (the rate-servo drift signal, D52) — advertised as the `queue` capability.
-func backendReportsQueue(b contracts.Backend) bool {
-	_, ok := b.(contracts.DelayReporter)
+// backendReportsQueue reports whether a sink device exposes a phase probe — its
+// queued-audio depth, the servo's phase reference (D52) — advertised as the
+// `queue` capability.
+func backendReportsQueue(b device.Sink) bool {
+	_, ok := device.Query[device.DelayReporter](b)
 	return ok
 }
 
@@ -841,7 +850,7 @@ func capabilities(opt options) contracts.Capabilities {
 		codecs = append(codecs, "opus")
 	}
 
-	playback := sink.HasPlayback()
+	playback := device.HasPlayback()
 	if forcedNull(opt.Output) {
 		playback = false
 	}
@@ -849,7 +858,7 @@ func capabilities(opt options) contracts.Capabilities {
 	return contracts.Capabilities{
 		Playback: playback,
 		Codecs:   codecs,
-		Backends: sink.BackendNames(),
+		Backends: device.BackendNames(),
 		Sources:  audio.Schemes(),
 		Formats:  []string{"wav", "mp3", "flac"},
 	}
@@ -1153,7 +1162,7 @@ func (d *disableState) has(feature string) bool {
 // sink backend: disabling playback swaps to the null backend; re-enabling reopens
 // the configured device/backend (mirroring applyOutputDevice). opus/input need no
 // swap — the factories/deliver read the set directly.
-func applyDisabled(state *disableState, outputSpec, device string, sk *sink.Playout, log *slog.Logger) func([]string) {
+func applyDisabled(state *disableState, outputSpec, dev string, sk *sink.Playout, log *slog.Logger) func([]string) {
 	return func(features []string) {
 		wasPlayback := state.has("playback")
 		state.set(features)
@@ -1163,7 +1172,7 @@ func applyDisabled(state *disableState, outputSpec, device string, sk *sink.Play
 		}
 		if nowPlayback {
 			// Newly disabled: swap to the null backend (timed discard).
-			nb, _, err := sink.OpenDevice("null", device, log)
+			nb, _, err := device.OpenDevice("null", dev, log)
 			if err != nil {
 				log.Warn("playback disable: null backend open failed", "err", err)
 				return
@@ -1174,7 +1183,7 @@ func applyDisabled(state *disableState, outputSpec, device string, sk *sink.Play
 		}
 		// Re-enabled: reopen the resilient failover chain (not a plain backend) so
 		// the self-healing output is restored after a disable/enable cycle.
-		nb, name, err := sink.OpenResilient(outputSpec, device, log)
+		nb, name, err := device.OpenResilient(outputSpec, dev, log)
 		if err != nil {
 			log.Warn("playback re-enable: backend reopen failed; keeping null", "err", err)
 			return

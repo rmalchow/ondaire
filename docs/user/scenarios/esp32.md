@@ -80,10 +80,10 @@ other node, ready to drop into a room.
 The full firmware, hardware, membership, and provisioning design lives in the
 developer docs:
 
-- **[`docs/esp32.md`](../../esp32.md)** — the ESP32-S2 node design spec (firmware,
-  hardware, the thin-node membership model, the web flasher).
-- **[`docs/PLAYER.md`](../../PLAYER.md)** — the audio wire protocol any
-  thin client implements, with a reference client in
+- **[`docs/developer/esp32.md`](../../developer/esp32.md)** — the ESP32-S2 node
+  design spec (firmware, hardware, the thin-node membership model, the web flasher).
+- **[`docs/developer/player-protocol.md`](../../developer/player-protocol.md)** — the
+  audio wire protocol any thin client implements, with a reference client in
   [`cmd/player`](../../../cmd/player).
 
 ---

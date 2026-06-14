@@ -105,6 +105,21 @@ func (c *Cluster) SetOutputDevice(device string) {
 	c.broadcastOwn(snap)
 }
 
+// SetChannel sets this node's playout channel mode ("stereo"|"L"|"R"). Caller
+// validates; C stores verbatim. No-op when unchanged.
+func (c *Cluster) SetChannel(channel string) {
+	c.mu.Lock()
+	if c.closed || c.own().Channel == channel {
+		c.mu.Unlock()
+		return
+	}
+	r := c.bumpOwn()
+	r.Channel = channel
+	snap := cloneNode(r)
+	c.mu.Unlock()
+	c.broadcastOwn(snap)
+}
+
 // SetOutputBackend records this node's CHOSEN sink backend ("alsa"|"exec"|"null",
 // §8.5), set once after the backend opens at boot. No-op when unchanged.
 func (c *Cluster) SetOutputBackend(backend string) {
@@ -356,11 +371,22 @@ func (c *Cluster) UpsertPlaybackNode(p discovery.Peer) {
 		Caps:         contracts.Capabilities{Playback: true, Codecs: append([]string(nil), p.Caps.Codecs...)},
 		AppVersion:   p.AppVersion, // build version from mDNS advert (UI / version-skew check)
 	}
+	// D59: on FIRST discovery (cur == nil, e.g. after a master restart) seed Following
+	// from the persisted assignment so the node re-joins its group instead of going
+	// solo. A live proxy (cur != nil) overrides with its current Following below —
+	// AssignPlaybackNode keeps pbAssign and the proxy in lockstep.
+	if t, ok := c.pbAssign[p.ID]; ok {
+		rec.Following = t
+	}
+	if ch, ok := c.pbChannel[p.ID]; ok {
+		rec.Channel = ch // restore persisted channel mode across restart (D59)
+	}
 	if cur != nil {
 		rec.Following = cur.Following // preserve operator assignment (D59)
 		rec.Name = cur.Name           // preserve a master-set label across re-discovery
 		rec.Volume = cur.Volume
 		rec.OutputDelayMs = cur.OutputDelayMs
+		rec.Channel = cur.Channel
 		rec.Version = cur.Version
 		if !playbackIdentityChanged(cur, rec) {
 			cur.UpdatedAt = now // freshen against purge; no version bump, no notify
@@ -393,7 +419,14 @@ func (c *Cluster) AssignPlaybackNode(node, target id.ID) bool {
 	r.Following = target
 	r.Version++
 	r.UpdatedAt = c.clock().Unix()
+	// D59: keep the persisted assignment map in lockstep so it survives a restart.
+	if target.IsZero() {
+		delete(c.pbAssign, node)
+	} else {
+		c.pbAssign[node] = target
+	}
 	c.mu.Unlock()
+	c.markDirty()
 	c.log.Info("playback node assignment", "id", node, "target", target)
 	c.notify()
 	return true
@@ -417,7 +450,7 @@ func (c *Cluster) TouchPlaybackNode(node id.ID) {
 // driver pushes volume/delay (and ATTACH for the assignment) to the node over the
 // control plane. Returns false only when the node is unknown or not a playback node;
 // an in-range no-op still returns true. Stays local to the master (Slice A).
-func (c *Cluster) PatchPlaybackNode(node id.ID, name *string, volume *float64, delayMs *int, following *id.ID) bool {
+func (c *Cluster) PatchPlaybackNode(node id.ID, name *string, volume *float64, delayMs *int, following *id.ID, channel *string) bool {
 	c.mu.Lock()
 	r := c.doc.Nodes[node]
 	if c.closed || r == nil || !r.PlaybackNode {
@@ -425,9 +458,16 @@ func (c *Cluster) PatchPlaybackNode(node id.ID, name *string, volume *float64, d
 		return false
 	}
 	changed := false
+	persist := false
 	if name != nil && r.Name != *name {
 		r.Name = *name
 		changed = true
+	}
+	if channel != nil && r.Channel != *channel {
+		r.Channel = *channel
+		c.pbChannel[node] = *channel // D59: persist so it survives a master restart
+		changed = true
+		persist = true
 	}
 	if volume != nil && r.Volume != *volume {
 		r.Volume = *volume
@@ -446,6 +486,9 @@ func (c *Cluster) PatchPlaybackNode(node id.ID, name *string, volume *float64, d
 		r.UpdatedAt = c.clock().Unix()
 	}
 	c.mu.Unlock()
+	if persist {
+		c.markDirty()
+	}
 	if changed {
 		c.log.Info("playback node patched", "id", node)
 		c.notify()

@@ -44,6 +44,7 @@ type NodeRecord struct {
 	Volume        float64                  `json:"volume"`                  // playback gain 0.0–1.0 (D35)
 	OutputDelayMs int                      `json:"outputDelayMs"`           // hardware latency calibration, ±500 (D36)
 	OutputDevice  string                   `json:"outputDevice"`            // selected ALSA device id (D37)
+	Channel       string                   `json:"channel"`                 // playout channel: "stereo" (default) | "L" | "R" (dual-mono)
 	OutputDevices []contracts.OutputDevice `json:"outputDevices"`           // enumerated devices on this node (D37)
 	OutputBackend string                   `json:"outputBackend,omitempty"` // CHOSEN sink backend ("alsa"|"exec"|"null", §8.5)
 	InputDevices  []contracts.InputDevice  `json:"inputDevices"`            // enumerated capture devices on this node (D48)

@@ -11,17 +11,7 @@ import (
 	"ensemble/internal/id"
 )
 
-// ---- Output backend (sink piece E owns the implementations) -----------------
-
-// Backend is a PCM output device. Audio is raw canonical PCM (48 kHz stereo
-// s16le) written as 20 ms frames (stream.FrameBytes each). Write must consume
-// the whole frame or error.
-type Backend interface {
-	// Write plays one canonical PCM frame. Blocks at most until buffered.
-	Write(frame []byte) error
-	// Close stops the device and releases resources.
-	Close() error
-}
+// ---- Output devices (the device port + adapters live in internal/sink/device) --
 
 // OutputDevice is one enumerated ALSA playback device (§8.5, D37). ID is an
 // ALSA device spec ("default" or "hw:C,D"); Desc is a human label. Enumerated
@@ -40,34 +30,6 @@ type OutputDevice struct {
 type InputDevice struct {
 	ID   string `json:"id"`
 	Desc string `json:"desc"`
-}
-
-// DelayReporter is an OPTIONAL Backend extension (type-asserted by the rate
-// servo in E, §8.5): the exact amount of queued audio between a Write and the
-// speaker, in nanoseconds. alsa implements it (snd_pcm_delay); exec/null/file
-// do not — the servo then falls back to backpressure inference.
-type DelayReporter interface {
-	DeviceDelay() (nanos int64, ok bool)
-}
-
-// LatencyReporter is an OPTIONAL Backend extension: the backend's CONFIGURED
-// output latency in nanoseconds — a known constant (e.g. ALSA's
-// ENSEMBLE_ALSA_LATENCY_MS), NOT the live queue depth. The playout subtracts it
-// from the deadline so the device is pre-rolled to its full buffer (xrun cushion)
-// and every node plays at a common master-time instant regardless of its device
-// latency (D63). alsa implements it; the pipe/exec/null backends do not (no DAC
-// buffer ⇒ treated as 0).
-type LatencyReporter interface {
-	ConfiguredLatencyNs() int64
-}
-
-// Flusher is an OPTIONAL Backend extension (type-asserted by the sink): drop
-// any audio queued inside the device/player when a playout session ends.
-// Without it, device layers that retain their buffer across an underrun
-// (PipeWire's alsa plugin, pipe players) audibly REPLAY stale audio when the
-// node rejoins a stream.
-type Flusher interface {
-	Flush()
 }
 
 // ---- Frame sink (playout; sink piece E owns it, group H feeds it) -----------
@@ -103,17 +65,17 @@ type Sink interface {
 type SinkStats struct {
 	Played        uint64  // frames written to the backend
 	Silence       uint64  // silent frames inserted for gaps
-	LateDrop      uint64  // frames dropped for arriving past their deadline
+	LateDrop      uint64  // frames dropped as stale/late at insert or overdue at prime
 	StaleGen      uint64  // frames dropped for an old generation
 	Synced        bool    // clock follower has a usable offset (gates playout)
-	RatePPM       float64 // current rate-servo correction (0 until settled)
+	RatePPM       float64 // current phase-lock servo rate correction, (ratio−1)*1e6 (0 until settled)
 	Buffered      int     // jitter-buffer depth, frames
-	DeviceDelayNs int64   // last measured output (device) latency, ns; 0 if unreported (D63 telemetry)
-	PhaseErrNs    int64   // playout phase error vs the smoothed model, ns (D64 telemetry)
-	Calibrated    bool    // servo setpoint captured → DeviceDelayNs−PhaseErrNs is stable (D65)
-	// Grounded resample accounting: cumulative samples the rate-servo actually
-	// duplicated into / dropped from the output (per-channel sample units). The
-	// realized correction at the DAC, not the commanded RatePPM.
+	DeviceDelayNs int64   // device's queued audio (the phase reference), ns; 0 if unreported (D63 telemetry)
+	PhaseErrNs    int64   // play-head phase error vs the master clock, ns; ≈0 when locked (D64 telemetry)
+	Calibrated    bool    // phase probe exists AND clock synced → DeviceDelayNs−PhaseErrNs is the stable per-room device-queue depth (D65)
+	// Grounded resample accounting: cumulative samples the phase-lock servo
+	// actually duplicated into / dropped from the output (per-channel sample
+	// units). The realized correction at the DAC, not the commanded RatePPM.
 	SamplesInjected uint64
 	SamplesDropped  uint64
 }
@@ -169,6 +131,7 @@ type NodeView struct {
 	Name          string             `json:"name"`
 	Volume        float64            `json:"volume"`                  // 0.0–1.0 software gain (D35)
 	OutputDelayMs int                `json:"outputDelayMs"`           // hardware latency calibration (D36)
+	Channel       string             `json:"channel"`                 // playout channel: "stereo" (default) | "L" | "R" (dual-mono)
 	OutputDevice  string             `json:"outputDevice"`            // selected ALSA device id (D37); "default" by default
 	OutputDevices []OutputDevice     `json:"outputDevices"`           // enumerated devices on this node (D37); empty when none
 	OutputBackend string             `json:"outputBackend,omitempty"` // CHOSEN sink backend ("alsa"|"exec"|"null", §8.5); the one actually playing
@@ -307,8 +270,8 @@ const (
 	DefaultCodec     = "opus"
 	DefaultTransport = "udp"
 	// DefaultBufferMs is the end-to-end playout budget. It must EXCEED the backend's
-	// configured device latency (D63: the playout subtracts that latency from the
-	// deadline, so the jitter window = bufferMs − deviceLatency). With ALSA at ~200ms,
+	// configured device latency (D63: the jitter window = bufferMs − the device's
+	// configured buffer, which the device pre-rolls). With ALSA at ~200ms,
 	// 300ms leaves ~100ms of jitter headroom; play-to-sound stays under the 500ms bar.
 	DefaultBufferMs = 300
 	DefaultLeadMs   = 50 // source release lead over the clock (§8.2)

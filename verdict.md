@@ -79,9 +79,11 @@ The things I specifically went to verify:
   (HashiCorp memberlist). That's a genuinely tasteful design. Less state to
   corrupt, less to disagree about.
 
-- **A stable, numbered decision log** (`docs/arch/DECISIONS.md`, decisions cited
-  from code as `// D64`). This is the discipline of someone who's maintained
-  long-lived systems. I'd be comfortable picking this up cold in a year.
+- **The "why" is written down.** The architecture docs don't just describe the
+  system, they argue for it — why a *proportional* servo and not PI, why the group ID
+  is the master's node ID, why opus is the default with a pcm fallback — and the code
+  back-references the choices it implements. This is the discipline of someone who's
+  maintained long-lived systems. I'd be comfortable picking this up cold in a year.
 
 **Where my skepticism survived contact with the code:**
 

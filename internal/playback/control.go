@@ -185,6 +185,14 @@ func (l *Listener) handle(typ byte, payload []byte, from netip.AddrPort) {
 			return
 		}
 		l.onSetEqualize(e)
+	case stream.TypeSetChan:
+		s, err := stream.DecodeSetChannel(payload)
+		if err != nil {
+			l.warnDecode(typ, payload, from, err)
+			return
+		}
+		// Re-asserted every reconcile tick (soft-state); the sink dedups.
+		l.player.SetChannel(s.Mode)
 	case stream.TypeSetCap:
 		c, err := stream.DecodeSetCap(payload)
 		if err != nil {

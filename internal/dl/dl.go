@@ -1,6 +1,6 @@
 // Package dl loads optional shared libraries at runtime via purego (dlopen/
 // dlsym FFI, no cgo, works with CGO_ENABLED=0). It is the single home for the
-// "capability off" soft-fail (DECISIONS.md D32): a missing library, wrong
+// "capability off" soft-fail (D32): a missing library, wrong
 // version, or missing required symbol yields ErrUnavailable — never a panic —
 // and the corresponding capability is simply reported off. Consumed by the
 // opus codec (piece D) and the alsa backend (piece E).

@@ -3,99 +3,207 @@ package sink
 import (
 	"encoding/binary"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"ensemble/internal/stream"
 )
 
-// fakeClock is a wall-clock-backed master/local clock: master == local ==
-// nanoseconds since `base`, gated by `synced`. Tying it to the wall clock means
-// the scheduler's real time.Sleep deadline-waits align with master time, so
-// frames play at their deadlines rather than all arriving "late".
+// ENGINE integration tests for the DAC-pull, phase-locked Playout (sink.go).
+//
+// The control-loop deadline scheduler is GONE: the device's blocking Write is the
+// only rate pacer (PLAN-dac-pull-phase-lock). So the old deadline late-drop tests
+// (TestPlayoutLateFrameDropped, TestPlayoutBufferMsLead exact-deadline timing) no
+// longer apply — there is no per-frame deadline sleep to miss. Prime's overdue-frame
+// skip still late-drops, but steady state never does. We therefore prefer
+// convergence/threshold assertions over exact wall-clock counts.
+//
+// To stay deterministic AND fast, the fake DAC drives a VIRTUAL clock: each Write
+// (one frame handed to the device) advances simulated time by FrameNanos and sleeps
+// a tiny REAL duration so the scheduler goroutine actually yields (the loop is paced,
+// the test runs in milliseconds). Both the injected now() and the fake master/local
+// clock read this same virtual clock, so phase error is a function of frames-written,
+// not of real scheduling jitter.
+
+// ---- virtual clock ---------------------------------------------------------
+
+// vclock is simulated monotonic time in ns, advanced by the DAC as it consumes
+// frames. Shared (atomically) by the DAC fake, the fakeClock and the injected now.
+type vclock struct{ ns atomic.Int64 }
+
+func (v *vclock) now() int64  { return v.ns.Load() }
+func (v *vclock) add(d int64) { v.ns.Add(d) }
+func newVClock() *vclock      { v := &vclock{}; v.ns.Store(1_000_000_000); return v } // start at t=1s
+
+// ---- fake clock (master == local, toggleable sync) -------------------------
+
 type fakeClock struct {
-	mu     sync.Mutex
-	base   time.Time
-	synced bool
+	v      *vclock
+	synced atomic.Bool
 }
 
-func newFakeClock(synced bool) *fakeClock {
-	return &fakeClock{base: time.Now(), synced: synced}
+func newFakeClock(v *vclock, synced bool) *fakeClock {
+	c := &fakeClock{v: v}
+	c.synced.Store(synced)
+	return c
+}
+func (c *fakeClock) setSynced(s bool)                    { c.synced.Store(s) }
+func (c *fakeClock) MasterNow() (int64, bool)            { return c.v.now(), c.synced.Load() }
+func (c *fakeClock) MasterToLocal(m int64) (int64, bool) { return m, c.synced.Load() }
+func (c *fakeClock) LocalToMaster(l int64) (int64, bool) { return l, c.synced.Load() }
+
+// ---- virtual DAC -----------------------------------------------------------
+
+// virtualDAC models a real sound card: a blocking Write (the rate pacer) and a
+// device queue draining at a crystal skewed dacPPM off nominal. It implements
+// device.Sink + DelayReporter + LatencyReporter + Interrupter.
+//
+// QUEUE MODEL (all in virtual ns):
+//   - Write adds FrameNanos of audio to the queue, advances the virtual clock by
+//     FrameNanos, and sleeps `pace` of REAL time so the loop goroutine yields.
+//   - The DAC continuously drains at (1+dacPPM/1e6) ×real-time. We compute the
+//     drained amount lazily from the virtual clock: drained(t) = (t−t0)*(1+ppm).
+//   - Delay() returns queue = written − drained, floored at 0 (a real card cannot
+//     report negative latency; flooring models an underrun). It starts ok=false
+//     until the first write so prime's "no signal yet" branch is exercised.
+//
+// A fast DAC (ppm>0) drains faster than frames arrive, so to hold the queue the
+// engine must SLOW production (ratio<1 ⇒ RatePPM<0): RatePPM → −dacPPM at lock.
+type virtualDAC struct {
+	mu          sync.Mutex
+	v           *vclock
+	dacPPM      float64
+	pace        time.Duration // real sleep per Write (loop pacing)
+	t0          int64         // virtual ns of the first write (drain origin)
+	writtenNs   float64       // cumulative audio handed to the device (ns)
+	started     bool
+	configLatNs int64
+	interrupted atomic.Bool
+	closed      atomic.Bool
 }
 
-func (c *fakeClock) setSynced(s bool) {
-	c.mu.Lock()
-	c.synced = s
-	c.mu.Unlock()
+func newVirtualDAC(v *vclock, dacPPM float64, pace time.Duration) *virtualDAC {
+	const configLat = 200 * 1_000_000 // 200 ms configured buffer
+	return &virtualDAC{
+		v:           v,
+		dacPPM:      dacPPM,
+		pace:        pace,
+		configLatNs: configLat,
+		// Seed the buffer cushion as already pre-filled so the queue holds ~configLat in
+		// steady state (the blocking write maintains it there); see Write.
+		writtenNs: configLat,
+	}
 }
 
-func (c *fakeClock) nowNs() int64 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return int64(time.Since(c.base))
+// drainedLocked returns audio drained since t0 at the skewed DAC rate.
+func (d *virtualDAC) drainedLocked() float64 {
+	if !d.started {
+		return 0
+	}
+	dt := float64(d.v.now() - d.t0)
+	if dt < 0 {
+		dt = 0
+	}
+	return dt * (1 + d.dacPPM/1e6)
 }
 
-func (c *fakeClock) MasterNow() (int64, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return int64(time.Since(c.base)), c.synced
+func (d *virtualDAC) Write(frame []byte) error {
+	if len(frame) != stream.FrameBytes {
+		return errBadFrame
+	}
+	if d.closed.Load() {
+		return nil
+	}
+	d.mu.Lock()
+	if !d.started {
+		d.started = true
+		d.t0 = d.v.now()
+	}
+	d.writtenNs += float64(stream.FrameNanos)
+	d.mu.Unlock()
+	// Advance virtual time by the REAL time the blocking write waited: the DAC must drain
+	// one frame's worth of room, which at a crystal skewed dacPPM takes FrameNanos/(1+ppm)
+	// (a fast DAC frees room sooner). This is what couples the drift into the engine's
+	// phase error (fedPTS advances at the input rate, shouldPTS at this DAC-paced wall
+	// clock), so the constant-latency servo locks to ratePPM → −dacPPM. Then yield real
+	// time so the loop goroutine is paced.
+	d.v.add(int64(float64(stream.FrameNanos) / (1 + d.dacPPM/1e6)))
+	if d.pace > 0 && !d.interrupted.Load() {
+		time.Sleep(d.pace)
+	}
+	return nil
 }
 
-func (c *fakeClock) MasterToLocal(m int64) (int64, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return m, c.synced // local == master
+func (d *virtualDAC) Close() error { d.closed.Store(true); return nil }
+
+// Delay reports the live queue depth in ns (the servo's phase probe).
+func (d *virtualDAC) Delay() (int64, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.started {
+		return 0, false
+	}
+	q := d.writtenNs - d.drainedLocked()
+	if q < 0 {
+		q = 0 // underrun: a real card floors at zero
+	}
+	return int64(q), true
 }
 
-func (c *fakeClock) LocalToMaster(l int64) (int64, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return l, c.synced
-}
+func (d *virtualDAC) ConfiguredLatencyNs() int64 { return d.configLatNs }
 
-// recBackend records every written frame. Optionally a DelayReporter.
+func (d *virtualDAC) Interrupt() { d.interrupted.Store(true) }
+
+// errBadFrame is returned for a wrong-size Write (the package contract).
+var errBadFrame = errBadFrameT("frame size")
+
+type errBadFrameT string
+
+func (e errBadFrameT) Error() string { return string(e) }
+
+// recBackend is a NON-paced recorder for lifecycle tests that only need to count
+// frames / inspect content (gap, reorder, gain, stale gen). It blocks just enough
+// to yield (the rate pacer) and advances the virtual clock so the watchdog/now
+// arithmetic stays consistent. No queue model → no phase probe (the servo holds
+// ratio 1, the device's clock would pace in production).
 type recBackend struct {
-	mu       sync.Mutex
-	frames   [][]byte
-	delayNs  int64
-	hasDelay bool
+	mu     sync.Mutex
+	v      *vclock
+	frames [][]byte
+	pace   time.Duration
 }
+
+func newRecBackend(v *vclock) *recBackend { return &recBackend{v: v, pace: 150 * time.Microsecond} }
 
 func (b *recBackend) Write(f []byte) error {
+	if len(f) != stream.FrameBytes {
+		return errBadFrame
+	}
 	b.mu.Lock()
 	cp := make([]byte, len(f))
 	copy(cp, f)
 	b.frames = append(b.frames, cp)
 	b.mu.Unlock()
+	b.v.add(stream.FrameNanos)
+	if b.pace > 0 {
+		time.Sleep(b.pace)
+	}
 	return nil
 }
-
 func (b *recBackend) Close() error { return nil }
-
-func (b *recBackend) reset() {
-	b.mu.Lock()
-	b.frames = nil
-	b.mu.Unlock()
-}
-
-func (b *recBackend) DeviceDelay() (int64, bool) {
-	if !b.hasDelay {
-		return 0, false
-	}
-	return b.delayNs, true
-}
-
 func (b *recBackend) count() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.frames)
 }
-
 func (b *recBackend) at(i int) []byte {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.frames[i]
 }
+
+// ---- helpers ---------------------------------------------------------------
 
 // audioFrame builds a frame whose every sample equals v.
 func audioFrame(v int16) []byte {
@@ -106,9 +214,66 @@ func audioFrame(v int16) []byte {
 	return f
 }
 
-// newTestPlayout wires a Playout against the wall-clock fake clock and a backend.
-// `now` is the same wall-clock source as the master clock, so deadlines line up.
-func newTestPlayout(t *testing.T, clk *fakeClock, be interface {
+// drainUntil polls cond up to ~5 s of real time, yielding to the scheduler.
+func drainUntil(cond func() bool) bool {
+	for i := 0; i < 50000; i++ {
+		if cond() {
+			return true
+		}
+		time.Sleep(100 * time.Microsecond)
+	}
+	return cond()
+}
+
+// pushRun pushes seqs with pts anchored a little ahead of the current virtual
+// master time so their (now-gone) deadlines and the prime alignment land just
+// ahead — never overdue at prime, so nothing is skipped.
+func pushRun(p *Playout, v *vclock, gen uint32, seqs []uint64) {
+	base := v.now() + int64(5*time.Millisecond)
+	for _, s := range seqs {
+		pts := base + int64(s)*stream.FrameNanos
+		p.Push(gen, s, pts, audioFrame(int16(1000+s)))
+	}
+}
+
+// feedFor keeps the sink fed DEMAND-DRIVEN: it tops the jitter buffer up toward a
+// small target depth and otherwise idles. Decoupling the push rate from real time
+// means the DAC's blocking Write alone paces the loop (the design contract), so the
+// buffer stays bounded no matter how fast the test's feeder goroutine runs — the
+// engine cannot be force-fed into a runaway. Runs until stop is closed; used by the
+// convergence test, which must run long enough for the servo to lock.
+func feedFor(p *Playout, v *vclock, gen uint32, stop <-chan struct{}) {
+	go func() {
+		seq := uint64(0)
+		base := v.now() + int64(40*time.Millisecond)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if p.Stats().Buffered < 12 {
+				p.Push(gen, seq, base+int64(seq)*stream.FrameNanos, audioFrame(500))
+				seq++
+			} else {
+				time.Sleep(20 * time.Microsecond)
+			}
+		}
+	}()
+}
+
+// engineServoCfg is a hot LP-P tune for the live-engine convergence tests: a brisk gain
+// and short filter so the loop locks within a few seconds of paced real time. Hotter than
+// production defaults (which low-pass the Pi's snd_pcm_delay jitter); the virtual DAC is
+// noise-free so it can afford it. At Kp 0.3 the P-only standing error for the test's
+// 150 ppm DAC is dacPPM/(1e6·Kp) ≈ 500 µs.
+func engineServoCfg() servoConfig {
+	return servoConfig{Kp: 0.3, N: 4, ClampPPM: 300, SlewPPM: 50000}
+}
+
+// newTestPlayout wires a Playout against the virtual clock + a backend, fast
+// watchdog off by default (long), fast servo gains.
+func newTestPlayout(t *testing.T, v *vclock, clk *fakeClock, be interface {
 	Write([]byte) error
 	Close() error
 }, restart RestartFunc) *Playout {
@@ -119,144 +284,170 @@ func newTestPlayout(t *testing.T, clk *fakeClock, be interface {
 		BufferMs: 150,
 		Restart:  restart,
 		Volume:   1.0,
-		Watchdog: 30 * time.Second, // long: only the dedicated watchdog tests want it short (slow CI was tripping it mid-test)
-		now:      clk.nowNs,
+		Watchdog: 30 * time.Second, // dedicated watchdog tests set it short
+		now:      v.now,
 		servoCfg: fastServoCfg(),
 	})
 	t.Cleanup(func() { p.Close() })
 	return p
 }
 
-// drainUntil polls cond up to ~3 s of wall time, yielding to the scheduler.
-func drainUntil(t *testing.T, cond func() bool) bool {
-	t.Helper()
-	for i := 0; i < 3000; i++ {
-		if cond() {
-			return true
-		}
-		time.Sleep(time.Millisecond)
-	}
-	return cond()
-}
+// ---- THE KEY TEST: the loop closes ----------------------------------------
 
-// unstarvedRun pushes a real-time-paced scenario onto p and retries it on a fresh
-// session until the playout completes WITHOUT being starved — i.e. a loaded CI
-// runner did not deschedule the scheduler past a frame deadline (no LateDrop).
-// These scenarios are deterministic absent starvation, so a clean attempt still
-// verifies exact played/silence counts; retrying only rides out transient
-// scheduler stalls that would otherwise late-drop a frame and fail the counts.
-// `be` is reset each attempt, so after a clean return it holds exactly that run's
-// written frames; wantWritten is the frame count a clean run writes (played +
-// silence). Fails if no clean run lands within the attempt budget.
-func unstarvedRun(t *testing.T, p *Playout, be *recBackend, clk *fakeClock, gen uint32, seqs []uint64, wantWritten int) {
-	t.Helper()
-	for attempt := 0; attempt < 8; attempt++ {
-		be.reset()
-		p.Reset(gen)
-		pushRun(p, clk, gen, seqs)
-		drainUntil(t, func() bool {
-			s := p.Stats()
-			return s.LateDrop > 0 || be.count() >= wantWritten
-		})
-		if s := p.Stats(); s.LateDrop == 0 && be.count() >= wantWritten {
-			return // clean, unstarved run: counts are exact
-		}
-	}
+// TestPlayoutServoLocksToDAC validates the closed loop end-to-end: with the virtual DAC
+// running +150 ppm fast, after enough paced frames the servo LOCKS — RatePPM tracks ≈ −150
+// (slow production to match the fast drain), PhaseErrNs settles at the small P-only
+// standing error (≈ 500 µs at Kp 0.3, well inside the ±3 ms bound), and the jitter buffer
+// stays bounded (no runaway). If this does NOT lock it is a real engine bug, reported
+// loudly rather than hidden.
+func TestPlayoutServoLocksToDAC(t *testing.T) {
+	const dacPPM = 150.0
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	dac := newVirtualDAC(v, dacPPM, 10*time.Microsecond)
+	p := New(Config{
+		Backend:  dac,
+		Clock:    clk,
+		BufferMs: 20,  // small playout lead ⇒ prime hands over near phase 0, so the
+		Volume:   1.0, // integral has only the rate offset to absorb (fast lock)
+		Watchdog: 30 * time.Second,
+		now:      v.now,
+		servoCfg: engineServoCfg(),
+	})
+	t.Cleanup(func() { p.Close() })
+	p.Reset(1)
+
+	stop := make(chan struct{})
+	defer close(stop)
+	feedFor(p, v, 1, stop)
+
+	// Wait for LOCK: RatePPM tracks −dacPPM (±20) AND |PhaseErrNs| under ~3 ms. The
+	// rate match (RatePPM → −150) is the proof the loop closed — production slows to
+	// exactly cancel the fast drain; P-only then holds a small standing phase offset.
+	locked := drainUntil(func() bool {
+		s := p.Stats()
+		return s.RatePPM < -130 && s.RatePPM > -170 &&
+			s.PhaseErrNs < 3_000_000 && s.PhaseErrNs > -3_000_000
+	})
 	s := p.Stats()
-	t.Fatalf("playout starved in all attempts (last: played=%d silence=%d late=%d)", s.Played, s.Silence, s.LateDrop)
+	if !locked {
+		// Do NOT weaken this to hide a non-converging loop — that is a real engine bug.
+		t.Fatalf("ENGINE LOOP DID NOT CLOSE: RatePPM=%.1f (want ≈ -150), PhaseErrNs=%d (want ≈0), Buffered=%d",
+			s.RatePPM, s.PhaseErrNs, s.Buffered)
+	}
+	if s.Buffered > defaultCapacity {
+		t.Fatalf("jitter buffer unbounded under lock: Buffered=%d", s.Buffered)
+	}
+	t.Logf("locked: RatePPM=%.1f (want ≈ -150), PhaseErrNs=%d ns, Buffered=%d", s.RatePPM, s.PhaseErrNs, s.Buffered)
 }
 
-// pushRun pushes frames seq..seq+count-1 with pts anchored a little ahead of the
-// current master time so their deadlines (pts + bufferMs) fall in the near
-// future and play at cadence (not late).
-func pushRun(p *Playout, clk *fakeClock, gen uint32, seqs []uint64) {
-	base := clk.nowNs() + int64(10*time.Millisecond)
-	for _, s := range seqs {
-		pts := base + int64(s)*stream.FrameNanos
-		p.Push(gen, s, pts, audioFrame(int16(1000+s)))
+// TestPlayoutRatePPMClamps: an absurd DAC skew saturates the servo at the clamp,
+// never beyond, and the buffer still stays bounded.
+func TestPlayoutRatePPMClamps(t *testing.T) {
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	dac := newVirtualDAC(v, 20000, 10*time.Microsecond) // absurd +20000 ppm
+	p := New(Config{
+		Backend: dac, Clock: clk, BufferMs: 20, Volume: 1,
+		Watchdog: 30 * time.Second, now: v.now, servoCfg: engineServoCfg(),
+	})
+	t.Cleanup(func() { p.Close() })
+	p.Reset(1)
+	stop := make(chan struct{})
+	defer close(stop)
+	feedFor(p, v, 1, stop)
+	clampPPM := engineServoCfg().ClampPPM
+	drainUntil(func() bool { return p.Stats().RatePPM <= -(clampPPM - 1) })
+	ppm := p.Stats().RatePPM
+	if ppm < -clampPPM-0.001 || ppm > clampPPM+0.001 {
+		t.Fatalf("RatePPM %.1f outside ±%.0f clamp", ppm, clampPPM)
 	}
 }
+
+// ---- lifecycle (ported, adapted to the paced engine) -----------------------
 
 func TestPlayoutBasicInOrder(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
-	unstarvedRun(t, p, be, clk, 1, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 10)
-	if p.Stats().Silence != 0 {
-		t.Fatalf("Silence=%d, want 0", p.Stats().Silence)
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
+	p := newTestPlayout(t, v, clk, be, nil)
+	p.Reset(1)
+	pushRun(p, v, 1, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9})
+	if !drainUntil(func() bool { return p.Stats().Played >= 10 }) {
+		t.Fatalf("Played=%d, want >=10", p.Stats().Played)
+	}
+	if s := p.Stats(); s.Silence != 0 {
+		t.Fatalf("Silence=%d, want 0 for an in-order run", s.Silence)
 	}
 }
 
 func TestPlayoutInsertsSilenceForGap(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
-	// miss seq 2 → a clean run writes 4 real frames + 1 silence for the gap.
-	unstarvedRun(t, p, be, clk, 1, []uint64{0, 1, 3, 4}, 5)
-	st := p.Stats()
-	if st.Silence != 1 {
-		t.Fatalf("Silence=%d, want 1", st.Silence)
-	}
-	if st.Played != 4 {
-		t.Fatalf("Played=%d, want 4", st.Played)
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
+	p := newTestPlayout(t, v, clk, be, nil)
+	p.Reset(1)
+	// Miss seq 2: the engine fills one silence frame for the gap, plays the rest.
+	pushRun(p, v, 1, []uint64{0, 1, 3, 4})
+	if !drainUntil(func() bool { return p.Stats().Played >= 4 && p.Stats().Silence >= 1 }) {
+		s := p.Stats()
+		t.Fatalf("gap not filled: Played=%d Silence=%d, want Played>=4 Silence>=1", s.Played, s.Silence)
 	}
 }
 
 func TestPlayoutReorderWithinBuffer(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
-	// reordered within the jitter buffer → a clean run plays 4, no silence.
-	unstarvedRun(t, p, be, clk, 1, []uint64{0, 2, 1, 3}, 4)
-	if p.Stats().Silence != 0 {
-		t.Fatalf("Silence=%d, want 0", p.Stats().Silence)
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
+	p := newTestPlayout(t, v, clk, be, nil)
+	p.Reset(1)
+	// Push 0,2,1,3 quickly: the jitter buffer reorders so all four play, no gap.
+	p.Push(1, 0, v.now()+int64(5*time.Millisecond), audioFrame(10))
+	p.Push(1, 2, v.now()+int64(5*time.Millisecond)+2*stream.FrameNanos, audioFrame(12))
+	p.Push(1, 1, v.now()+int64(5*time.Millisecond)+1*stream.FrameNanos, audioFrame(11))
+	p.Push(1, 3, v.now()+int64(5*time.Millisecond)+3*stream.FrameNanos, audioFrame(13))
+	if !drainUntil(func() bool { return p.Stats().Played >= 4 }) {
+		s := p.Stats()
+		t.Fatalf("reorder not played in order: Played=%d Silence=%d", s.Played, s.Silence)
+	}
+	if s := p.Stats(); s.Silence != 0 {
+		t.Fatalf("reorder produced %d silence frames, want 0", s.Silence)
 	}
 }
 
 func TestPlayoutStaleGenDropped(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
+	p := newTestPlayout(t, v, clk, be, nil)
 	p.Reset(2)
-	p.Push(1, 0, clk.nowNs(), audioFrame(1)) // stale gen
-	if !drainUntil(t, func() bool { return p.Stats().StaleGen >= 1 }) {
-		t.Fatalf("StaleGen=%d", p.Stats().StaleGen)
+	p.Push(1, 0, v.now(), audioFrame(1)) // gen 1 is stale (armed for gen 2)
+	if !drainUntil(func() bool { return p.Stats().StaleGen >= 1 }) {
+		t.Fatalf("StaleGen=%d, want >=1", p.Stats().StaleGen)
 	}
 	if be.count() != 0 {
 		t.Fatalf("stale frame written, count=%d", be.count())
 	}
 }
 
-func TestPlayoutLateFrameDropped(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
+func TestPlayoutUnsyncedHoldsThenFlushes(t *testing.T) {
+	v := newVClock()
+	clk := newFakeClock(v, false) // unsynced
+	be := newRecBackend(v)
+	p := newTestPlayout(t, v, clk, be, nil)
 	p.Reset(1)
-	// pts far in the PAST so deadline (pts+150ms) is already > one frame past.
-	pastPts := clk.nowNs() - int64(500*time.Millisecond)
-	p.Push(1, 0, pastPts, audioFrame(123))
-	if !drainUntil(t, func() bool { return p.Stats().LateDrop >= 1 }) {
-		t.Fatalf("LateDrop=%d", p.Stats().LateDrop)
-	}
-}
-
-func TestPlayoutUnsyncedHolds(t *testing.T) {
-	clk := newFakeClock(false) // unsynced
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
-	p.Reset(1)
-	pushRun(p, clk, 1, []uint64{0})
-	time.Sleep(40 * time.Millisecond)
+	pushRun(p, v, 1, []uint64{0, 1, 2})
+	time.Sleep(20 * time.Millisecond)
 	if be.count() != 0 {
-		t.Fatalf("unsynced: wrote %d frames", be.count())
+		t.Fatalf("unsynced: wrote %d frames, want 0 (the §7 gate holds)", be.count())
 	}
 	if p.Stats().Synced {
-		t.Fatal("Synced should be false")
+		t.Fatal("Synced should be false while the fake clock is unsynced")
 	}
 	clk.setSynced(true)
-	// Re-push with fresh near-future pts (the first push may now be late).
-	pushRun(p, clk, 1, []uint64{1, 2, 3})
-	if !drainUntil(t, func() bool { return be.count() >= 1 }) {
+	// Fresh near-future frames now flush.
+	pushRun(p, v, 1, []uint64{3, 4, 5})
+	if !drainUntil(func() bool { return be.count() >= 1 }) {
 		t.Fatal("frames should flush after sync")
 	}
 	if !p.Stats().Synced {
@@ -265,473 +456,300 @@ func TestPlayoutUnsyncedHolds(t *testing.T) {
 }
 
 func TestPlayoutBufferStat(t *testing.T) {
-	clk := newFakeClock(false) // unsynced so frames accumulate
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
+	v := newVClock()
+	clk := newFakeClock(v, false) // unsynced so frames accumulate, none drain
+	be := newRecBackend(v)
+	p := newTestPlayout(t, v, clk, be, nil)
 	p.Reset(1)
 	for s := uint64(0); s < 5; s++ {
-		p.Push(1, s, int64(s)*stream.FrameNanos, audioFrame(1))
+		p.Push(1, s, v.now()+int64(s)*stream.FrameNanos, audioFrame(1))
 	}
-	if !drainUntil(t, func() bool { return p.Stats().Buffered == 5 }) {
+	if !drainUntil(func() bool { return p.Stats().Buffered == 5 }) {
 		t.Fatalf("Buffered=%d, want 5", p.Stats().Buffered)
 	}
 }
 
-func TestPlayoutBufferMsLead(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
-	p.Reset(1)
-	// pts = now + 100ms; deadline = pts + 150ms = now + 250ms. Nothing should
-	// write for at least ~200ms.
-	pts := clk.nowNs() + int64(100*time.Millisecond)
-	p.Push(1, 0, pts, audioFrame(42))
-	time.Sleep(120 * time.Millisecond)
-	if be.count() != 0 {
-		t.Fatalf("wrote before deadline (lead not honored), count=%d", be.count())
-	}
-	if !drainUntil(t, func() bool { return be.count() >= 1 }) {
-		t.Fatal("frame not written after deadline")
+func TestPlayoutNoLatencyReporterIsZero(t *testing.T) {
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	p := newTestPlayout(t, v, clk, newRecBackend(v), nil)
+	if p.deviceLatencyNs != 0 {
+		t.Fatalf("deviceLatencyNs=%d, want 0 for a backend without LatencyReporter", p.deviceLatencyNs)
 	}
 }
 
-func TestPlayoutNoLatencyReporterIsZero(t *testing.T) {
-	clk := newFakeClock(true)
-	p := newTestPlayout(t, clk, &recBackend{}, nil)
-	if p.deviceLatencyNs != 0 {
-		t.Fatalf("deviceLatencyNs = %d, want 0 for a backend without LatencyReporter", p.deviceLatencyNs)
+func TestPlayoutLatencyReporterRead(t *testing.T) {
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	dac := newVirtualDAC(v, 0, 150*time.Microsecond)
+	p := New(Config{Backend: dac, Clock: clk, BufferMs: 150, Volume: 1, now: v.now, servoCfg: fastServoCfg()})
+	t.Cleanup(func() { p.Close() })
+	if p.deviceLatencyNs != dac.ConfiguredLatencyNs() {
+		t.Fatalf("deviceLatencyNs=%d, want %d from the DAC's LatencyReporter", p.deviceLatencyNs, dac.ConfiguredLatencyNs())
 	}
 }
 
 func TestPlayoutSetGainHalves(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
+	p := newTestPlayout(t, v, clk, be, nil)
 	p.Reset(1)
 	p.SetGain(0.5)
-	const v = 8000
-	base := clk.nowNs() + int64(10*time.Millisecond)
-	for s := uint64(0); s < 8; s++ {
-		pts := base + int64(s)*stream.FrameNanos
-		p.Push(1, s, pts, audioFrame(v))
+	const val = 8000
+	base := v.now() + int64(5*time.Millisecond)
+	for s := uint64(0); s < 10; s++ {
+		p.Push(1, s, base+int64(s)*stream.FrameNanos, audioFrame(val))
 	}
-	// Wait until all 8 frames are PROCESSED (played, or late-dropped on a starved
-	// runner) — not until all 8 actually play. Real-time pacing drops late frames
-	// under CI scheduling jitter, so requiring Played>=8 was flaky. The gain ramp
-	// settles within one frame, so the last WRITTEN frame is fully halved as long
-	// as ≥2 frames played (the first applied frame ramps; the rest are settled).
-	if !drainUntil(t, func() bool { s := p.Stats(); return s.Played+s.LateDrop >= 8 }) {
-		s := p.Stats()
-		t.Fatalf("frames not all processed: played=%d late=%d", s.Played, s.LateDrop)
+	if !drainUntil(func() bool { return p.Stats().Played >= 6 }) {
+		t.Fatalf("frames not played: Played=%d", p.Stats().Played)
 	}
-	if got := p.Stats().Played; got < 2 {
-		t.Fatalf("too few frames played to settle the ramp: played=%d", got)
-	}
-	// A late frame (ramp settled) must be ~halved.
+	// The gain ramp settles within a frame; a late written frame is fully halved.
 	last := be.at(be.count() - 1)
 	mid := int16(binary.LittleEndian.Uint16(last[100:102]))
-	if mid < v/2-50 || mid > v/2+50 {
-		t.Fatalf("settled gain not ~0.5: sample=%d want ~%d", mid, v/2)
+	if mid < val/2-80 || mid > val/2+80 {
+		t.Fatalf("settled gain not ~0.5: sample=%d want ~%d", mid, val/2)
 	}
 }
 
 func TestPlayoutResetZeroesCounters(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
+	p := newTestPlayout(t, v, clk, be, nil)
 	p.Reset(1)
-	pushRun(p, clk, 1, []uint64{0})
-	drainUntil(t, func() bool { return p.Stats().Played >= 1 })
+	pushRun(p, v, 1, []uint64{0, 1})
+	drainUntil(func() bool { return p.Stats().Played >= 1 })
 	p.Reset(2)
 	st := p.Stats()
-	if st.Played != 0 || st.Silence != 0 || st.LateDrop != 0 || st.StaleGen != 0 || st.RatePPM != 0 {
+	if st.Played != 0 || st.Silence != 0 || st.LateDrop != 0 || st.StaleGen != 0 || st.RatePPM != 0 || st.PhaseErrNs != 0 {
 		t.Fatalf("Reset did not zero counters: %+v", st)
 	}
 }
 
-func TestPlayoutPushAfterCloseNoop(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := New(Config{Backend: be, Clock: clk, BufferMs: 150, Volume: 1, now: clk.nowNs, servoCfg: fastServoCfg()})
-	if err := p.Close(); err != nil {
-		t.Fatal(err)
-	}
-	p.Push(1, 0, 0, audioFrame(1)) // no panic
-	p.Reset(1)                     // no panic
-	if err := p.Close(); err != nil {
-		t.Fatalf("second Close: %v", err)
-	}
-}
-
-func TestPlayoutCloseNoLeak(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
+func TestPlayoutCloseIdempotentNoLeak(t *testing.T) {
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
+	p := newTestPlayout(t, v, clk, be, nil)
 	p.Reset(1)
-	pushRun(p, clk, 1, []uint64{0, 1, 2})
-	time.Sleep(20 * time.Millisecond)
+	pushRun(p, v, 1, []uint64{0, 1, 2})
+	time.Sleep(10 * time.Millisecond)
 	if err := p.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Close(); err != nil { // idempotent
 		t.Fatalf("second Close: %v", err)
 	}
+	// Push/Reset after Close must not panic.
+	p.Push(1, 9, v.now(), audioFrame(1))
+	p.Reset(3)
 }
 
-func TestPlayoutStatsConcurrent(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil)
+// TestPlayoutCloseUnblocksParkedWrite: Close must interrupt a Write parked inside a
+// slow device so wg.Wait cannot hang (the Interrupter path).
+func TestPlayoutCloseUnblocksParkedWrite(t *testing.T) {
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	// A DAC whose Write sleeps a long real time models a wedged device; Interrupt
+	// flips the flag so the sleep is skipped and Close's wg.Wait returns promptly.
+	dac := newVirtualDAC(v, 0, 200*time.Millisecond)
+	p := New(Config{Backend: dac, Clock: clk, BufferMs: 150, Volume: 1, now: v.now, servoCfg: fastServoCfg()})
 	p.Reset(1)
-	done := make(chan struct{})
-	go func() {
-		for i := 0; i < 200; i++ {
-			pushRun(p, clk, 1, []uint64{uint64(i)})
-			time.Sleep(time.Millisecond)
+	pushRun(p, v, 1, []uint64{0, 1, 2})
+	time.Sleep(10 * time.Millisecond) // let the loop park inside a slow Write
+	done := make(chan error, 1)
+	go func() { done <- p.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
 		}
-		close(done)
-	}()
-	for {
-		select {
-		case <-done:
-			return
-		default:
-			_ = p.Stats()
-			p.SetGain(0.8)
-		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close hung on a parked Write (Interrupter not honored)")
 	}
 }
 
-// --- servo / watchdog / delay-offset integration ---------------------------
+// The watchdog measures p.now()−lastPkt and only wakes the idle loop on a real
+// time.Timer of p.watchdog. The VIRTUAL clock freezes when idle (it only advances
+// on Writes), so the watchdog would never age. These two tests therefore wire a
+// WALL-clock now() + a wall-backed master/local clock: time genuinely passes while
+// idle, the watchdog ages naturally, and a short Watchdog keeps the test fast. The
+// loop body (feed/render/observe) is identical; only the clock source differs.
 
-// skewDAC is a fake backend modeling a crystal running dacPPM off nominal. The
-// model is DETERMINISTIC and tied to the write count (not the wall clock) so the
-// servo sees a clean, noise-free skew signal: each frame written adds
-// FrameSamples to the device queue, while the DAC consumes
-// FrameSamples·(1+dacPPM/1e6) — i.e. a fast DAC drains the queue by
-// FrameSamples·dacPPM/1e6 per write. The reported DeviceDelay is that queue atop
-// a generous pre-fill (so it never underruns). The servo's emitted = written −
-// queue then equals the DAC-consumed count (minus the constant pre-fill it
-// baselines away), which tracks the crystal: emitted grows dacPPM faster than
-// master → skew > 0 → correction → −dacPPM, cancelling the drift (§3.5).
-type skewDAC struct {
-	mu      sync.Mutex
-	written int64
-	dacPPM  float64
-	prefill float64
+// wallClock is master==local==wall-time-since-base, gated by synced.
+type wallClock struct {
+	base   time.Time
+	synced atomic.Bool
 }
 
-func newSkewDAC(dacPPM float64) *skewDAC {
-	return &skewDAC{dacPPM: dacPPM, prefill: 100 * float64(stream.SampleRate)}
+func newWallClock(synced bool) *wallClock {
+	c := &wallClock{base: time.Now()}
+	c.synced.Store(synced)
+	return c
+}
+func (c *wallClock) now() int64                          { return int64(time.Since(c.base)) }
+func (c *wallClock) MasterNow() (int64, bool)            { return c.now(), c.synced.Load() }
+func (c *wallClock) MasterToLocal(m int64) (int64, bool) { return m, c.synced.Load() }
+func (c *wallClock) LocalToMaster(l int64) (int64, bool) { return l, c.synced.Load() }
+
+// wallBackend records frames, paced by a tiny real sleep; no virtual clock.
+type wallBackend struct {
+	mu     sync.Mutex
+	frames int
 }
 
-func (d *skewDAC) Write(f []byte) error {
-	d.mu.Lock()
-	d.written++
-	d.mu.Unlock()
+func (b *wallBackend) Write(f []byte) error {
+	if len(f) != stream.FrameBytes {
+		return errBadFrame
+	}
+	b.mu.Lock()
+	b.frames++
+	b.mu.Unlock()
+	time.Sleep(150 * time.Microsecond)
 	return nil
 }
+func (b *wallBackend) Close() error { return nil }
+func (b *wallBackend) count() int   { b.mu.Lock(); defer b.mu.Unlock(); return b.frames }
 
-func (d *skewDAC) Close() error { return nil }
-
-func (d *skewDAC) DeviceDelay() (int64, bool) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.written == 0 {
-		return 0, false
-	}
-	writtenSamples := float64(d.written) * float64(stream.FrameSamples)
-	dacConsumed := writtenSamples * (1 + d.dacPPM/1e6)
-	queue := d.prefill + writtenSamples - dacConsumed
-	if queue < 0 {
-		queue = 0
-	}
-	ns := int64(queue / float64(stream.SampleRate) * 1e9)
-	return ns, true
-}
-
-// feedFor continuously pushes frames (one per ~1 ms real time) to keep the sink
-// fed for the test, stopping when stop is closed.
-func feedFor(p *Playout, clk *fakeClock, gen uint32, stop <-chan struct{}) {
-	go func() {
-		seq := uint64(0)
-		base := clk.nowNs() + int64(10*time.Millisecond)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			pts := base + int64(seq)*stream.FrameNanos
-			p.Push(gen, seq, pts, audioFrame(500))
-			seq++
-			time.Sleep(time.Millisecond)
-		}
-	}()
-}
-
-// TestPlayoutServoDrivesRate ties the servo into the live scheduler: with a
-// skewed fake DAC behind the backend the servo must ENGAGE (drive a non-zero,
-// clamped correction) and the jitter buffer must stay bounded (no drift-driven
-// runaway). The exact ±dacPPM magnitude AND sign are proven deterministically in
-// servo_test.go's closed-loop model; here the wall-clock scheduler's catch-up
-// dynamics make the live absolute value scheduler-dependent, so the live test
-// asserts engagement + clamp + buffer stability (the servo is wired in and runs
-// continuously, not an underrun reaction).
-func TestPlayoutServoDrivesRate(t *testing.T) {
-	clk := newFakeClock(true)
-	dac := newSkewDAC(200) // DAC runs +200 ppm fast (implements DelayReporter)
-	cfg := fastServoCfg()  // 200ms warmup: engages within the test's budget
-	p := New(Config{
-		Backend:  dac,
-		Clock:    clk,
-		BufferMs: 150,
-		Volume:   1,
-		now:      clk.nowNs,
-		servoCfg: cfg,
-	})
-	t.Cleanup(func() { p.Close() })
-	p.Reset(1)
-
-	stop := make(chan struct{})
-	defer close(stop)
-	feedFor(p, clk, 1, stop)
-
-	// The servo must engage (non-zero correction) and stay within the ±500 clamp;
-	// the jitter buffer must stay bounded.
-	engaged := drainUntil(t, func() bool {
-		ppm := p.Stats().RatePPM
-		return ppm > 5 || ppm < -5
-	})
-	if !engaged {
-		t.Fatalf("servo did not engage (RatePPM=%.1f) with a skewed DAC", p.Stats().RatePPM)
-	}
-	st := p.Stats()
-	if st.RatePPM < -500.001 || st.RatePPM > 500.001 {
-		t.Fatalf("RatePPM %.1f outside ±500 clamp", st.RatePPM)
-	}
-	if st.Buffered > 256 {
-		t.Fatalf("jitter buffer unbounded: %d", st.Buffered)
+// pushRunWall pushes seqs with pts just ahead of the wall master clock.
+func pushRunWall(p *Playout, clk *wallClock, gen uint32, seqs []uint64) {
+	base := clk.now() + int64(5*time.Millisecond)
+	for _, s := range seqs {
+		p.Push(gen, s, base+int64(s)*stream.FrameNanos, audioFrame(int16(1000+s)))
 	}
 }
 
-func TestPlayoutRatePPMClamps(t *testing.T) {
-	clk := newFakeClock(true)
-	dac := newSkewDAC(20000) // absurd skew
-	p := New(Config{
-		Backend:  dac,
-		Clock:    clk,
-		BufferMs: 150,
-		Volume:   1,
-		now:      clk.nowNs,
-		servoCfg: fastServoCfg(),
-	})
-	t.Cleanup(func() { p.Close() })
-	p.Reset(1)
-	stop := make(chan struct{})
-	defer close(stop)
-	feedFor(p, clk, 1, stop)
-	// An absurd skew must saturate the servo at the clamp, never beyond.
-	drainUntil(t, func() bool {
-		ppm := p.Stats().RatePPM
-		return ppm >= 499 || ppm <= -499
-	})
-	ppm := p.Stats().RatePPM
-	if ppm < -500.001 || ppm > 500.001 {
-		t.Fatalf("RatePPM %.1f outside ±500 clamp", ppm)
-	}
-}
-
-func TestPlayoutWatchdogFiresRestart(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
+func TestPlayoutWatchdogFiresRestartThenDisarms(t *testing.T) {
+	clk := newWallClock(true)
+	be := &wallBackend{}
+	var mu sync.Mutex
 	var restarts int
-	var rmu sync.Mutex
-	restart := func() {
-		rmu.Lock()
-		restarts++
-		rmu.Unlock()
-	}
-	// Short watchdog for a fast test.
+	restart := func() { mu.Lock(); restarts++; mu.Unlock() }
 	p := New(Config{
-		Backend:  be,
-		Clock:    clk,
-		BufferMs: 150,
-		Restart:  restart,
-		Volume:   1,
-		Watchdog: 80 * time.Millisecond,
-		now:      clk.nowNs,
-		servoCfg: fastServoCfg(),
+		Backend: be, Clock: clk, BufferMs: 150, Restart: restart, Volume: 1,
+		Watchdog: 60 * time.Millisecond, now: clk.now, servoCfg: fastServoCfg(),
 	})
 	t.Cleanup(func() { p.Close() })
 	p.Reset(1)
-	pushRun(p, clk, 1, []uint64{0})
-	// Wait one watchdog interval with no further pushes → RESTART once.
-	if !drainUntil(t, func() bool {
-		rmu.Lock()
-		defer rmu.Unlock()
-		return restarts == 1
-	}) {
-		rmu.Lock()
-		n := restarts
-		rmu.Unlock()
-		t.Fatalf("restarts=%d, want 1", n)
+	pushRunWall(p, clk, 1, []uint64{0})
+	drainUntil(func() bool { return p.Stats().Played >= 1 })
+
+	getR := func() int { mu.Lock(); defer mu.Unlock(); return restarts }
+	// One watchdog interval of silence → RESTART fires once.
+	if !drainUntil(func() bool { return getR() == 1 }) {
+		t.Fatalf("watchdog did not fire RESTART: restarts=%d", getR())
 	}
-	// Sink should stay armed: resumed pushes play.
+	// Sink stays armed after RESTART: resumed pushes still play.
 	before := be.count()
-	pushRun(p, clk, 1, []uint64{1, 2, 3})
-	if !drainUntil(t, func() bool { return be.count() > before }) {
+	pushRunWall(p, clk, 1, []uint64{1, 2, 3})
+	if !drainUntil(func() bool { return be.count() > before }) {
 		t.Fatal("sink did not resume after RESTART")
 	}
-}
-
-func TestPlayoutWatchdogDisarmsAfterRestart(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	var restarts int
-	var rmu sync.Mutex
-	restart := func() { rmu.Lock(); restarts++; rmu.Unlock() }
-	p := New(Config{
-		Backend:  be,
-		Clock:    clk,
-		BufferMs: 150,
-		Restart:  restart,
-		Volume:   1,
-		Watchdog: 60 * time.Millisecond,
-		now:      clk.nowNs,
-		servoCfg: fastServoCfg(),
-	})
-	t.Cleanup(func() { p.Close() })
-	p.Reset(1)
-	pushRun(p, clk, 1, []uint64{0})
-	// Stay silent for two watchdog intervals → RESTART then disarm.
-	drainUntil(t, func() bool {
-		rmu.Lock()
-		defer rmu.Unlock()
-		return restarts >= 1
-	})
-	time.Sleep(150 * time.Millisecond) // second interval → disarm
-	// After disarm, a stale-gen-free push to the SAME gen is dropped because the
-	// sink disarmed; Buffered stays 0 and nothing new plays until Reset.
-	countAtDisarm := be.count()
-	pushRun(p, clk, 1, []uint64{1, 2})
-	time.Sleep(60 * time.Millisecond)
-	if be.count() != countAtDisarm {
-		t.Fatalf("disarmed sink still played: %d -> %d", countAtDisarm, be.count())
+	// Sustained silence (a second watchdog interval after the RESTART) → disarm.
+	if !drainUntil(func() bool { _, armed := p.ArmedGen(); return !armed }) {
+		t.Fatal("watchdog did not disarm after a second starved interval")
 	}
-	// Re-arm via Reset and confirm playout resumes.
+	// Re-arm via Reset resumes playout.
+	atDisarm := be.count()
 	p.Reset(2)
-	pushRun(p, clk, 2, []uint64{0, 1})
-	if !drainUntil(t, func() bool { return be.count() > countAtDisarm }) {
+	pushRunWall(p, clk, 2, []uint64{0, 1})
+	if !drainUntil(func() bool { return be.count() > atDisarm }) {
 		t.Fatal("sink did not re-arm after Reset")
 	}
 }
 
 func TestPlayoutWatchdogNilRestart(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
+	clk := newWallClock(true)
+	be := &wallBackend{}
 	p := New(Config{
-		Backend:  be,
-		Clock:    clk,
-		BufferMs: 150,
-		Restart:  nil,
-		Volume:   1,
-		Watchdog: 50 * time.Millisecond,
-		now:      clk.nowNs,
-		servoCfg: fastServoCfg(),
+		Backend: be, Clock: clk, BufferMs: 150, Restart: nil, Volume: 1,
+		Watchdog: 50 * time.Millisecond, now: clk.now, servoCfg: fastServoCfg(),
 	})
 	t.Cleanup(func() { p.Close() })
 	p.Reset(1)
-	pushRun(p, clk, 1, []uint64{0})
-	time.Sleep(160 * time.Millisecond) // two intervals: no panic, disarms
+	pushRunWall(p, clk, 1, []uint64{0})
+	drainUntil(func() bool { return p.Stats().Played >= 1 })
+	// Two intervals of silence: no panic with a nil restart hook, then disarms.
+	if !drainUntil(func() bool { _, armed := p.ArmedGen(); return !armed }) {
+		t.Fatal("nil-restart watchdog did not disarm after sustained silence")
+	}
 	// Re-arm works.
 	p.Reset(2)
-	pushRun(p, clk, 2, []uint64{0})
-	if !drainUntil(t, func() bool { return be.count() >= 1 }) {
+	pushRunWall(p, clk, 2, []uint64{0})
+	if !drainUntil(func() bool { return be.count() >= 1 }) {
 		t.Fatal("did not resume after nil-restart disarm + Reset")
 	}
 }
 
+// TestPlayoutSetDelayOffsetReanchors: SetDelayOffset re-anchors (discards the
+// buffer, fires restart once, re-primes on the next Push). The deadline scheduler
+// is gone, so we assert the re-anchor SIDE EFFECTS, not an exact play time.
 func TestPlayoutSetDelayOffsetReanchors(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
+	var mu sync.Mutex
 	var restarts int
-	var rmu sync.Mutex
-	restart := func() { rmu.Lock(); restarts++; rmu.Unlock() }
-	p := newTestPlayout(t, clk, be, restart)
+	restart := func() { mu.Lock(); restarts++; mu.Unlock() }
+	p := newTestPlayout(t, v, clk, be, restart)
 	p.Reset(1)
-	pushRun(p, clk, 1, []uint64{0, 1, 2, 3, 4})
-	// Drain ALL initial frames so no stale write races the probe measurement.
-	drainUntil(t, func() bool { return p.Stats().Played >= 5 })
+	pushRun(p, v, 1, []uint64{0, 1, 2, 3, 4})
+	drainUntil(func() bool { return p.Stats().Played >= 3 })
 
-	// Zero the counter immediately before the call: with the buffer drained, the
-	// 2s starvation watchdog can also fire the restart hook on a slow runner
-	// (seen in CI), so isolate the restart SetDelayOffset itself triggers.
-	rmu.Lock()
+	mu.Lock()
 	restarts = 0
-	rmu.Unlock()
+	mu.Unlock()
 	p.SetDelayOffset(int64(50 * time.Millisecond))
-	rmu.Lock()
+	mu.Lock()
 	r := restarts
-	rmu.Unlock()
+	mu.Unlock()
 	if r != 1 {
-		t.Fatalf("SetDelayOffset should fire restart once, got %d", r)
+		t.Fatalf("SetDelayOffset should fire restart exactly once, got %d", r)
 	}
 	if p.Stats().Buffered != 0 {
 		t.Fatalf("buffer not discarded on delay change: %d", p.Stats().Buffered)
 	}
-	// After re-prime, deadlines shift earlier by 50 ms. Push a single probe frame
-	// far in the future and confirm the NEW write lands near pts+150ms−50ms, i.e.
-	// before the no-offset deadline pts+150ms.
+	if p.delayOffsetNs != int64(50*time.Millisecond) {
+		t.Fatalf("delayOffsetNs=%d, want %d", p.delayOffsetNs, int64(50*time.Millisecond))
+	}
+	// Re-primes on the next Push.
 	before := be.count()
-	pts := clk.nowNs() + int64(300*time.Millisecond)
-	p.Push(1, 10, pts, audioFrame(99)) // re-arms origin at seq 10
-	wantDeadline := pts + int64(150*time.Millisecond) - int64(50*time.Millisecond)
-	noOffsetDeadline := pts + int64(150*time.Millisecond)
-	if !drainUntil(t, func() bool { return be.count() > before }) {
-		t.Fatal("probe frame not played after re-anchor")
-	}
-	playedAt := clk.nowNs()
-	if playedAt >= noOffsetDeadline {
-		t.Fatalf("played at %d ns, expected before no-offset deadline %d (offset not applied)", playedAt, noOffsetDeadline)
-	}
-	if playedAt < wantDeadline-int64(50*time.Millisecond) {
-		t.Fatalf("played at %d ns, well before shifted deadline %d", playedAt, wantDeadline)
+	pushRun(p, v, 1, []uint64{10, 11, 12})
+	if !drainUntil(func() bool { return be.count() > before }) {
+		t.Fatal("did not re-prime after the delay-offset re-anchor")
 	}
 }
 
-func TestPlayoutSetDelayOffsetNilRestart(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
-	p := newTestPlayout(t, clk, be, nil) // nil restart
+func TestPlayoutSetDelayOffsetClampsAndNilRestart(t *testing.T) {
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
+	p := newTestPlayout(t, v, clk, be, nil) // nil restart: must not panic
 	p.Reset(1)
-	pushRun(p, clk, 1, []uint64{0, 1, 2})
-	drainUntil(t, func() bool { return p.Stats().Played >= 1 })
-	p.SetDelayOffset(int64(30 * time.Millisecond)) // no panic
+	// A wildly negative offset clamps to −maxDelayMs (D36, §1).
+	p.SetDelayOffset(int64(-10 * time.Second))
+	if p.delayOffsetNs != -int64(maxDelayMs)*1_000_000 {
+		t.Fatalf("negative offset not clamped: %d, want %d", p.delayOffsetNs, -int64(maxDelayMs)*1_000_000)
+	}
 	if p.Stats().Buffered != 0 {
 		t.Fatalf("buffer not discarded: %d", p.Stats().Buffered)
 	}
-	// Re-primes on the next Push.
-	pushRun(p, clk, 1, []uint64{5, 6})
-	if !drainUntil(t, func() bool { return be.count() >= 2 }) {
-		t.Fatal("did not re-prime after delay change")
-	}
 }
 
-// D65: SetEqualizeDelay re-anchors on a real change, dedups an unchanged re-assert
-// (the master pushes it every heartbeat, and re-anchoring each time is audible), and
-// clamps negatives to zero (equalization only ever delays).
+// TestPlayoutSetEqualizeDelay (D65): re-anchors on a real change, dedups an
+// unchanged re-assert (the master re-asserts every heartbeat; re-anchoring each
+// time would be audible), and clamps negatives to zero (it only ever delays).
 func TestPlayoutSetEqualizeDelay(t *testing.T) {
-	clk := newFakeClock(true)
-	be := &recBackend{}
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
+	var mu sync.Mutex
 	var restarts int
-	var rmu sync.Mutex
-	restart := func() { rmu.Lock(); restarts++; rmu.Unlock() }
-	p := newTestPlayout(t, clk, be, restart)
-	t.Cleanup(func() { p.Close() })
+	restart := func() { mu.Lock(); restarts++; mu.Unlock() }
+	p := newTestPlayout(t, v, clk, be, restart)
 	p.Reset(1)
-
-	get := func() int { rmu.Lock(); defer rmu.Unlock(); return restarts }
+	get := func() int { mu.Lock(); defer mu.Unlock(); return restarts }
 
 	p.SetEqualizeDelay(int64(70 * time.Millisecond)) // change → re-anchor
 	if got := get(); got != 1 {
@@ -741,12 +759,50 @@ func TestPlayoutSetEqualizeDelay(t *testing.T) {
 	if got := get(); got != 1 {
 		t.Fatalf("restarts after identical re-assert = %d, want 1 (must dedup)", got)
 	}
-	p.SetEqualizeDelay(-5_000_000) // negative clamps to 0 → a change from 70 → re-anchor
+	p.SetEqualizeDelay(-5_000_000) // negative clamps to 0; 70 → 0 is a change → re-anchor
 	if got := get(); got != 2 {
 		t.Fatalf("restarts after clamp-to-zero = %d, want 2", got)
+	}
+	if p.equalizeDelayNs != 0 {
+		t.Fatalf("equalizeDelayNs=%d, want 0 after the negative clamp", p.equalizeDelayNs)
 	}
 	p.SetEqualizeDelay(0) // already 0 → dedup
 	if got := get(); got != 2 {
 		t.Fatalf("restarts after redundant zero = %d, want 2", got)
+	}
+}
+
+// TestPlayoutStatsConcurrent: Stats/SetGain hammered from another goroutine while
+// the loop runs must be race-free (run under -race).
+func TestPlayoutStatsConcurrent(t *testing.T) {
+	v := newVClock()
+	clk := newFakeClock(v, true)
+	be := newRecBackend(v)
+	p := newTestPlayout(t, v, clk, be, nil)
+	p.Reset(1)
+	stop := make(chan struct{})
+	go func() {
+		seq := uint64(0)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			p.Push(1, seq, v.now()+int64(5*time.Millisecond)+int64(seq)*stream.FrameNanos, audioFrame(500))
+			seq++
+			time.Sleep(200 * time.Microsecond)
+		}
+	}()
+	deadline := time.After(150 * time.Millisecond)
+	for {
+		select {
+		case <-deadline:
+			close(stop)
+			return
+		default:
+			_ = p.Stats()
+			p.SetGain(0.8)
+		}
 	}
 }

@@ -7,189 +7,257 @@ import (
 	"ensemble/internal/stream"
 )
 
-// fastServoCfg converges quickly for tests (short warmup/tau, brisk slew).
+// These tests are a PURE, deterministic closed-loop simulation of the low-pass-filtered
+// PROPORTIONAL servo (servo.go). No clock, no goroutine: the test IS the plant.
+//
+// SIGN / CONTROL LAW (the maths the sim verifies):
+//
+//   The servo's actuator is the resample RATIO: input samples consumed per output sample.
+//   fedPTS = master time of the read cursor, advancing FrameSamples*ratio per step. The
+//   sensor is the play-head phase error the ENGINE computes (servo never sees the queue):
+//
+//       phaseErr = fedPTS − L − shouldPTS          (L = constant configured device latency)
+//
+//   The servo drives target = 1 − Kp·lowpass(phaseErr), so phaseErr>0 (content AHEAD) ⇒
+//   ratio<1 (consume input slower, fall back).
+//
+//   Plant model of a virtual DAC running dacPPM off nominal. The device WRITE BLOCKS, so
+//   the DAC drain paces the loop: one frame of room frees every FrameNanos/(1+dacPPM/1e6)
+//   of real time, so that is how far nowLocal (==shouldPTS) advances per step. The read
+//   cursor advances FrameSamples*ratio of INPUT per step (→ fedPTS). Hence
+//       d(phaseErr)/step = FrameNanos·[ratio − 1/(1+dacPPM/1e6)] ≈ FrameNanos·[ratio−1+dacPPM/1e6]
+//   Lock ⇔ ratio = 1 − dacPPM/1e6, i.e. ratePPM → −dacPPM.
+//
+//   P-only (no integral) holds a STANDING phase error e_ss = dacPPM/(1e6·Kp): the loop
+//   needs a non-zero error to command the rate that cancels the drift. That is expected
+//   and acceptable (small, stable, absorbed by per-node delay calibration). The previous
+//   PI integral existed to null it, but it wound up against the queue jitter into a
+//   sawtooth — see TestServoNoSawtoothLongRun, the regression guard.
+
+const nsPerSample = 1e9 / float64(stream.SampleRate)
+
+// samplesToNs converts a (fractional) per-channel sample count to nanoseconds.
+func samplesToNs(samples float64) int64 { return int64(samples * nsPerSample) }
+
+// standingErrNs is the expected P-only standing phase error for a dacPPM drift at gain Kp.
+func standingErrNs(dacPPM, kp float64) float64 { return dacPPM * 1e3 / kp }
+
+// fastServoCfg converges quickly for tests: brisk gain, short filter, fast slew, so a few
+// thousand 20 ms steps settle. Shared by servo_test and sink_test. Hotter than the
+// production defaultServoConfig (gentler to ride out the Pi's ±10 ms snd_pcm_delay
+// jitter); the noise-free sim can afford the speed.
 func fastServoCfg() servoConfig {
 	return servoConfig{
-		WarmUp:   200_000_000, // 200 ms
-		QueueTau: 100_000_000, // 100 ms
-		Kq:       2.0,
-		ClampPPM: 300,
+		Kp:       0.3,  // τ ≈ 3.3 s; 1 ms phase error → 300 ppm
+		N:        4,    // short filter — sim is noise-free
+		ClampPPM: 300,  // ±0.03% — same envelope as production
 		SlewPPM:  4000, // ppm/s — fast so tests converge in a few hundred frames
 	}
 }
 
-// driveServoQueue is a CLOSED-LOOP device-queue simulation. The backend's DAC
-// drains the device queue at dacPPM off nominal; the servo's correction sets
-// the rate at which the resampler PRODUCES into that queue. deviceDelay is the
-// live queue depth. noise adds ±noise samples of measurement jitter (the Pi's
-// snd_pcm_delay). In steady state the servo settles where production == drain,
-// i.e. outPPM ≈ dacPPM, holding the queue near its calibrated setpoint.
-func driveServoQueue(s *rateServo, dacPPM float64, steps int, noise float64) float64 {
-	var master int64
-	var consumed float64
-	queue := float64(stream.SampleRate) / 5 // start ~200 ms filled
-	var out float64
-	seed := int64(12345)
-	rnd := func() float64 {
-		seed = seed*6364136223846793005 + 1442695040888963407
-		return float64(uint64(seed)>>40) / float64(uint64(1)<<24) // ~[0,1)
+// lcg is a cheap deterministic ±1 source (no math/rand, reproducible).
+func lcg(seed int64) func() float64 {
+	s := seed
+	return func() float64 {
+		s = s*6364136223846793005 + 1442695040888963407
+		return float64(uint64(s)>>40)/float64(uint64(1)<<24)*2 - 1
 	}
+}
+
+// dacSim is the closed-loop plant: a virtual DAC at dacPPM whose blocking drain paces the
+// loop. It runs the servo for `steps` frames, optionally injecting ±jitter samples of
+// measurement noise on the phase error (the Pi's snd_pcm_delay frame-quantization). The
+// anchor starts the play-head phase at ~0 — what the engine's Phase-B prime achieves
+// before the servo takes over.
+func dacSim(s *rateServo, dacPPM float64, steps int, jitterSamples float64) {
+	const L = 0 // constant configured latency cancels in the dynamics; 0 ⇒ phaseErr starts at 0
+	var nowLocal int64
+	var consumed float64
+	stepNs := int64(float64(stream.FrameNanos) / (1 + dacPPM/1e6)) // DAC-paced write return
+	ratio := s.currentRatio()
+	rnd := lcg(-0x61C8864680B583EB)
 	for i := 0; i < steps; i++ {
-		master += stream.FrameNanos
-		produced := float64(stream.FrameSamples) * (1 + out/1e6)
-		drained := float64(stream.FrameSamples) * (1 + dacPPM/1e6)
-		queue += produced - drained
-		consumed += produced
-		measured := queue
-		if noise > 0 {
-			measured += (2*rnd() - 1) * noise
+		nowLocal += stepNs
+		consumed += float64(stream.FrameSamples) * ratio
+		fedPTS := int64(consumed * nsPerSample)
+		phaseErr := fedPTS - L - nowLocal
+		if jitterSamples > 0 {
+			phaseErr += int64(rnd() * jitterSamples * nsPerSample)
 		}
-		ddNs := int64(measured / float64(stream.SampleRate) * 1e9)
-		out = s.observe(int64(consumed), master, ddNs, true)
-	}
-	return out
-}
-
-func TestServoConvergesOnFastDAC(t *testing.T) {
-	s := newRateServo(fastServoCfg())
-	out := driveServoQueue(s, 200, 8000, 0) // DAC 200ppm fast → produce 200ppm faster
-	if math.Abs(out-200) > 30 {
-		t.Fatalf("expected correction ≈ +200 ppm, got %.1f", out)
+		ratio = s.observe(phaseErr, nowLocal, true)
 	}
 }
 
-func TestServoConvergesNegative(t *testing.T) {
-	s := newRateServo(fastServoCfg())
-	out := driveServoQueue(s, -150, 8000, 0)
-	if math.Abs(out-(-150)) > 30 {
-		t.Fatalf("expected correction ≈ -150 ppm, got %.1f", out)
-	}
-}
-
-func TestServoConvergesUnderNoise(t *testing.T) {
-	// The Pi's snd_pcm_delay swings ±10ms (~480 samples) per read; the servo
-	// must still converge to the true drift, not chase the noise. Noise
-	// rejection is the job of the queue EMA (2s) AND the slew limit, so use
-	// the production-like slew here, not fastServoCfg's quick-converge slew.
-	cfg := servoConfig{
-		WarmUp:   500_000_000,
-		QueueTau: 2_000_000_000,
-		Kq:       1.5,
-		ClampPPM: 300,
-		SlewPPM:  60, // production-class; slew IS the final noise filter
-	}
-	s := newRateServo(cfg)
-	out := driveServoQueue(s, 120, 60000, 480) // ~20 min sim (pure math, instant)
-	if math.Abs(out-120) > 40 {
-		t.Fatalf("under ±480-sample noise expected ≈ +120 ppm, got %.1f", out)
-	}
-}
-
-func TestServoClampsPPM(t *testing.T) {
-	s := newRateServo(fastServoCfg())
-	out := driveServoQueue(s, 5000, 8000, 0) // absurd drift → clamp
-	if out < -300.0001 || out > 300.0001 {
-		t.Fatalf("output %.1f outside ±300 clamp", out)
-	}
-	if out < 250 {
-		t.Fatalf("expected correction near +300 clamp, got %.1f", out)
-	}
-}
-
-func TestServoNoSignalWithoutDelayReporter(t *testing.T) {
-	// ok=false (exec/pw-play: no snd_pcm_delay) ⇒ no drift signal ⇒ stay at 0.
-	s := newRateServo(fastServoCfg())
-	var master, consumed int64
-	for i := 0; i < 500; i++ {
-		master += stream.FrameNanos
-		consumed += stream.FrameSamples
-		if out := s.observe(consumed, master, 0, false); out != 0 {
-			t.Fatalf("ok=false must return 0, got %.3f", out)
-		}
-	}
-}
-
-func TestServoSlewLimited(t *testing.T) {
+// TestServoConvergesFastDAC: a +150 ppm (fast) DAC drives the ratio to ≈ −150 ppm
+// (SIGN: fast DAC ⇒ ratio<1) and the filtered phase error settles at the standing offset.
+func TestServoConvergesFastDAC(t *testing.T) {
 	cfg := fastServoCfg()
-	cfg.SlewPPM = 50 // ppm/s; per 20ms frame ⇒ ≤1 ppm/step
 	s := newRateServo(cfg)
-	var master int64
-	var consumed float64
-	queue := float64(stream.SampleRate) / 5
-	prev := 0.0
-	maxStep := cfg.SlewPPM * float64(stream.FrameNanos) / 1e9
-	for i := 0; i < 1500; i++ {
-		master += stream.FrameNanos
-		produced := float64(stream.FrameSamples) * (1 + prev/1e6)
-		queue += produced - float64(stream.FrameSamples)*(1+9000/1e6) // huge drift
-		consumed += produced
-		out := s.observe(int64(consumed), master, int64(queue/float64(stream.SampleRate)*1e9), true)
-		if math.Abs(out-prev) > maxStep+1e-6 {
-			t.Fatalf("step %d: |Δout|=%.4f exceeds slew %.4f", i, math.Abs(out-prev), maxStep)
-		}
-		prev = out
+	dacSim(s, 150, 30000, 0)
+	if math.Abs(s.ratePPM()-(-150)) > 5 {
+		t.Fatalf("ratePPM=%.2f, want ≈ -150 (fast DAC ⇒ ratio<1)", s.ratePPM())
+	}
+	ess := standingErrNs(150, cfg.Kp)
+	if got := float64(s.phaseErr()); math.Abs(got-ess) > 0.25*ess {
+		t.Fatalf("phaseErr=%.0f ns, want ≈ +%.0f ns (P-only standing error)", got, ess)
 	}
 }
 
-func TestServoGentleNeverRailsOnJitter(t *testing.T) {
-	// The DEFAULT (production) config must track a real DAC drift while the Pi's
-	// ±10 ms (~±480 sample) snd_pcm_delay jitter is present, WITHOUT railing at the
-	// ±300 clamp. The old Kq=1.5 railed on a single jitter sample → ±300 ppm
-	// excursions → the audible "stumbling" (D64). The gentle gain must stay well off
-	// the rail.
-	s := newRateServo(defaultServoConfig())
-	var master int64
-	var consumed float64
-	queue := float64(stream.SampleRate) / 5 // ~200 ms filled
-	var out, maxAbs float64
-	seed := int64(99)
-	rnd := func() float64 {
-		seed = seed*6364136223846793005 + 1442695040888963407
-		return float64(uint64(seed)>>40) / float64(uint64(1)<<24)
+// TestServoConvergesSlowDAC: a −150 ppm (slow) DAC drives the ratio to ≈ +150 ppm and the
+// standing error is negative.
+func TestServoConvergesSlowDAC(t *testing.T) {
+	cfg := fastServoCfg()
+	s := newRateServo(cfg)
+	dacSim(s, -150, 30000, 0)
+	if math.Abs(s.ratePPM()-150) > 5 {
+		t.Fatalf("ratePPM=%.2f, want ≈ +150 (slow DAC ⇒ ratio>1)", s.ratePPM())
 	}
-	for i := 0; i < 120000; i++ { // ~40 min sim (pure math, instant)
-		master += stream.FrameNanos
-		produced := float64(stream.FrameSamples) * (1 + out/1e6)
-		queue += produced - float64(stream.FrameSamples)*(1+120.0/1e6) // DAC +120 ppm
-		consumed += produced
-		measured := queue + (2*rnd()-1)*480 // ±480-sample (10 ms) jitter
-		out = s.observe(int64(consumed), master, int64(measured/float64(stream.SampleRate)*1e9), true)
-		if i > 30000 { // past warmup + convergence
-			if a := math.Abs(out); a > maxAbs {
-				maxAbs = a
+	ess := standingErrNs(-150, cfg.Kp)
+	if got := float64(s.phaseErr()); math.Abs(got-ess) > 0.25*math.Abs(ess) {
+		t.Fatalf("phaseErr=%.0f ns, want ≈ %.0f ns (P-only standing error)", got, ess)
+	}
+}
+
+// TestServoGentleNeverRailsOnJitter: the PRODUCTION (default) config must track a real DAC
+// drift while the Pi's ±10 ms (~±480 sample) snd_pcm_delay jitter is present WITHOUT
+// railing at ±ClampPPM. The N-tap low-pass is the noise filter; the correction must stay
+// well off the clamp.
+func TestServoGentleNeverRailsOnJitter(t *testing.T) {
+	cfg := defaultServoConfig()
+	s := newRateServo(cfg)
+	dacPPM := 40.0 // generous-but-realistic crystal offset; leaves clamp headroom for jitter
+	var nowLocal int64
+	var consumed float64
+	stepNs := int64(float64(stream.FrameNanos) / (1 + dacPPM/1e6))
+	ratio := 1.0
+	rnd := lcg(99)
+	var maxAbsCorr, sumPPM float64
+	var nPPM int
+	const steps = 120000 // ~40 min sim (instant maths)
+	for i := 0; i < steps; i++ {
+		nowLocal += stepNs
+		consumed += float64(stream.FrameSamples) * ratio
+		fedPTS := int64(consumed * nsPerSample)
+		phaseErr := fedPTS - nowLocal + int64(rnd()*480*nsPerSample) // ±480-sample (±10 ms) jitter
+		ratio = s.observe(phaseErr, nowLocal, true)
+		if i > steps/2 { // past convergence: track the mean (lock) and worst instantaneous excursion
+			sumPPM += s.ratePPM()
+			nPPM++
+			if a := math.Abs(s.ratePPM()); a > maxAbsCorr {
+				maxAbsCorr = a
 			}
 		}
 	}
-	if math.Abs(out-120) > 50 {
-		t.Fatalf("gentle servo did not track +120 ppm drift: out=%.1f", out)
+	if meanPPM := sumPPM / float64(nPPM); math.Abs(meanPPM-(-40)) > 10 {
+		t.Fatalf("gentle servo did not track +40 ppm DAC: mean ratePPM=%.1f, want ≈ -40", meanPPM)
 	}
-	if maxAbs > 250 {
-		t.Fatalf("gentle servo railed on jitter (max|out|=%.1f); must stay well off ±300", maxAbs)
-	}
-}
-
-func TestServoPILocksQueueErrorToZero(t *testing.T) {
-	// With integral action (default config) the loop parks the QUEUE ERROR at ~0 —
-	// no proportional droop — and the correction holds at the DAC drift instead of
-	// ramping. A P-only loop would sit at a standing error of −dacPPM/Kq
-	// (= −80/0.08 ≈ −1000 samples); the integral nulls it. (This is the loop the
-	// 2 h capture showed running away in production before outLen became the
-	// actuator; the sim models the now-correct closed loop.)
-	s := newRateServo(defaultServoConfig())
-	out := driveServoQueue(s, 80, 120000, 0) // +80 ppm DAC, ~40 min sim
-	if math.Abs(out-80) > 15 {
-		t.Fatalf("PI did not lock to +80 ppm: out=%.1f", out)
-	}
-	if math.Abs(s.queueErr) > 60 {
-		t.Fatalf("PI left a %.0f-sample queue droop; the integral should null it", s.queueErr)
+	if maxAbsCorr > 250 {
+		t.Fatalf("gentle servo railed on jitter (max|ratePPM|=%.1f); must stay well off ±%.0f", maxAbsCorr, cfg.ClampPPM)
 	}
 }
 
-func TestServoResetClears(t *testing.T) {
+// TestServoNoSawtoothLongRun is the REGRESSION GUARD for the bug this servo replaces. With
+// the production config, a realistic small DAC drift, and the ±10 ms queue jitter, the
+// low-frequency component of the phase error must NOT wander — i.e. no multi-minute
+// wind-up sawtooth. We average the filtered phase error in 30 s blocks across the settled
+// second half and assert every block mean stays within a tight band of the standing error.
+// (The old PI integral produced ~±20 ms block-to-block swings here.)
+func TestServoNoSawtoothLongRun(t *testing.T) {
+	cfg := defaultServoConfig()
+	s := newRateServo(cfg)
+	dacPPM := 20.0 // realistic crystal offset
+	var nowLocal int64
+	var consumed float64
+	stepNs := int64(float64(stream.FrameNanos) / (1 + dacPPM/1e6))
+	ratio := 1.0
+	rnd := lcg(1234567)
+	const steps = 180000 // ~60 min sim
+	const blk = 1500     // 30 s blocks
+	var blockSum float64
+	var blockN int
+	var blockMin, blockMax = math.Inf(1), math.Inf(-1)
+	var sumPPM float64
+	var nPPM int
+	for i := 0; i < steps; i++ {
+		nowLocal += stepNs
+		consumed += float64(stream.FrameSamples) * ratio
+		fedPTS := int64(consumed * nsPerSample)
+		phaseErr := fedPTS - nowLocal + int64(rnd()*480*nsPerSample)
+		ratio = s.observe(phaseErr, nowLocal, true)
+		if i >= steps/2 { // settled second half
+			sumPPM += s.ratePPM()
+			nPPM++
+			blockSum += float64(s.phaseErr())
+			blockN++
+			if blockN == blk {
+				m := blockSum / float64(blockN)
+				if m < blockMin {
+					blockMin = m
+				}
+				if m > blockMax {
+					blockMax = m
+				}
+				blockSum, blockN = 0, 0
+			}
+		}
+	}
+	ess := standingErrNs(dacPPM, cfg.Kp) // ≈ 400 µs at 20 ppm, Kp 0.05
+	// Block means must hug e_ss: a wandering/sawtoothing loop would blow this range open.
+	if span := blockMax - blockMin; span > 1_000_000 { // 1 ms — vs the old ~20 ms sawtooth
+		t.Fatalf("phase error wanders (block-mean span=%.0f ns over the settled half); "+
+			"a stable P loop should hold ~e_ss=%.0f ns flat", span, ess)
+	}
+	if meanPPM := sumPPM / float64(nPPM); math.Abs(meanPPM-(-dacPPM)) > 5 {
+		t.Fatalf("did not lock to %.0f ppm: mean ratePPM=%.1f", -dacPPM, meanPPM)
+	}
+}
+
+// TestServoClampsOnAbsurdDrift: an impossible drift saturates the correction at the
+// ±ClampPPM rail and never beyond.
+func TestServoClampsOnAbsurdDrift(t *testing.T) {
+	cfg := fastServoCfg()
+	s := newRateServo(cfg)
+	dacSim(s, 5000, 30000, 0) // 5000 ppm — far past the clamp
+	if math.Abs(s.ratePPM()) > cfg.ClampPPM+0.001 {
+		t.Fatalf("ratePPM=%.2f exceeds ±%.0f clamp", s.ratePPM(), cfg.ClampPPM)
+	}
+	if math.Abs(s.ratePPM()) < cfg.ClampPPM-1 {
+		t.Fatalf("ratePPM=%.2f did not saturate near the ±%.0f clamp on absurd drift", s.ratePPM(), cfg.ClampPPM)
+	}
+}
+
+// TestServoUnsyncedFreezes: while synced==false the servo holds the ratio and does NOT
+// fold the sample into the filter — no offset to align against, so the loop must not move.
+func TestServoUnsyncedFreezes(t *testing.T) {
 	s := newRateServo(fastServoCfg())
-	driveServoQueue(s, 200, 2000, 0)
+	dacSim(s, 200, 8000, 0)
+	locked := s.currentRatio()
+	if math.Abs((locked-1)*1e6) < 50 {
+		t.Fatalf("precondition: servo did not engage before freeze (ratePPM=%.1f)", s.ratePPM())
+	}
+	var nowLocal int64 = 1_000_000_000
+	for i := 0; i < 5000; i++ {
+		nowLocal += stream.FrameNanos
+		got := s.observe(samplesToNs(50_000), nowLocal, false) // huge error, but unsynced
+		if got != locked {
+			t.Fatalf("step %d: unsynced changed ratio %.9f -> %.9f", i, locked, got)
+		}
+	}
+}
+
+// TestServoResetReturnsToUnity: reset clears the filter and phase, so the ratio is back at
+// exactly 1 (a fresh session starts un-skewed).
+func TestServoResetReturnsToUnity(t *testing.T) {
+	s := newRateServo(fastServoCfg())
+	dacSim(s, 200, 4000, 0)
+	if s.currentRatio() == 1.0 {
+		t.Fatal("precondition: servo never moved off unity")
+	}
 	s.reset()
-	if s.outPPM != 0 || s.calibrated || s.have {
-		t.Fatalf("reset incomplete: %+v", *s)
+	if s.currentRatio() != 1.0 {
+		t.Fatalf("reset left ratio at %.9f, want 1.0", s.currentRatio())
+	}
+	if s.ratePPM() != 0 || s.phaseErr() != 0 {
+		t.Fatalf("reset left telemetry dirty: ratePPM=%.3f phaseErr=%d", s.ratePPM(), s.phaseErr())
 	}
 }

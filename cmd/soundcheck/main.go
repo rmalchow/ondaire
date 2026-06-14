@@ -9,7 +9,11 @@ import (
 	"os"
 	"time"
 
-	"ensemble/internal/sink"
+	"ensemble/internal/sink/device"
+	_ "ensemble/internal/sink/device/alsa"
+	_ "ensemble/internal/sink/device/exec"
+	_ "ensemble/internal/sink/device/file"
+	_ "ensemble/internal/sink/device/null"
 	"ensemble/internal/stream"
 )
 
@@ -18,7 +22,7 @@ func main() {
 	if len(os.Args) > 1 {
 		name = os.Args[1]
 	}
-	backend, kind, err := sink.Open(name, nil)
+	backend, kind, err := device.Open(name, nil)
 	if err != nil {
 		fmt.Printf("RESULT %s: open failed: %v\n", name, err)
 		os.Exit(1)

@@ -17,7 +17,7 @@ N1="http://127.0.0.1:18080"
 N2="http://127.0.0.1:28080"
 N3="http://127.0.0.1:38080"
 
-# Build the protocol-minimal reference player (docs/PLAYER.md) for the
+# Build the protocol-minimal reference player (docs/developer/player-protocol.md) for the
 # conformance leg (step 11b). It is a standalone, receive-only audio participant.
 PLAYER="$(mktemp)"
 go build -o "$PLAYER" "$ROOT/cmd/player"

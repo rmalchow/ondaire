@@ -1,5 +1,5 @@
 // Command player is a protocol-minimal, receive-only ensemble audio
-// participant — the standalone reference implementation for docs/PLAYER.md.
+// participant — the standalone reference implementation for docs/developer/player-protocol.md.
 //
 // It speaks ONLY the wire protocol (magic 0xE5): it subscribes to a master's
 // SOURCE_PORT, follows the master clock on STREAM_PORT, and schedules PCM
@@ -47,7 +47,7 @@ import (
 	"time"
 )
 
-// ---- v1 wire protocol constants (docs/PLAYER.md) ----------------------
+// ---- v1 wire protocol constants (docs/developer/player-protocol.md) ----------------------
 
 const (
 	magic      = 0xE5 // version marker: unknown types are ignored; a new magic = incompatible revision

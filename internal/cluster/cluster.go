@@ -54,6 +54,14 @@ type Cluster struct {
 	statePath    string
 	saveDebounce time.Duration
 	dirty        chan struct{} // coalesced "save soon" signal (buffer 1)
+
+	// pbAssign is the authoritative, persisted map of playback-node assignments
+	// (nodeID → target group, D59), guarded by mu. Survives a master restart so a
+	// re-discovered playback node's Following is restored, not dropped to solo.
+	pbAssign map[id.ID]id.ID
+	// pbChannel is the same idea for the playback node's channel mode (nodeID →
+	// "stereo"|"L"|"R"), restored on re-discovery so it survives a master restart.
+	pbChannel map[id.ID]string
 	saveNotify   chan struct{} // test hook (nil in production)
 
 	done chan struct{}
@@ -79,6 +87,7 @@ type Config struct {
 	Volume           float64
 	OutputDelayMs    int
 	OutputDevice     string                      // selected ALSA device id (D37)
+	Channel          string                      // playout channel: "stereo" (default) | "L" | "R" (dual-mono)
 	OutputDevices    []contracts.OutputDevice    // enumerated devices on this node (D37)
 	OutputBackend    string                      // CHOSEN sink backend ("alsa"|"exec"|"null", §8.5)
 	InputDevices     []contracts.InputDevice     // enumerated capture devices on this node (D48)
@@ -159,6 +168,7 @@ func New(cfg Config) (*Cluster, error) {
 		Volume:           cfg.Volume,
 		OutputDelayMs:    cfg.OutputDelayMs,
 		OutputDevice:     cfg.OutputDevice,
+		Channel:          cfg.Channel,
 		OutputDevices:    append([]contracts.OutputDevice(nil), cfg.OutputDevices...),
 		OutputBackend:    cfg.OutputBackend,
 		InputDevices:     append([]contracts.InputDevice(nil), cfg.InputDevices...),
@@ -181,12 +191,20 @@ func New(cfg Config) (*Cluster, error) {
 	// BEFORE any memberlist join/merge, so a node that was offline still knows
 	// every group name + setting it ever saw. A missing/corrupt file is non-fatal
 	// (warn + start empty); the exact LWW merge rules apply against gossiped peers.
+	pbAssign := map[id.ID]id.ID{}
+	pbChannel := map[id.ID]string{}
 	if cfg.StatePath != "" {
 		if st, err := loadState(cfg.StatePath); err != nil {
 			log.Warn("cluster state load failed; starting with empty lookup tables", "path", cfg.StatePath, "err", err)
 		} else {
 			st.into(doc)
-			log.Info("cluster state loaded", "path", cfg.StatePath, "groups", len(doc.Groups), "settings", len(doc.Settings))
+			for k, v := range st.PlaybackAssignments {
+				pbAssign[k] = v
+			}
+			for k, v := range st.PlaybackChannels {
+				pbChannel[k] = v
+			}
+			log.Info("cluster state loaded", "path", cfg.StatePath, "groups", len(doc.Groups), "settings", len(doc.Settings), "playbackAssignments", len(pbAssign))
 		}
 	}
 
@@ -202,6 +220,8 @@ func New(cfg Config) (*Cluster, error) {
 		maxAge:       maxAge,
 		statePath:    cfg.StatePath,
 		saveDebounce: saveDebounce,
+		pbAssign:     pbAssign,
+		pbChannel:    pbChannel,
 		dirty:        make(chan struct{}, 1),
 		saveNotify:   cfg.saveNotify,
 		done:         make(chan struct{}),

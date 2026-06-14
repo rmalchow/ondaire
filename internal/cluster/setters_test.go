@@ -324,3 +324,57 @@ func TestObserveNewIPAfterChangeBroadcasts(t *testing.T) {
 		t.Fatal("a new IP should always re-broadcast")
 	}
 }
+
+// TestPlaybackAssignmentGossipsToOtherMasters: a playback node's assignment must be
+// gossiped (not master-local) so two masters on one network converge on a single
+// owner via LWW — otherwise both drive it (conflicting ATTACHes, D62).
+func TestPlaybackAssignmentGossipsToOtherMasters(t *testing.T) {
+	a := newTestCluster(t, id.New(), nil)
+	b := newTestCluster(t, id.New(), nil)
+	x := id.New()
+
+	// A holds a proxied playback node X (as if discovered over mDNS).
+	a.mu.Lock()
+	a.doc.Nodes[x] = &NodeRecord{ID: x, PlaybackNode: true, ControlPort: 9300, Version: 1, UpdatedAt: a.clock().Unix()}
+	a.mu.Unlock()
+
+	// Assigning X to A must GOSSIP the assignment — not just notify locally.
+	if !a.AssignPlaybackNode(x, a.self) {
+		t.Fatal("AssignPlaybackNode returned false")
+	}
+	if queued(a) == 0 {
+		t.Fatal("assignment was not broadcast — peer masters cannot converge")
+	}
+
+	// Master B receives A's gossiped delta and must converge: X follows A.
+	a.mu.Lock()
+	rec := cloneNode(a.doc.Nodes[x])
+	a.mu.Unlock()
+	b.deleg.NotifyMsg(encodeDelta(kindNodeDelta, delta{Node: rec}))
+
+	var following id.ID
+	found := false
+	for _, nv := range b.Snapshot().Nodes {
+		if nv.ID == x {
+			following, found = nv.Following, true
+		}
+	}
+	if !found {
+		t.Fatal("X not present in B's snapshot after gossip")
+	}
+	if following != a.self {
+		t.Fatalf("B sees X.Following = %s, want A %s (assignment did not converge)", following, a.self)
+	}
+
+	// B must NOT keep X in a group it masters — else it would fight A to drive it.
+	for _, g := range b.Snapshot().Groups {
+		if g.Master != b.self {
+			continue
+		}
+		for _, m := range g.Members {
+			if m == x {
+				t.Fatal("B still has X in its own group; both masters would drive it")
+			}
+		}
+	}
+}

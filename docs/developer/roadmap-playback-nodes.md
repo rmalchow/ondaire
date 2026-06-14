@@ -57,9 +57,15 @@ hasn't ruled on them and they shape Phases 2–3.
 3. **Liveness for non-gossiping playback nodes** = mDNS browse freshness **OR** recent
    STATUS, expiring when both go stale. (memberlist liveness doesn't apply — they're
    not in it.) `DeriveGroups`/`Snapshot` `isAlive` must consult this for `Role=playback`.
-4. **A combined (master+playback) node drives its own playback in-process**, not over
-   loopback wire — but through the *identical* `Player` verb interface, so "behaves the
-   same" holds. The wire is used only for *remote* playback nodes.
+4. ~~**A combined (master+playback) node drives its own playback in-process**, not over
+   loopback wire.~~ **Reversed (D61):** a combined node drives its own playback **over
+   the loopback control plane** — *not* in-process. The master's driver sends its own
+   player `ATTACH`/`SETVOL`/`DETACH` over loopback, exactly like a remote player, so
+   "behaves the same" is now literal: one drive path, no in-process special case. The
+   group **engine becomes a pure producer** — it owns the clock authority (reads
+   `monoNow()` directly, never follows itself) and sources the stream, but never arms a
+   sink or drives the local player. See the
+   [architecture overview](../architecture/README.md#producer-and-consumer-one-control-plane).
 5. **Multi-master convergence** for a discovered playback node reuses the own-record
    version reconcile: the discovering master injects the record; assignment is LWW.
 

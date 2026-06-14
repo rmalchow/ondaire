@@ -51,6 +51,27 @@ Every alive gossiping node always **masters its own group** (group ID == node ID
 even with no players attached. Group membership is *derived*, not stored — see
 [Discovery & cluster](discovery-and-cluster.md).
 
+### Producer and consumer, one control plane
+
+The two roles are a clean **producer / consumer** split, with *no* "same-node"
+special-casing:
+
+- A **room (master)** is a pure **producer**. It **owns the clock** — it *is* the
+  time authority, serving `monoNow()` and stamping the stream with that same clock,
+  so it never *follows* a clock (it reads `monoNow()` directly for every PTS). It
+  sources the stamped stream and runs a **driver** that turns cluster state + API
+  actions into control-plane commands.
+- A **player** is a pure **consumer**: a clock follower + stream subscriber + sink
+  behind a control **listener**. It follows whatever clock/source endpoint the
+  master hands it in an `ATTACH`, applies `SETVOL`/`SETDELAY`/`DETACH`, and reports
+  `STATUS` back. It is driven *entirely* over the control plane.
+
+A combined node runs **both** subsystems from one `main`, exactly as if `--role
+master` and `--role playback` were two processes on the host — its own driver
+drives its own player **over loopback**, identical to a remote player. Because
+control (volume, channel, output delay) is a property of the *node*, not of
+playback, the master asserts it whether or not the group is playing.
+
 ## How the pieces fit
 
 ```
@@ -81,10 +102,16 @@ even with no players attached. Group membership is *derived*, not stored — see
 4. On **play**, the master opens a **media source** for the URI and runs a **source
    server**: it stamps each 20 ms frame with a master-clock presentation timestamp
    and fans it out to every subscriber.
-5. Every member — *including the master, over loopback* — runs a **clock follower**
-   and a **sink**: jitter buffer → resampler → gain → output device. The sink holds
-   each speaker on the master clock.
-6. The **HTTP API**, WebSocket, node proxy and **SPA** are the control surface.
+5. Every **player** — a receive-only subsystem (clock follower + subscriber +
+   **sink**: jitter buffer → resampler → gain → output device) — is driven over the
+   **control plane**: the master's *driver* sends it `ATTACH`/`SETVOL`/`DETACH`
+   (UDP), and it follows the master clock and plays. A master plays its *own*
+   speakers by running this same player subsystem and driving it **over loopback** —
+   identical to a remote player, no special case.
+6. The **HTTP API**, WebSocket, node proxy and **SPA** are the control surface. The
+   master *translates* every control action (assign, play, stop, volume, …) into
+   the control-plane commands above — fired immediately on the state change, not on
+   the soft-state re-assert tick.
 
 ## The two timing problems
 

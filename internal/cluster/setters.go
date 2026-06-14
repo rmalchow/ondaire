@@ -29,6 +29,18 @@ func (c *Cluster) broadcastOwn(rec *NodeRecord) {
 	c.notify()
 }
 
+// broadcastNode gossips a PROXIED (non-self) node record so peer masters merge it
+// by LWW (D62): a playback node's ownership/assignment becomes a single shared fact,
+// so exactly one master drives it. Without this the assignment is master-local and
+// two masters on one network fight over the same player. The broadcast dedup key is
+// the node's own id (re-asserts of the same node coalesce). Caller must NOT hold mu;
+// rec is cloned under the lock.
+func (c *Cluster) broadcastNode(rec *NodeRecord) {
+	c.log.Debug("broadcast node record", "id", rec.ID, "version", rec.Version)
+	c.enqueueBroadcast(kindNodeDelta, rec.ID, delta{Node: rec})
+	c.notify()
+}
+
 // SetName renames this node (§1). No-op when unchanged.
 func (c *Cluster) SetName(name string) {
 	c.mu.Lock()
@@ -425,10 +437,12 @@ func (c *Cluster) AssignPlaybackNode(node, target id.ID) bool {
 	} else {
 		c.pbAssign[node] = target
 	}
+	snap := cloneNode(r)
 	c.mu.Unlock()
 	c.markDirty()
 	c.log.Info("playback node assignment", "id", node, "target", target)
-	c.notify()
+	// D62: gossip the assignment so every master converges on a single driver.
+	c.broadcastNode(snap)
 	return true
 }
 
@@ -481,9 +495,11 @@ func (c *Cluster) PatchPlaybackNode(node id.ID, name *string, volume *float64, d
 		r.Following = *following
 		changed = true
 	}
+	var snap *NodeRecord
 	if changed {
 		r.Version++
 		r.UpdatedAt = c.clock().Unix()
+		snap = cloneNode(r)
 	}
 	c.mu.Unlock()
 	if persist {
@@ -491,7 +507,8 @@ func (c *Cluster) PatchPlaybackNode(node id.ID, name *string, volume *float64, d
 	}
 	if changed {
 		c.log.Info("playback node patched", "id", node)
-		c.notify()
+		// D62: gossip the patch (esp. `following`) so peer masters converge by LWW.
+		c.broadcastNode(snap)
 	}
 	return true
 }

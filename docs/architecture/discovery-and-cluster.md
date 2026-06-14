@@ -84,6 +84,29 @@ yet falls back to its self-reported list (tightening to observed-only as soon as
 flows). The audio path needs no resolution at all: the source streams back to wherever
 each subscription came from.
 
+### One player, one driver
+
+A receive-only player has **no HTTP API of its own**; a master drives it over the
+control plane, translating every control action (assign, play, volume, …) into
+`ATTACH`/`SETVOL`/`DETACH`. A player follows exactly one master — its `following` is
+a single replicated record — so only that master's driver acts on it (D62).
+
+**Ownership is gossiped, so multiple masters converge.** When a master sets a
+player's `following` (assign / reassign / clear), it **broadcasts** the proxied
+record like any other node delta; peers merge it last-writer-wins. So moving a player
+from room A to room B is safe: B's assignment carries a higher version, A merges it,
+sees the player no longer follows A, and `DETACH`es — exactly one driver at any time.
+A discovering master keeps the record *fresh* (mDNS liveness) without bumping its
+version, so re-discovery never churns the assignment. (The `UpsertPlaybackNode`
+proxy injection stays local — only the **assignment** is gossiped.)
+
+Two narrow caveats remain: a **truly concurrent** assignment of the same player by
+two masters within one gossip round (same base version) is resolved by LWW only once
+one write lands later — a rare operator race, fixed by re-assigning. And convergence
+needs the masters to be in **one gossip cluster** speaking the **same protocol
+version**: a stale/old-version master that predates gossiped assignments (or a
+partitioned cluster) won't honor it and can still fight over a shared player.
+
 ## Replicated cluster state
 
 A single eventually-consistent document, replicated to all gossiping nodes via

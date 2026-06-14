@@ -11,9 +11,13 @@ Conventions: `M` = master, `N` = a full gossiping member node, `P` = a receive-o
 
 ## Attach — joining a group
 
-There are two shapes, because a full member and a receive-only player attach
-differently. Both end in the same place: subscribed to the master's source and locked
-to its clock.
+Every node that plays a group — a full gossiping member *or* a receive-only player —
+is driven the **same way**: the group master's [driver](discovery-and-cluster.md)
+sends it an `ATTACH` over the control plane, and from there it subscribes to the
+master's source and locks to its clock. The only thing that differs is **how the
+master learns it should drive the node**: a full member *gossips* its `following`,
+while a receive-only player is *assigned* master-side (it never gossips). A master
+plays its own speakers by driving its own player over loopback — the same path.
 
 ### A full member follows a master
 
@@ -21,16 +25,16 @@ to its clock.
 operator        N (alice)                         M (bob, master)
    │                                                   │
    │ POST /api/follow {target: bob} ──► N              │
-   │                │ verify bob alive & a master      │
    │                │ following = bob; gossip it ──────┼──► (all nodes re-derive groups)
-   │                │                                   │
-   │                │ re-derive: I'm now in bob's group, playing
+   │                │                                   │ re-derive: alice ∈ my group
+   │                │                                   │ driver: alice exposes a control port
+   │  N:CONTROL_PORT ◄─ ATTACH {bob SOURCE_PORT, bob STREAM_PORT, codec, …} ─┤
    │                │ clock follower → bob's STREAM_PORT (burst, then 1 Hz)
    │                │ HELLO+prime ─────────────────────► bob's SOURCE_PORT
    │                │                  ◄──── burst of ring frames (prime) ────│
    │                │ sink primes phase on first future-deadline frame
    │                │                  ◄──── live frames + FEC ───────────────│
-   │                │ keepalive HELLO every 5 s ───────►
+   │  N:CONTROL_PORT ── STATUS ~1 Hz ─────────────────► bob SOURCE_PORT
 ```
 
 - The follow is just a [replicated `following` field](discovery-and-cluster.md#groups);
@@ -61,8 +65,10 @@ M (master)                                  P (player)
 - The player is [discovered over mDNS and master-driven](../developer/player-protocol.md);
   it never gossips. ATTACH is **idempotent** and re-asserted ~1 Hz, so a lost control
   datagram self-heals.
-- From the HELLO onward, the data path is identical to a full member's — only the
-  *trigger* (ATTACH vs. self-derivation) differs.
+- This is now identical to a full member's attach — same `ATTACH` trigger, same data
+  path. Only how the master learned to drive it differs: a member gossips `following`;
+  a player is assigned master-side. (The member's `following` reaching the master is
+  the one extra hop — gossip propagation — vs. an assignment, which is master-local.)
 
 ---
 
@@ -90,8 +96,8 @@ operator     M (master)                         members + own sink (subscribers)
   from the **gossiping** members; `play` never fails for lack of opus (pcm is the
   universal fallback).
 - `sessionStart = now + leadMs`; every frame's `pts` is master-clock time, so all
-  subscribers — including the master's own loopback sink — schedule it identically and
-  emit the same sample at the same wall instant.
+  subscribers — including the master's own player driven over loopback — schedule it
+  identically and emit the same sample at the same wall instant.
 - A **settings change mid-session** (codec / transport / bufferMs) bumps the gen,
   broadcasts RECONFIG, and subscribers reconnect with the new settings read from the
   replicated group settings — it applies **live**, not at next play. A forced

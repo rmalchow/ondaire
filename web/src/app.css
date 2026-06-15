@@ -492,6 +492,9 @@ input[type="range"] {
   .section > h2 {
     padding-inline: 14px;
   }
+  .page-switch {
+    padding-inline: 14px;
+  }
   .card {
     padding-inline: 14px;
   }

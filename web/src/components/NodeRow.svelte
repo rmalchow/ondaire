@@ -242,18 +242,18 @@
   {#if stat}
     <section class="node-section sync-health" class:stale={statStale}>
       <h4 class="node-section-h">sync health{statStale ? " · stale" : ""}</h4>
-      <div class="row wrap">
-        <span class="chip plain" title="clock offset to master (master − local)">offset {fmtMs(stat.offsetNs)}</span>
-        <span class="chip plain" title="round-trip time of the clock sync">rtt {fmtMs(stat.rttNs)}</span>
-        <span class="chip plain" title="servo rate correction (ppm)">drift {stat.ratePPM.toFixed(1)} ppm</span>
-        <span class="chip plain" title="playout phase error vs the smoothed model">phase {fmtUs(stat.phaseErrNs)}</span>
-        {#if stat.deviceDelayNs}<span class="chip plain" title="measured output (device) latency">dev {fmtMs(stat.deviceDelayNs)}</span>{/if}
-        <span class="chip plain" title="jitter-buffer depth (frames)">buf {stat.buffered}f</span>
-        <span class="chip plain" title="silent frames inserted for gaps (underrun proxy)">silence {stat.silence}</span>
-        <span class="chip plain" title="frames dropped (arrived past deadline)">late {stat.late}</span>
-        <span class="chip plain" title="cumulative samples the rate-servo duplicated into the output (realized correction, not commanded ppm)">inj {stat.samplesInjected} ({(stat.samplesInjected / 48).toFixed(0)} ms)</span>
-        <span class="chip plain" title="cumulative samples the rate-servo dropped from the output (realized correction, not commanded ppm)">drop {stat.samplesDropped} ({(stat.samplesDropped / 48).toFixed(0)} ms)</span>
-        <span class="chip plain" title="servo setpoint captured (device-queue depth stable)">{stat.calibrated ? "calibrated ✓" : "uncalibrated"}</span>
+      <div class="sync-metrics">
+        <div class="sm-cell" title="clock offset to master (master − local)"><span class="sm-label">offset</span><span class="sm-val">{fmtMs(stat.offsetNs)}</span></div>
+        <div class="sm-cell" title="round-trip time of the clock sync"><span class="sm-label">rtt</span><span class="sm-val">{fmtMs(stat.rttNs)}</span></div>
+        <div class="sm-cell" title="servo rate correction (ppm)"><span class="sm-label">drift</span><span class="sm-val">{stat.ratePPM.toFixed(1)} ppm</span></div>
+        <div class="sm-cell" title="playout phase error vs the smoothed model"><span class="sm-label">phase</span><span class="sm-val">{fmtUs(stat.phaseErrNs)}</span></div>
+        {#if stat.deviceDelayNs}<div class="sm-cell" title="measured output (device) latency"><span class="sm-label">dev</span><span class="sm-val">{fmtMs(stat.deviceDelayNs)}</span></div>{/if}
+        <div class="sm-cell" title="jitter-buffer depth (frames)"><span class="sm-label">buf</span><span class="sm-val">{stat.buffered}f</span></div>
+        <div class="sm-cell" title="silent frames inserted for gaps (underrun proxy)"><span class="sm-label">silence</span><span class="sm-val">{stat.silence}</span></div>
+        <div class="sm-cell" title="frames dropped (arrived past deadline)"><span class="sm-label">late</span><span class="sm-val">{stat.late}</span></div>
+        <div class="sm-cell" title="cumulative samples the rate-servo duplicated into the output (realized correction, not commanded ppm)"><span class="sm-label">inj</span><span class="sm-val">{stat.samplesInjected} ({(stat.samplesInjected / 48).toFixed(0)} ms)</span></div>
+        <div class="sm-cell" title="cumulative samples the rate-servo dropped from the output (realized correction, not commanded ppm)"><span class="sm-label">drop</span><span class="sm-val">{stat.samplesDropped} ({(stat.samplesDropped / 48).toFixed(0)} ms)</span></div>
+        <div class="sm-cell" class:sm-ok={stat.calibrated} class:sm-bad={!stat.calibrated} title="servo setpoint captured (device-queue depth stable)"><span class="sm-label">calibrated</span><span class="sm-val">{stat.calibrated ? "✓" : "✗"}</span></div>
       </div>
     </section>
   {/if}
@@ -346,13 +346,46 @@
   .node-section {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-top: 12px;
-    padding-top: 16px;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 18px;
     border-top: 1px solid var(--border);
   }
   .sync-health.stale {
     opacity: 0.45;
+  }
+
+  /* sync health as a structured label/value grid (ensemble-design): a 4-column
+     grid of cells, each a muted uppercase label over a mono tabular value, rather
+     than a wrap of label+value pills. sm-ok / sm-bad tint the value by health. */
+  .sync-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px 16px;
+    padding: 6px 0 2px;
+  }
+  .sm-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .sm-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+  }
+  .sm-val {
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+  }
+  .sm-cell.sm-ok .sm-val {
+    color: var(--ok);
+  }
+  .sm-cell.sm-bad .sm-val {
+    color: var(--danger);
   }
   .node-section-h {
     margin: 0;
@@ -380,6 +413,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
+    padding-block: 4px;
   }
   .setting-label {
     flex: 0 0 4.5rem;

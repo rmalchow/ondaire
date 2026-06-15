@@ -160,6 +160,36 @@ func TestRegisterCandidatesAndDedup(t *testing.T) {
 	}
 }
 
+// TestCandidatesAlsaFirst: ALSA candidates always precede exec in the chain,
+// regardless of registration order — guards the deterministic ordering that
+// replaced the randomized registry-map walk (exec must never shadow ALSA).
+func TestCandidatesAlsaFirst(t *testing.T) {
+	// Register exec BEFORE alsa to defeat any insertion-order coincidence.
+	RegisterCandidates("exec", func(preferred string) []Candidate {
+		return []Candidate{{Kind: "exec", Arg: "pw-play", Label: "exec(pw-play)"}}
+	})
+	RegisterCandidates("alsa", func(preferred string) []Candidate {
+		return []Candidate{{Kind: "alsa", Arg: "default", Label: "alsa(default)"}}
+	})
+
+	got := Candidates("")
+	alsaAt, execAt := -1, -1
+	for i, c := range got {
+		if c.Kind == "alsa" && alsaAt < 0 {
+			alsaAt = i
+		}
+		if c.Kind == "exec" && execAt < 0 {
+			execAt = i
+		}
+	}
+	if alsaAt < 0 || execAt < 0 {
+		t.Fatalf("expected both alsa and exec candidates, got %+v", got)
+	}
+	if alsaAt > execAt {
+		t.Fatalf("alsa (idx %d) must precede exec (idx %d): %+v", alsaAt, execAt, got)
+	}
+}
+
 // TestRegisterEnumerator: ListOutputDevices aggregates every registered enumerator.
 func TestRegisterEnumerator(t *testing.T) {
 	RegisterEnumerator("named_explicit", func() []contracts.OutputDevice {

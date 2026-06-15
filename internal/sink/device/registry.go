@@ -156,19 +156,35 @@ func RegisterCandidates(name string, p CandidateProvider) {
 
 // Candidates assembles the host's full failover chain: every registered provider's
 // candidates, deduped stable (preferred first). The resilient backend consumes this.
+//
+// Providers are walked in candidatePriority order (ALSA first), NOT registry-map
+// order: ranging the map gave Go's randomized iteration order, so on a desktop where
+// exec also offers candidates (pw-play/paplay on $PATH) the exec provider could be
+// walked first and shadow a perfectly good ALSA output. ALSA is always the first
+// choice — it is the only backend with a real device clock for the rate servo.
 func Candidates(preferred string) []Candidate {
 	regMu.RLock()
-	provs := make([]CandidateProvider, 0, len(registry))
-	for _, r := range registry {
+	type namedProvider struct {
+		name string
+		p    CandidateProvider
+	}
+	provs := make([]namedProvider, 0, len(registry))
+	for n, r := range registry {
 		if r.cands != nil {
-			provs = append(provs, r.cands)
+			provs = append(provs, namedProvider{n, r.cands})
 		}
 	}
 	regMu.RUnlock()
+	sort.SliceStable(provs, func(i, j int) bool {
+		if pi, pj := candidatePriority(provs[i].name), candidatePriority(provs[j].name); pi != pj {
+			return pi < pj
+		}
+		return provs[i].name < provs[j].name
+	})
 	var out []Candidate
 	seen := map[string]bool{}
-	for _, p := range provs {
-		for _, c := range p(preferred) {
+	for _, np := range provs {
+		for _, c := range np.p(preferred) {
 			key := c.Kind + "|" + c.Arg
 			if seen[key] {
 				continue
@@ -178,6 +194,16 @@ func Candidates(preferred string) []Candidate {
 		}
 	}
 	return out
+}
+
+// candidatePriority ranks backend kinds for the failover chain (lower = tried
+// first): ALSA leads unconditionally, everything else follows in name order. This is
+// what makes the chain deterministic and keeps "alsa → exec → null" honest.
+func candidatePriority(name string) int {
+	if name == "alsa" {
+		return 0
+	}
+	return 1
 }
 
 // splitSpec splits "name:arg" on the first colon. "name" alone ⇒ arg "".

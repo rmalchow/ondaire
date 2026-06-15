@@ -331,6 +331,96 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
   border: 1px solid var(--line-2);
   box-shadow: 0 40px 90px -40px rgba(0, 0, 0, 0.8);
 }
+
+/* Theme carousel — a scroll-snap row of framed per-theme screenshots. */
+.tc {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tc-track {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 3vw, 28px);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  /* side padding lets the first/last slide center (coverflow). */
+  padding: 14px max(8px, calc((100% - 260px) / 2)) 18px;
+  scrollbar-width: none;
+}
+.tc-track::-webkit-scrollbar { display: none; }
+.tc-slide {
+  flex: 0 0 auto;
+  width: min(260px, 70vw);
+  scroll-snap-align: center;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* inactive: smaller + dimmed; the centered (active) one pops to full size. */
+  opacity: 0.4;
+  transform: scale(0.82);
+  transform-origin: center center;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.tc-slide.is-active {
+  opacity: 1;
+  transform: scale(1);
+}
+.tc-frame {
+  aspect-ratio: 600 / 900;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  background: var(--panel);
+  box-shadow: 0 40px 90px -45px rgba(0, 0, 0, 0.85);
+}
+.tc-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+.tc-cap { text-align: center; display: flex; flex-direction: column; gap: 2px; }
+.tc-name { font-weight: 600; font-size: 15px; text-transform: lowercase; letter-spacing: -0.01em; }
+.tc-blurb { color: var(--muted); font-size: 12.5px; }
+.tc-arrow {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.tc-arrow:hover { border-color: var(--accent); color: var(--accent); }
+.tc-dots { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+.tc-dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 999px;
+  border: none;
+  background: var(--line-2);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.tc-dot[aria-current="true"] { background: var(--accent); transform: scale(1.25); }
+@media (max-width: 760px) {
+  .tc-arrow { display: none; }
+}
 .screen-copy h3 {
   font-family: var(--serif);
   font-weight: 380;
@@ -1029,7 +1119,7 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
 .quote {
   display: grid;
   grid-template-columns: auto 1fr;
-  grid-template-areas: "photo quote" "photo who";
+  grid-template-areas: "photo quote" "photo who" "cred cred";
   align-content: start;
   column-gap: 16px;
   row-gap: 8px;
@@ -1065,3 +1155,22 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
 }
 .quote-name { font-weight: 600; font-size: 14px; }
 .quote-role { color: var(--muted); font-size: 12.5px; }
+/* image-source / license attribution (compliance): muted, small, italic, tucked
+   bottom-right under the quote, linking to the source on Wikimedia Commons. */
+.quote-credit {
+  grid-area: cred;
+  justify-self: end;
+  margin-top: 2px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--faint);
+}
+.quote-credit a {
+  color: var(--faint);
+  text-decoration: none;
+  border-bottom: 1px dotted color-mix(in srgb, var(--faint) 60%, transparent);
+}
+.quote-credit a:hover {
+  color: var(--accent);
+  border-bottom-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}

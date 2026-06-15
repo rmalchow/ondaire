@@ -156,12 +156,12 @@
     border: 1px solid var(--border);
   }
   .chip.player.on {
-    background: #15803d;
-    border-color: #15803d;
-    color: #fff;
+    background: var(--on);
+    border-color: var(--on);
+    color: var(--on-ink);
   }
   .chip.player.on:hover {
-    background: #166534;
+    background: var(--on-hover);
   }
   .chip.player .glyph {
     margin-right: 4px;

@@ -12,6 +12,18 @@
   // self {id, name}; id/name seeded once from GET /api/status.
   let self = $state({ id: "", name: "", role: "" });
 
+  // Theme switcher (experimental): a theme is a token swap on <html data-theme>.
+  // Persisted to localStorage; applied synchronously at init so there's no flash.
+  const THEMES = ["mint", "studio", "nocturne", "paper", "8bit", "xp"];
+  const initialTheme = localStorage.getItem("ensemble-theme") || "mint";
+  if (typeof document !== "undefined")
+    document.documentElement.dataset.theme = initialTheme;
+  let theme = $state(initialTheme);
+  $effect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("ensemble-theme", theme);
+  });
+
   // re-render trigger for the "stale connection" hint (no interval needed —
   // heartbeats drive re-render; this just reads receivedAt).
   let stale = $derived(
@@ -97,9 +109,54 @@
   </span>
   <span class="spacer"></span>
   <div class="header-right">
+    <select
+      class="theme-select"
+      bind:value={theme}
+      aria-label="color theme"
+      title="color theme (experimental)"
+    >
+      {#each THEMES as t (t)}
+        <option value={t}>{t}</option>
+      {/each}
+    </select>
     <NodeSwitcher snapshot={cluster.snapshot} {self} {statusLevel} {statusTitle} />
   </div>
 </header>
+
+<style>
+  /* experimental theme picker — a compact pill that matches the chip language */
+  .theme-select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: color-mix(in srgb, var(--panel) 80%, transparent);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 24px 4px 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    background-image: linear-gradient(
+        45deg,
+        transparent 50%,
+        var(--muted) 50%
+      ),
+      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position:
+      right 11px center,
+      right 7px center;
+    background-size:
+      4px 4px,
+      4px 4px;
+    background-repeat: no-repeat;
+    transition: border-color 0.18s ease, color 0.18s ease;
+  }
+  .theme-select:hover {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    color: var(--fg);
+  }
+</style>
 
 {#if showFallback}
   <UnreachableBanner {self} />

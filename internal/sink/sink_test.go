@@ -268,7 +268,7 @@ func feedFor(p *Playout, v *vclock, gen uint32, stop <-chan struct{}) {
 // noise-free so it can afford it. At Kp 0.3 the P-only standing error for the test's
 // 150 ppm DAC is dacPPM/(1e6·Kp) ≈ 500 µs.
 func engineServoCfg() servoConfig {
-	return servoConfig{Kp: 0.3, N: 4, ClampPPM: 300, SlewPPM: 50000}
+	return servoConfig{Kp: 0.3, N: 4, ClampPPM: 900, SlewPPM: 50000}
 }
 
 // newTestPlayout wires a Playout against the virtual clock + a backend, fast

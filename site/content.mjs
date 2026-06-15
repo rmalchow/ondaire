@@ -127,6 +127,23 @@ export const content = {
     ],
   },
 
+  // Theme carousel — the control app ships several built-in looks; one click swaps
+  // the whole UI. Screenshots are captured from the live cluster, one per theme.
+  themes: {
+    eyebrow: "Make it yours",
+    title: "Pick a look. One click.",
+    intro:
+      "The control app is fully themed — a single switch re-skins everything, fonts and all. A few built in, from a warm studio console to a pixel-art throwback.",
+    items: [
+      { name: "mint", img: "assets/img/themes/mint.png", blurb: "The classic Ensemble identity." },
+      { name: "studio", img: "assets/img/themes/studio.png", blurb: "Warm tube-amp dark on walnut veneer." },
+      { name: "nocturne", img: "assets/img/themes/nocturne.png", blurb: "Indigo night with a drifting starfield." },
+      { name: "paper", img: "assets/img/themes/paper.png", blurb: "Bright, editorial light mode." },
+      { name: "8bit", img: "assets/img/themes/8bit.png", blurb: "Blocky, pixelated, NES-green." },
+      { name: "xp", img: "assets/img/themes/xp.png", blurb: "Luna blue, beige windows, Bliss sky." },
+    ],
+  },
+
   // The home-page Quickstart: the three-step gist + a Download CTA. The detailed
   // install one-liner and the config-flag reference now live on the download page.
   quickstart: {
@@ -238,6 +255,12 @@ export const content = {
         quote:
           "I could not hear a single one of my rooms — yet they played as one. Magnificent. I was, however, not consulted.",
         img: "assets/img/testimonials/beethoven.jpg",
+        // `credit` renders a license pill linking to the source under the photo.
+        // Pre-1900 portrait paintings are public domain regardless of the scan.
+        // The 20th-century PHOTOS below need each vendored file's exact Commons
+        // source + license filled in (there are many differently-licensed files
+        // per artist, so they can't be safely guessed).
+        credit: { license: "Public domain", href: "https://commons.wikimedia.org/wiki/Category:Ludwig_van_Beethoven" },
       },
       {
         name: "Wolfgang Amadeus Mozart",
@@ -245,6 +268,7 @@ export const content = {
         quote:
           "Setup took less time than a cadenza. One file, no fuss — even a prodigy could manage it.",
         img: "assets/img/testimonials/mozart.jpg",
+        credit: { license: "Public domain", href: "https://commons.wikimedia.org/wiki/Category:Wolfgang_Amadeus_Mozart" },
       },
       {
         name: "Johann Sebastian Bach",
@@ -252,13 +276,15 @@ export const content = {
         quote:
           "Every voice entering at precisely the right instant, in every room at once. Counterpoint, but for speakers.",
         img: "assets/img/testimonials/bach.jpg",
+        credit: { license: "Public domain", href: "https://commons.wikimedia.org/wiki/Category:Johann_Sebastian_Bach" },
       },
       {
         name: "Miles Davis",
         role: "Jazz · 1926–1991",
         quote:
           "It’s not the notes you sync, it’s the ones you don’t. ensemble gets the silence right in all five rooms.",
-        img: "assets/img/testimonials/miles-davis.png",
+        img: "assets/img/testimonials/miles-davis.jpg",
+        credit: { author: "Tom Palumbo", license: "CC BY-SA 2.0", href: "https://commons.wikimedia.org/wiki/File:Miles_Davis_by_Palumbo.jpg" },
       },
       {
         name: "Ella Fitzgerald",
@@ -266,6 +292,7 @@ export const content = {
         quote:
           "No cloud, no accounts, no scat about subscriptions. Put it on and the whole house swings.",
         img: "assets/img/testimonials/ella-fitzgerald.jpg",
+        credit: { author: "William P. Gottlieb", license: "Public domain", href: "https://commons.wikimedia.org/wiki/File:Ella_Fitzgerald_(Gottlieb_02871).jpg" },
       },
       {
         name: "Freddie Mercury",
@@ -273,6 +300,7 @@ export const content = {
         quote:
           "I want it all, I want it all — and I want it in every room. Darling, it delivered.",
         img: "assets/img/testimonials/freddie-mercury.jpg",
+        credit: { author: "Carl Lender", license: "CC BY-SA 3.0", href: "https://commons.wikimedia.org/wiki/File:Freddie_Mercury_performing_in_New_Haven,_CT,_November_1977_cropped.jpg" },
       },
       {
         name: "Jimi Hendrix",
@@ -280,13 +308,15 @@ export const content = {
         quote:
           "’Scuse me while I sync the sky. Kitchen, hallway, garage — all phase-locked. Far out.",
         img: "assets/img/testimonials/jimi-hendrix.jpg",
+        credit: { author: "A. Vente", license: "CC BY-SA 3.0 NL", href: "https://commons.wikimedia.org/wiki/File:Jimi_Hendrix_(1967).jpg" },
       },
       {
         name: "Prince",
         role: "Pop · 1958–2016",
         quote:
           "Dearly beloved, we are gathered to play one song in every room. No latency, no cloud. Just the music.",
-        img: "assets/img/testimonials/prince.png",
+        img: "assets/img/testimonials/prince.jpg",
+        credit: { author: "Scott Penner", license: "CC BY-SA 2.0", href: "https://commons.wikimedia.org/wiki/File:Prince_at_Coachella.jpg" },
       },
     ],
   },

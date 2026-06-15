@@ -67,6 +67,23 @@ const screens = C.screens.items
   )
   .join("");
 
+// Theme carousel — one framed screenshot per built-in theme, in a scroll-snap row.
+const themeSlides = C.themes.items
+  .map(
+    (t, i) => `
+      <figure class="tc-slide" data-i="${i}">
+        <div class="tc-frame"><img src="${esc(t.img)}" alt="ensemble in the ${esc(t.name)} theme" loading="lazy" decoding="async" /></div>
+        <figcaption class="tc-cap"><span class="tc-name">${esc(t.name)}</span><span class="tc-blurb">${esc(t.blurb)}</span></figcaption>
+      </figure>`
+  )
+  .join("");
+const themeDots = C.themes.items
+  .map(
+    (t, i) =>
+      `<button class="tc-dot" data-i="${i}" aria-label="Show the ${esc(t.name)} theme"${i === 0 ? ' aria-current="true"' : ""}></button>`
+  )
+  .join("");
+
 // Lightbox carousel — the screenshot gallery followed by the measured-coherence
 // graphs, in order. data-lb indices on the thumbs are global across both sets, so
 // the proof graphs open at C.screens.items.length + their own index. The graphs are
@@ -144,6 +161,11 @@ const testimonials = C.testimonials.items
         <img class="quote-photo" src="${esc(t.img)}" alt="${esc(t.name)}" loading="lazy" decoding="async" width="72" height="72" />
         <blockquote>“${esc(t.quote)}”</blockquote>
         <figcaption><span class="quote-name">${esc(t.name)}</span><span class="quote-role">${esc(t.role)}</span></figcaption>
+        ${
+          t.credit
+            ? `<span class="quote-credit">image: <a href="${esc(t.credit.href)}" target="_blank" rel="noopener license" title="source on Wikimedia Commons">${esc([t.credit.author, t.credit.license].filter(Boolean).join(" · "))}</a></span>`
+            : ""
+        }
       </figure>`
   )
   .join("");
@@ -211,6 +233,20 @@ const page = `<!doctype html>
       <h2>${esc(C.screens.title)}</h2>
     </header>
     <div class="screen-list">${screens}</div>
+  </section>
+
+  <section id="themes" class="themes">
+    <header class="sec-head">
+      <span class="eyebrow">${esc(C.themes.eyebrow)}</span>
+      <h2>${esc(C.themes.title)}</h2>
+      <p class="sec-intro">${esc(C.themes.intro)}</p>
+    </header>
+    <div class="tc">
+      <button class="tc-arrow tc-prev" type="button" aria-label="Previous theme">‹</button>
+      <div class="tc-track">${themeSlides}</div>
+      <button class="tc-arrow tc-next" type="button" aria-label="Next theme">›</button>
+    </div>
+    <div class="tc-dots">${themeDots}</div>
   </section>
 
   <section id="quickstart" class="how">
@@ -339,6 +375,49 @@ const page = `<!doctype html>
     else if (e.key === "ArrowLeft") goTo(idx - 1, true);
     else if (e.key === "ArrowRight") goTo(idx + 1, true);
   });
+})();
+
+// Theme carousel: scroll-snap track with arrows, dots, and gentle autoplay.
+(function () {
+  var track = document.querySelector(".tc-track");
+  if (!track) return;
+  var slides = [].slice.call(track.querySelectorAll(".tc-slide"));
+  var dots = [].slice.call(document.querySelectorAll(".tc-dot"));
+  var idx = 0, auto = null, t = null;
+  function render() {
+    slides.forEach(function (s, k) { s.classList.toggle("is-active", k === idx); });
+    dots.forEach(function (d, k) { d.setAttribute("aria-current", k === idx ? "true" : "false"); });
+  }
+  function center(i) {
+    var s = slides[i], max = track.scrollWidth - track.clientWidth;
+    var c = s.offsetLeft - (track.clientWidth - s.offsetWidth) / 2;
+    return Math.max(0, Math.min(c, max));
+  }
+  function go(i, smooth) {
+    idx = (i + slides.length) % slides.length;
+    track.scrollTo({ left: center(idx), behavior: smooth ? "smooth" : "auto" });
+    render();
+  }
+  function sync() {
+    var mid = track.scrollLeft + track.clientWidth / 2, min = Infinity, best = 0;
+    slides.forEach(function (s, k) {
+      var d = Math.abs(s.offsetLeft + s.offsetWidth / 2 - mid);
+      if (d < min) { min = d; best = k; }
+    });
+    idx = best; render();
+  }
+  track.addEventListener("scroll", function () { clearTimeout(t); t = setTimeout(sync, 90); }, { passive: true });
+  var prev = document.querySelector(".tc-prev"), next = document.querySelector(".tc-next");
+  if (prev) prev.addEventListener("click", function () { stop(); go(idx - 1, true); });
+  if (next) next.addEventListener("click", function () { stop(); go(idx + 1, true); });
+  dots.forEach(function (d) { d.addEventListener("click", function () { stop(); go(+d.getAttribute("data-i") || 0, true); }); });
+  function stop() { if (auto) { clearInterval(auto); auto = null; } }
+  function start() {
+    if (auto || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    auto = setInterval(function () { go(idx + 1, true); }, 4500);
+  }
+  ["pointerdown", "mouseenter", "focusin"].forEach(function (ev) { track.addEventListener(ev, stop); });
+  render(); start();
 })();
 </script>
 </body>

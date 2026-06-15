@@ -15,6 +15,7 @@
   import EditableText from "./EditableText.svelte";
   import VolumeSlider from "./VolumeSlider.svelte";
   import SpotifyEndpoints from "./SpotifyEndpoints.svelte";
+  import Sparkline from "./Sparkline.svelte";
   import { playbackStats } from "../lib/stats.svelte.js";
 
   let { node, self, snapshot } = $props();
@@ -24,8 +25,50 @@
   // stale (no STATUS in >3s). The coherence-relevant numbers are offset & phase.
   let stat = $derived(playbackStats.byId[node.id]);
   let statStale = $derived(stat ? stat.ageMs > 3000 : false);
-  const fmtMs = (ns) => (ns >= 0 ? "+" : "") + (ns / 1e6).toFixed(2) + " ms";
-  const fmtUs = (ns) => (ns >= 0 ? "+" : "") + (ns / 1e3).toFixed(0) + " µs";
+
+  // Featured sync-health metrics as charted tiles: each shows the ROLLING AVERAGE
+  // (the stable number) + a sparkline of its history, health-coloured ok/warn/danger.
+  // Continuous gauges (offset/drift/phase) swing about 0; the cumulative counters
+  // are shown as RATES (per minute) because an ever-growing absolute can't be
+  // coloured. History comes from the client-side accumulator in stats.svelte.js.
+  let hist = $derived((playbackStats.hist && playbackStats.hist[node.id]) || {});
+  const avg = (a) => (a && a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
+  const sgn = (v, d) => (v >= 0 ? "+" : "") + v.toFixed(d);
+  // three-level health from a value's magnitude against (warn, danger) thresholds.
+  const health = (v, warn, danger) => {
+    const a = Math.abs(v);
+    return a >= danger ? "bad" : a >= warn ? "warn" : "ok";
+  };
+  // fresh array each tick so the Sparkline prop ref changes (the source arrays are
+  // mutated in place by the accumulator); `f` optionally scales each sample.
+  const series = (a, f = 1) => (a || []).map((x) => x * f);
+
+  let tiles = $derived.by(() => {
+    const h = hist;
+    const off = avg(h.offsetMs),
+      ppm = avg(h.ratePPM),
+      ph = avg(h.phaseUs),
+      rtt = avg(h.rttMs),
+      dev = avg(h.deviceMs),
+      buf = avg(h.buffered),
+      injMs = avg(h.injRate) / 48, // samples/min → ms/min
+      dropMs = avg(h.dropRate) / 48,
+      late = avg(h.lateRate),
+      sil = avg(h.silenceRate);
+    // cls "" ⇒ neutral (informational, not a health signal).
+    return [
+      { key: "offset", label: "offset", val: sgn(off, 2) + " ms", values: series(h.offsetMs), signed: true, cls: health(off, 1, 5), tip: "clock offset to master (rolling avg of master − local)" },
+      { key: "drift", label: "drift", val: sgn(ppm, 1) + " ppm", values: series(h.ratePPM), signed: true, cls: health(ppm, 50, 150), tip: "servo rate correction, rolling avg (ppm; clamp ±300)" },
+      { key: "phase", label: "phase", val: sgn(ph, 0) + " µs", values: series(h.phaseUs), signed: true, cls: health(ph, 500, 2000), tip: "playout phase error vs the smoothed model (rolling avg)" },
+      { key: "rtt", label: "rtt", val: rtt.toFixed(2) + " ms", values: series(h.rttMs), signed: false, cls: health(rtt, 10, 40), tip: "round-trip time of the clock sync (rolling avg)" },
+      { key: "dev", label: "dev", val: dev.toFixed(2) + " ms", values: series(h.deviceMs), signed: false, cls: "", tip: "measured output (device) latency (rolling avg)" },
+      { key: "buf", label: "buf", val: buf.toFixed(0) + " f", values: series(h.buffered), signed: false, cls: "", tip: "jitter-buffer depth, frames (rolling avg)" },
+      { key: "inj", label: "inj", val: injMs.toFixed(0) + " ms/min", values: series(h.injRate, 1 / 48), signed: false, cls: health(injMs, 5, 50), tip: "samples the rate-servo duplicated into the output — as a rate (ms/min)" },
+      { key: "drop", label: "drop", val: dropMs.toFixed(0) + " ms/min", values: series(h.dropRate, 1 / 48), signed: false, cls: health(dropMs, 5, 50), tip: "samples the rate-servo dropped — as a rate (ms of audio per minute)" },
+      { key: "late", label: "late", val: late.toFixed(0) + "/min", values: series(h.lateRate), signed: false, cls: health(late, 1, 30), tip: "frames arriving past their deadline, per minute" },
+      { key: "silence", label: "silence", val: sil.toFixed(0) + "/min", values: series(h.silenceRate), signed: false, cls: health(sil, 1, 30), tip: "silent frames inserted for gaps (underrun proxy), per minute" },
+    ];
+  });
 
   let isSelf = $derived(node.id === self.id);
   // A dead, non-self node can be forgotten: deleted from the cluster and purged
@@ -242,18 +285,21 @@
   {#if stat}
     <section class="node-section sync-health" class:stale={statStale}>
       <h4 class="node-section-h">sync health{statStale ? " · stale" : ""}</h4>
-      <div class="sync-metrics">
-        <div class="sm-cell" title="clock offset to master (master − local)"><span class="sm-label">offset</span><span class="sm-val">{fmtMs(stat.offsetNs)}</span></div>
-        <div class="sm-cell" title="round-trip time of the clock sync"><span class="sm-label">rtt</span><span class="sm-val">{fmtMs(stat.rttNs)}</span></div>
-        <div class="sm-cell" title="servo rate correction (ppm)"><span class="sm-label">drift</span><span class="sm-val">{stat.ratePPM.toFixed(1)} ppm</span></div>
-        <div class="sm-cell" title="playout phase error vs the smoothed model"><span class="sm-label">phase</span><span class="sm-val">{fmtUs(stat.phaseErrNs)}</span></div>
-        {#if stat.deviceDelayNs}<div class="sm-cell" title="measured output (device) latency"><span class="sm-label">dev</span><span class="sm-val">{fmtMs(stat.deviceDelayNs)}</span></div>{/if}
-        <div class="sm-cell" title="jitter-buffer depth (frames)"><span class="sm-label">buf</span><span class="sm-val">{stat.buffered}f</span></div>
-        <div class="sm-cell" title="silent frames inserted for gaps (underrun proxy)"><span class="sm-label">silence</span><span class="sm-val">{stat.silence}</span></div>
-        <div class="sm-cell" title="frames dropped (arrived past deadline)"><span class="sm-label">late</span><span class="sm-val">{stat.late}</span></div>
-        <div class="sm-cell" title="cumulative samples the rate-servo duplicated into the output (realized correction, not commanded ppm)"><span class="sm-label">inj</span><span class="sm-val">{stat.samplesInjected} ({(stat.samplesInjected / 48).toFixed(0)} ms)</span></div>
-        <div class="sm-cell" title="cumulative samples the rate-servo dropped from the output (realized correction, not commanded ppm)"><span class="sm-label">drop</span><span class="sm-val">{stat.samplesDropped} ({(stat.samplesDropped / 48).toFixed(0)} ms)</span></div>
-        <div class="sm-cell" class:sm-ok={stat.calibrated} class:sm-bad={!stat.calibrated} title="servo setpoint captured (device-queue depth stable)"><span class="sm-label">calibrated</span><span class="sm-val">{stat.calibrated ? "✓" : "✗"}</span></div>
+      <div class="metric-grid">
+        {#each tiles as t (t.key)}
+          <div class="metric {t.cls}" title={t.tip}>
+            <div class="metric-head">
+              <span class="metric-label">{t.label}</span>
+              <span class="metric-val">{t.val}</span>
+            </div>
+            <Sparkline values={t.values} signed={t.signed} />
+          </div>
+        {/each}
+        <!-- calibrated: boolean — green "yes" / muted "no", no graph. -->
+        <div class="metric bool {stat.calibrated ? 'ok' : 'muted'}" title="servo setpoint captured (device-queue depth stable)">
+          <div class="metric-head"><span class="metric-label">calibrated</span></div>
+          <div class="bool-val">{stat.calibrated ? "yes" : "no"}</div>
+        </div>
       </div>
     </section>
   {/if}
@@ -355,38 +401,69 @@
     opacity: 0.45;
   }
 
-  /* sync health as a structured label/value grid (ensemble-design): a 4-column
-     grid of cells, each a muted uppercase label over a mono tabular value, rather
-     than a wrap of label+value pills. sm-ok / sm-bad tint the value by health. */
-  .sync-metrics {
+  /* sync health: featured metrics as charted tiles — a header [label … value]
+     over a sparkline of the rolling history — plus a compact aux row for the
+     values that aren't graphed. Each tile's health (ok/warn/danger) colours both
+     the value and the sparkline (via currentColor) and faintly tints its border. */
+  .metric-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px 16px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px 12px;
     padding: 6px 0 2px;
   }
-  .sm-cell {
+  .metric {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 5px;
+    padding: 8px 10px 6px;
+    border: 1px solid color-mix(in srgb, currentColor 22%, var(--border));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--panel-2) 35%, transparent);
+    --spark-h: 30px;
   }
-  .sm-label {
+  .metric.ok {
+    color: var(--ok);
+  }
+  .metric.warn {
+    color: var(--warn);
+  }
+  .metric.bad {
+    color: var(--danger);
+  }
+  .metric.muted {
+    color: var(--muted);
+  }
+  /* calibrated boolean tile: no graph — the yes/no fills the tile's body where a
+     sparkline would otherwise sit, so it lines up with the charted tiles. */
+  .metric.bool .bool-val {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    min-height: var(--spark-h, 30px);
+    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 17px;
+    font-weight: 700;
+    color: currentColor;
+  }
+  .metric-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .metric-label {
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.07em;
     color: var(--muted);
   }
-  .sm-val {
-    font-size: 12px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  .metric-val {
+    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 12.5px;
     font-variant-numeric: tabular-nums;
-    color: var(--fg);
+    color: currentColor;
   }
-  .sm-cell.sm-ok .sm-val {
-    color: var(--ok);
-  }
-  .sm-cell.sm-bad .sm-val {
-    color: var(--danger);
-  }
+
   .node-section-h {
     margin: 0;
     font-size: 0.7rem;
@@ -481,26 +558,26 @@
     line-height: 1;
   }
 
-  /* ON: available + enabled — solid green accent, ● , clickable. */
+  /* ON: available + enabled — solid accent, ● , clickable. */
   .chip.feat.on {
     cursor: pointer;
-    background: #15803d;
-    border-color: #15803d;
-    color: #fff;
+    background: var(--on);
+    border-color: var(--on);
+    color: var(--on-ink);
   }
   .chip.feat.on:hover {
-    background: #166534;
+    background: var(--on-hover);
   }
 
-  /* OFF: available but disabled — outlined amber, ○ , clickable. */
+  /* OFF: available but disabled — outlined warm, ○ , clickable. */
   .chip.feat.off {
     cursor: pointer;
     background: transparent;
-    border-color: #b45309;
-    color: #b45309;
+    border-color: var(--off);
+    color: var(--off);
   }
   .chip.feat.off:hover {
-    background: rgba(180, 83, 9, 0.12);
+    background: color-mix(in srgb, var(--off) 14%, transparent);
   }
 
   /* UNAVAILABLE: not probed on this host — dimmed + strike, ✕ , NOT clickable. */
@@ -521,9 +598,9 @@
   /* presence badge: this node runs go-librespot (not a toggle), Spotify green. */
   .chip.spotify {
     cursor: default;
-    background: #1db954;
-    border: 1px solid #1db954;
-    color: #04210f;
+    background: var(--spotify);
+    border: 1px solid var(--spotify);
+    color: var(--spotify-ink);
     font-weight: 600;
   }
 
@@ -532,12 +609,12 @@
   .chip.forget {
     cursor: pointer;
     background: transparent;
-    border: 1px solid color-mix(in srgb, #e5484d 50%, transparent);
-    color: #e5484d;
+    border: 1px solid color-mix(in srgb, var(--danger) 50%, transparent);
+    color: var(--danger);
   }
   .chip.forget:hover {
-    background: #e5484d;
+    background: var(--danger);
     color: #fff;
-    border-color: #e5484d;
+    border-color: var(--danger);
   }
 </style>

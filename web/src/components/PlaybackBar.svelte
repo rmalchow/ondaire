@@ -489,11 +489,11 @@
   }
   .state-pill.playing {
     background: var(--ok);
-    color: #04210f;
+    color: var(--ok-ink);
   }
   .state-pill.paused {
-    background: #f59e0b;
-    color: #2a1900;
+    background: var(--warn);
+    color: var(--warn-ink);
   }
 
   /* center: icon + track (ellipsised so the controls never move) + position */

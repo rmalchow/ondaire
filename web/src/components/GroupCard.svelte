@@ -1,9 +1,9 @@
 <script>
   // One derived group (J arch §4): headline, playback bar, members, settings.
-  import { nodeById, nameOf, addTargets, playerZone } from "../lib/derive.js";
-  import { assignToGroup, setGroupSettings, nodeSetVolume } from "../lib/api.js";
+  import { nodeById, nameOf } from "../lib/derive.js";
+  import { setGroupSettings, nodeSetVolume } from "../lib/api.js";
   import PlaybackBar from "./PlaybackBar.svelte";
-  import MemberRow from "./MemberRow.svelte";
+  import PlayerRow from "./PlayerRow.svelte";
   import MediaBrowser from "./MediaBrowser.svelte";
 
   let { group, snapshot, self, selected = false, onselect } = $props();
@@ -138,21 +138,30 @@
     }, 500);
   }
 
-  // alive playback nodes not already in this room → the assign roster (chips).
-  // Members of THIS room are NOT here — they show as MemberRows below.
-  let candidates = $derived(addTargets(snapshot, group));
-
-  // Clicking a chip points that node's player at this group's master. A gossiping
-  // node uses follow (proxy-aware); a non-gossiping playback node is patched
-  // master-side (assignToGroup routes by node.playbackNode). The WS snapshot then
-  // moves it out of its old card and into this one.
-  async function assignNode(node) {
-    try {
-      await assignToGroup(node, group.master);
-    } catch {
-      // toast shown by api.js
-    }
-  }
+  // The room's player roster: EVERY playback-capable node (plus this room's master),
+  // in a stable ALPHABETICAL order so a node never moves when its following state
+  // changes — each PlayerRow is a uniform toggle. The focused (selected) card shows
+  // the whole roster (toggle anyone in/out); other cards show just this room's
+  // members (glanceable), same component, same order.
+  let roster = $derived.by(() => {
+    const seen = new Set();
+    const out = [];
+    const add = (n) => {
+      if (n && !seen.has(n.id)) {
+        seen.add(n.id);
+        out.push(n);
+      }
+    };
+    for (const id of group.members || []) add(nodeById(snapshot, id));
+    for (const n of snapshot.nodes || [])
+      if (n && n.alive && n.capabilities && n.capabilities.playback) add(n);
+    return out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  });
+  let shown = $derived(
+    selected
+      ? roster
+      : roster.filter((p) => (group.members || []).includes(p.id)),
+  );
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -196,8 +205,8 @@
   </div>
 
   <div class="members">
-    {#each members as member (member.id)}
-      <MemberRow {member} {group} {self} />
+    {#each shown as p (p.id)}
+      <PlayerRow node={p} {group} {self} {snapshot} />
     {/each}
   </div>
 
@@ -205,24 +214,6 @@
        choosing media, and stream settings are focused actions, not glanceable state,
        so showing them on every card would be N-fold noise. The outline marks it. -->
   {#if selected}
-    {#if candidates.length > 0}
-      <div class="assign-roster" role="group" aria-label="add a player to this room">
-        {#each candidates as c (c.id)}
-          {@const zone = playerZone(snapshot, c)}
-          <button
-            class="assign-chip"
-            onclick={() => assignNode(c)}
-            title={zone === "idle"
-              ? `add ${c.name} (idle) to this room`
-              : `move ${c.name} here (currently in ${zone})`}
-          >
-            <span class="ac-name">{c.name}</span>
-            <span class="ac-zone" class:idle={zone === "idle"}>{zone}</span>
-          </button>
-        {/each}
-      </div>
-    {/if}
-
     <MediaBrowser {snapshot} nodeId={group.master} />
 
     <details class="advanced">
@@ -323,42 +314,6 @@
   }
   .headline .noplayers {
     color: var(--muted);
-  }
-
-  /* assign roster: one muted chip per player NOT in this room (members show as
-     rows above). Click moves a player here; the sub-label says where it is now. */
-  .assign-roster {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .assign-chip {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1px;
-    padding: 3px 9px;
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--fg);
-    cursor: pointer;
-    line-height: 1.2;
-  }
-  .assign-chip:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .assign-chip .ac-name {
-    font-size: 13px;
-  }
-  .assign-chip .ac-zone {
-    font-size: 10px;
-    color: var(--muted);
-  }
-  .assign-chip .ac-zone.idle {
-    font-style: italic;
-    opacity: 0.7;
   }
 
   /* group volume — a touch more prominent than a member row, full width */

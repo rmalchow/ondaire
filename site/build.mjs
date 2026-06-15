@@ -285,6 +285,14 @@ const page = `<!doctype html>
     <div class="quote-grid">${testimonials}</div>
   </section>
 
+  <section id="colophon" class="colophon">
+    <header class="sec-head">
+      <span class="eyebrow">${esc(C.authorship.eyebrow)}</span>
+      <h2>${esc(C.authorship.title)}</h2>
+    </header>
+    <div class="colophon-body">${C.authorship.body.map((p) => `<p>${esc(p)}</p>`).join("")}</div>
+  </section>
+
   <section class="cta">
     <h2>${esc(C.cta.title)}</h2>
     <p>${esc(C.cta.body)}</p>

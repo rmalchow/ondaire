@@ -215,3 +215,12 @@ Works today: discovery, grouping, takeover, synchronized playback, pause/resume,
 opus, per-node volume/delay/device, persisted names & settings, the web UI, and
 a tag-driven release pipeline. Out of scope for now: auth/TLS, internet-facing
 operation, playlists, and hardware-mixer volume. v1 is a trusted-LAN system.
+
+## On AI
+
+Yes — I used Claude for much of this code. No, it isn't vibe-coded AI slop. The
+architecture, the clock-sync math, the wire protocol, and the trade-offs behind
+every design decision are my own thinking and experience, and I know and
+understand pretty much every line that ships. I used AI the way you'd use any
+good power tool: to get past my own laziness and move faster, not to outsource
+the judgement. If something in here is wrong, that's on me, not on a model.

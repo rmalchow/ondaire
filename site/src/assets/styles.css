@@ -694,6 +694,18 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
 .cta p { color: var(--muted); max-width: 34rem; margin: 0 auto 28px; }
 .cta .actions { justify-content: center; }
 
+/* ── colophon (human-authored, AI-assisted note) ────────────────────── */
+.colophon { text-align: center; }
+.colophon .sec-head { max-width: 46rem; margin: 0 auto 32px; }
+.colophon-body { max-width: 44rem; margin: 0 auto; }
+.colophon-body p {
+  color: var(--muted);
+  font-size: clamp(16px, 2vw, 18px);
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+.colophon-body p:last-child { margin-bottom: 0; }
+
 /* ── footer ─────────────────────────────────────────────────────────── */
 .foot {
   max-width: var(--maxw);

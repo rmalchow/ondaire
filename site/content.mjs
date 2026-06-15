@@ -321,6 +321,17 @@ export const content = {
     ],
   },
 
+  // Honest authorship note — AI-assisted, human-understood. Same wry, candid
+  // voice as the proof section. Rendered as a centered colophon before the CTA.
+  authorship: {
+    eyebrow: "Made by a human",
+    title: "AI helped write it. A person understands all of it.",
+    body: [
+      "Yes — I used Claude for much of this code. No, it isn’t vibe-coded AI slop. The architecture, the clock-sync math, the wire protocol, the trade-offs behind every fix above: that’s my thinking and my experience, and I know and understand pretty much every line that ships.",
+      "I used AI the way you’d use any good power tool — to get past my own laziness and move faster, not to outsource the judgement. If something in here is wrong, that’s on me, not on a model.",
+    ],
+  },
+
   cta: {
     title: "Bring your speakers together.",
     body:

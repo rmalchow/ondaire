@@ -92,7 +92,7 @@ func (s *Server) primeUDP(sub *subscriber, frames []ringSlot, gen uint32) bool {
 func (s *Server) primeTCP(sub *subscriber, frames []ringSlot, gen uint32) bool {
 	sub.wmu.Lock()
 	defer sub.wmu.Unlock()
-	if sub.conn == nil || sub.dead {
+	if sub.conn == nil || sub.dead.Load() {
 		return false
 	}
 	buf := make([]byte, 0, stream.HeaderSize+stream.FrameBytes)
@@ -113,7 +113,7 @@ func (s *Server) primeTCP(sub *subscriber, frames []ringSlot, gen uint32) bool {
 		pkt := h.AppendFrame(buf[:0], f.payload)
 		_ = sub.conn.SetWriteDeadline(time.Now().Add(tcpWriteTimeout))
 		if err := writeTCPFrame(sub.conn, pkt); err != nil {
-			sub.dead = true
+			sub.dead.Store(true)
 			_ = sub.conn.Close()
 			return false
 		}

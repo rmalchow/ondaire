@@ -22,9 +22,16 @@ const keepaliveTTL = 15 * time.Second
 // sweepInterval is the expiry sweeper tick.
 const sweepInterval = 1 * time.Second
 
-// tcpWriteTimeout bounds a fan-out/prime write so a wedged TCP subscriber can't
-// stall H's release ticker (§8.4, D13). On timeout the conn is marked dead.
+// tcpWriteTimeout bounds a prime / per-sub-writer conn write; on timeout the conn
+// is marked dead. Live fan-out no longer runs on the release goroutine (D13), so
+// this bound only governs the per-sub writer goroutine, never H's release ticker.
 const tcpWriteTimeout = 50 * time.Millisecond
+
+// tcpSendQueue is the per-TCP-subscriber async fan-out queue depth (frames). The
+// release goroutine enqueues non-blockingly; this absorbs slow-start / scheduling
+// transients (~640 ms at 20 ms frames). A full queue means the conn is genuinely
+// wedged — the frame is dropped and the sub marked dead (D13), never blocking H.
+const tcpSendQueue = 32
 
 // Frame is one released audio frame handed to the source for fan-out. The
 // server stamps Seq/Gen; H supplies pts + payload via ReleaseFrame.
@@ -37,6 +44,7 @@ type Frame struct {
 // sourceCounters are the atomic stats read lock-free by Stats.
 type sourceCounters struct {
 	connects, restarts, primes, parity atomic.Uint64
+	fanoutDrops                        atomic.Uint64 // D13: frames dropped to a wedged TCP sub's full queue
 }
 
 // Server is the audio source: SOURCE_PORT control intake + per-frame fan-out to
@@ -62,6 +70,14 @@ type Server struct {
 	statuses map[id.ID]PlaybackStatus
 
 	scratch []byte // reusable encode buffer (under mu)
+
+	// release-cadence instrumentation (D13 verification): updated under mu in
+	// ReleaseFrame, sampled+reset in the 1 s heartbeat. relLastNs is the previous
+	// release wall time; relMaxGapNs/fanoutMaxNs are the worst inter-release gap and
+	// worst per-tick fan-out duration since the last heartbeat (both in ns).
+	relLastNs   int64
+	relMaxGapNs int64
+	fanoutMaxNs int64
 
 	stats    sourceCounters
 	onStatus func(id.ID) // D60: refresh playback-node liveness on STATUS (nil-safe)
@@ -162,6 +178,13 @@ func (s *Server) ReleaseFrame(pts int64, payload []byte) uint64 {
 	if !s.active {
 		return 0
 	}
+	nowNs := time.Now().UnixNano()
+	if s.relLastNs != 0 {
+		if gap := nowNs - s.relLastNs; gap > s.relMaxGapNs {
+			s.relMaxGapNs = gap
+		}
+	}
+	s.relLastNs = nowNs
 	seq := s.seq
 	s.seq++
 	s.ring.push(seq, pts, payload)
@@ -194,18 +217,33 @@ func (s *Server) ReleaseFrame(pts int64, payload []byte) uint64 {
 			}
 		}
 	}
+	if d := time.Now().UnixNano() - nowNs; d > s.fanoutMaxNs {
+		s.fanoutMaxNs = d
+	}
 	return seq
 }
 
-// sendTo writes one audio packet to a single subscriber on its transport.
-// Caller holds s.mu (for the registry snapshot consistency); the actual writes
-// are non-blocking (UDP sendto) or deadline-bounded (TCP).
+// sendTo hands one audio packet to a single subscriber on its transport. Caller
+// holds s.mu. Both branches are non-blocking from the release goroutine's view:
+// UDP is a non-blocking sendto; TCP is a non-blocking enqueue to the sub's writer
+// goroutine. Neither can stall H's release ticker (D13).
 func (s *Server) sendTo(sub *subscriber, pkt []byte) {
-	if sub.dead {
+	if sub.dead.Load() {
 		return
 	}
 	if sub.tr == stream.TransportTCP {
-		s.writeTCP(sub, pkt)
+		// The writer goroutine outlives this call, so the packet (which aliases the
+		// reused s.scratch buffer) must be copied. A full queue means the writer is
+		// not draining (a slow/wedged conn): drop + count this frame — like UDP loss,
+		// recoverable — instead of blocking the producer. A genuinely wedged conn is
+		// retired by writeTCP's write-deadline error path (marks dead + closes), not
+		// here, so a brief overrun never permanently evicts a healthy subscriber.
+		cp := append([]byte(nil), pkt...)
+		select {
+		case sub.sendCh <- cp:
+		default:
+			s.stats.fanoutDrops.Add(1)
+		}
 		return
 	}
 	s.writeUDP(pkt, sub.addr)
@@ -223,15 +261,47 @@ func (s *Server) writeUDP(pkt []byte, addr netip.AddrPort) {
 func (s *Server) writeTCP(sub *subscriber, pkt []byte) {
 	sub.wmu.Lock()
 	defer sub.wmu.Unlock()
-	if sub.conn == nil || sub.dead {
+	if sub.conn == nil || sub.dead.Load() {
 		return
 	}
 	_ = sub.conn.SetWriteDeadline(time.Now().Add(tcpWriteTimeout))
 	if err := writeTCPFrame(sub.conn, pkt); err != nil {
 		s.log.Debug("tcp fan-out write failed; marking dead", "addr", sub.addr, "err", err)
-		sub.dead = true
+		sub.dead.Store(true)
 		_ = sub.conn.Close()
 	}
+}
+
+// startTCPWriter launches the per-subscriber fan-out writer goroutine (D13): the
+// SOLE owner of live conn writes, draining sub.sendCh off the release goroutine so
+// a slow/wedged subscriber cannot stall H's release ticker. wg-tracked; exits on
+// the sub's wdone (removal) or the server's done (Close). writeTCP marks the sub
+// dead + closes the conn on a write error, after which the conn reader removes it.
+func (s *Server) startTCPWriter(sub *subscriber) {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for {
+			select {
+			case <-s.done:
+				return
+			case <-sub.wdone:
+				return
+			case pkt := <-sub.sendCh:
+				s.writeTCP(sub, pkt)
+			}
+		}
+	}()
+}
+
+// stopTCPWriter signals a subscriber's writer goroutine to exit (idempotent; safe
+// to call for UDP subs, which have no writer). Caller must have already removed the
+// sub from the registry so no further enqueue races the shutdown.
+func (s *Server) stopTCPWriter(sub *subscriber) {
+	if sub == nil || sub.wdone == nil {
+		return
+	}
+	sub.stopOnce.Do(func() { close(sub.wdone) })
 }
 
 // Reconfig broadcasts a non-stop RECONFIG to every subscriber (D23).
@@ -409,6 +479,9 @@ func (s *Server) onSubscribe(addr netip.AddrPort, t stream.Transport, conn net.C
 	sub, isNew := s.reg.upsert(addr, t, conn, now)
 	if isNew {
 		s.stats.connects.Add(1)
+		if t == stream.TransportTCP {
+			s.startTCPWriter(sub)
+		}
 	}
 	if isRestart {
 		s.stats.restarts.Add(1)
@@ -477,10 +550,11 @@ func (s *Server) tcpConnReader(conn *net.TCPConn) {
 		chunk, err := readTCPFrame(conn)
 		if err != nil {
 			s.mu.Lock()
-			existed := s.reg.get(ap) != nil
+			sub := s.reg.get(ap)
 			s.reg.remove(ap)
 			s.mu.Unlock()
-			if existed {
+			if sub != nil {
+				s.stopTCPWriter(sub)
 				s.log.Info("tcp subscriber conn closed", "addr", ap.String(), "err", err)
 			}
 			return
@@ -498,8 +572,10 @@ func (s *Server) tcpConnReader(conn *net.TCPConn) {
 			s.onSubscribe(ap, stream.TransportTCP, conn, now, true, true)
 		case stream.TypeBye:
 			s.mu.Lock()
+			sub := s.reg.get(ap)
 			s.reg.remove(ap)
 			s.mu.Unlock()
+			s.stopTCPWriter(sub)
 			s.log.Info("client left (BYE)", "addr", ap.String(), "transport", "tcp")
 			return
 		}
@@ -517,10 +593,13 @@ func (s *Server) sweepLoop() {
 			return
 		case now := <-t.C:
 			s.mu.Lock()
-			conns, expired := s.reg.expire(now, keepaliveTTL)
+			removed, expired := s.reg.expire(now, keepaliveTTL)
 			s.mu.Unlock()
-			for _, c := range conns {
-				_ = c.Close()
+			for _, sub := range removed {
+				s.stopTCPWriter(sub)
+				if sub.conn != nil {
+					_ = sub.conn.Close()
+				}
 			}
 			for _, addr := range expired {
 				s.log.Info("client left (keepalive expiry)", "addr", addr.String(), "ttl", keepaliveTTL.String())
@@ -537,14 +616,23 @@ func (s *Server) logSourceStats() {
 	s.mu.Lock()
 	active := s.active
 	gen := s.gen
+	maxGapNs := s.relMaxGapNs
+	maxFanNs := s.fanoutMaxNs
+	s.relMaxGapNs = 0
+	s.fanoutMaxNs = 0
 	s.mu.Unlock()
 	if !active {
 		return
 	}
 	st := s.Stats()
+	// relMaxGapMs is the worst inter-release interval this second (target 20 ms): a
+	// jittery cadence here is what every follower's servo chases. fanoutMaxUs is the
+	// worst per-tick fan-out cost — must stay tiny now that TCP writes are async (D13).
 	s.log.Debug("stats", "gen", gen,
 		"clients", st.Clients, "released", st.Released, "connects", st.Connects,
-		"primes", st.Primes, "restarts", st.Restarts, "parity", st.Parity)
+		"primes", st.Primes, "restarts", st.Restarts, "parity", st.Parity,
+		"fanoutDrops", s.stats.fanoutDrops.Load(),
+		"relMaxGapMs", maxGapNs/1_000_000, "fanoutMaxUs", maxFanNs/1000)
 }
 
 // logRoomSkew surfaces inter-room sync (D63 telemetry). For rooms currently playing

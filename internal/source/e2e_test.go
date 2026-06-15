@@ -185,8 +185,13 @@ func TestRoundTripTCPClean(t *testing.T) {
 	}
 	waitForN(t, func() int { return s.Stats().Clients }, 1, time.Second)
 
+	// Pace the release loop: the real source releases one frame per ~20 ms tick, so
+	// the per-sub async writer (D13) trivially keeps up. (Bursting all 100 instantly
+	// is not representative — it would overrun the bounded fan-out queue, which then
+	// drops frames exactly as it would for a wedged conn.)
 	for i := 0; i < 100; i++ {
 		s.ReleaseFrame(int64(i)*stream.FrameNanos, pcm(byte(i)))
+		time.Sleep(time.Millisecond)
 	}
 	if !waitForN(t, func() int { return col.count() }, 100, 3*time.Second) {
 		t.Fatalf("delivered %d want 100", col.count())

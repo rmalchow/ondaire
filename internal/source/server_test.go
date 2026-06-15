@@ -330,3 +330,36 @@ func waitForAtLeast(t *testing.T, get func() int, want int, d time.Duration) boo
 	}
 	return get() >= want
 }
+
+// TestReleaseFrameNeverBlocksOnWedgedTCP is the core D13 guarantee: a slow/wedged
+// TCP subscriber must NOT slow the master's release cadence. Every follower locks
+// its rate servo to that cadence, so a producer stall pegs the whole group. We
+// register a TCP sub whose peer never reads (every conn write parks until the
+// 50 ms deadline) and assert ReleaseFrame stays far under the 20 ms frame period
+// and that the backpressure surfaces as fan-out drops, not a stall.
+func TestReleaseFrameNeverBlocksOnWedgedTCP(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	s.StartSession(1, stream.TransportTCP, 150)
+
+	c1, c2 := net.Pipe() // c2 is never read → writes to c1 block until the deadline
+	defer c1.Close()
+	defer c2.Close()
+	s.onSubscribe(ap("127.0.0.1:6000"), stream.TransportTCP, c1, time.Now(), false, false)
+	waitForN(t, func() int { return s.Stats().Clients }, 1, time.Second)
+
+	var worst time.Duration
+	for i := 0; i < 100; i++ {
+		start := time.Now()
+		s.ReleaseFrame(int64(i)*stream.FrameNanos, pcm(byte(i)))
+		if d := time.Since(start); d > worst {
+			worst = d
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if worst > 5*time.Millisecond {
+		t.Fatalf("ReleaseFrame stalled %v on a wedged TCP sub; the producer cadence must be sink-independent", worst)
+	}
+	if s.stats.fanoutDrops.Load() == 0 {
+		t.Fatal("expected fan-out drops to the wedged TCP subscriber, got none")
+	}
+}

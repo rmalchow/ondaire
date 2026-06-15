@@ -33,9 +33,12 @@ func TestRegistryExpire(t *testing.T) {
 	now := time.Now()
 	r.upsert(ap("127.0.0.1:5000"), stream.TransportUDP, nil, now)
 	r.upsert(ap("127.0.0.1:5001"), stream.TransportUDP, nil, now.Add(20*time.Second))
-	conns, _ := r.expire(now.Add(20*time.Second), 15*time.Second)
-	if len(conns) != 0 {
-		t.Fatal("UDP sub has no conn to return")
+	removed, _ := r.expire(now.Add(20*time.Second), 15*time.Second)
+	if len(removed) != 1 {
+		t.Fatalf("expired removed=%d want 1", len(removed))
+	}
+	if removed[0].conn != nil {
+		t.Fatal("UDP sub should have nil conn")
 	}
 	if r.count() != 1 {
 		t.Fatalf("count=%d want 1 (one expired)", r.count())
@@ -55,9 +58,9 @@ func TestRegistryExpireReturnsTCPConn(t *testing.T) {
 	defer c2.Close()
 	now := time.Now()
 	r.upsert(ap("127.0.0.1:6000"), stream.TransportTCP, c1, now)
-	conns, _ := r.expire(now.Add(20*time.Second), 15*time.Second)
-	if len(conns) != 1 {
-		t.Fatalf("expected 1 returned conn, got %d", len(conns))
+	removed, _ := r.expire(now.Add(20*time.Second), 15*time.Second)
+	if len(removed) != 1 || removed[0].conn == nil {
+		t.Fatalf("expected 1 removed TCP sub with a conn, got %d", len(removed))
 	}
 }
 

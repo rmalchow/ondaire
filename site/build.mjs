@@ -1116,9 +1116,30 @@ function flashPage(builds) {
       attachConsole("fl-log-install", "fl-connect-install", MSG.flashDone);
     }
   }
+  // ESP Web Tools renders its own dialog. For a non-Improv device its first screen
+  // is an "Install / Logs & Console" menu — redundant here (we have our own
+  // console), so auto-pick Install to land straight on its Confirm screen. Guarded
+  // by sawInstall + autoTried so it never re-fires when DASHBOARD reappears after a
+  // flash. Best-effort: if the shadow DOM ever changes, the menu just stays.
+  function clickInstall(dlg, tries){
+    try {
+      var root = dlg.shadowRoot;
+      var items = root ? root.querySelectorAll("ew-list-item") : [];
+      for (var i = 0; i < items.length; i++){
+        if (/install/i.test(items[i].textContent || "")){ items[i].click(); return; }
+      }
+    } catch(e){ return; }
+    if ((tries || 0) < 10) setTimeout(function(){ clickInstall(dlg, (tries || 0) + 1); }, 60);
+  }
   function watchDialog(dlg){
     sawInstall = false; sawError = false; flashStatus(null);
-    function read(){ var s = dlg.getAttribute("state"); if (s === "INSTALL") sawInstall = true; else if (s === "ERROR") sawError = true; }
+    var autoTried = false;
+    function read(){
+      var s = dlg.getAttribute("state");
+      if (s === "INSTALL") sawInstall = true;
+      else if (s === "ERROR") sawError = true;
+      else if (s === "DASHBOARD" && !sawInstall && !autoTried){ autoTried = true; clickInstall(dlg, 0); }
+    }
     read();
     new MutationObserver(read).observe(dlg, { attributes: true, attributeFilter: ["state"] });
   }
@@ -1158,7 +1179,21 @@ function flashPage(builds) {
     try { if (writer) writer.releaseLock(); } catch(e){}
     writer = null; port = null; buf = "";   // closed — e.g. a reboot re-enumerated the USB-JTAG
   }
-  async function openPort(p){ port = p; await port.open({ baudRate: 115200 }); writer = port.writable.getWriter(); buf = ""; readLoop(); }
+  function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+  // Open p, retrying the transient "already open" — ESP Web Tools can still hold
+  // the port for a moment after its dialog closes, so we wait for it to release
+  // (implicit close-and-reopen). port is set only on success, so a failed open
+  // never poisons a later connect().
+  async function openPort(p){
+    for (var i = 0; ; i++){
+      try { await p.open({ baudRate: 115200 }); break; }
+      catch(e){
+        if (i >= 9 || !/already open/i.test(String(e && e.message))) throw e;
+        await sleep(400);
+      }
+    }
+    port = p; writer = port.writable.getWriter(); buf = ""; readLoop();
+  }
   async function dropPort(){
     try { if (writer) writer.releaseLock(); } catch(e){}
     try { if (port) await port.close(); } catch(e){}
@@ -1206,7 +1241,8 @@ function flashPage(builds) {
     if (intro) appendLog(intro + "\\n");
     if (connectBtnId) $(connectBtnId).hidden = false;
     try { await connect(false); } catch(e){ appendLog(e.message + "\\n"); }
-    setTimeout(function(){ if (!gotData) appendLog(MSG.noLogs + "\\n"); }, 4000);
+    // Only nudge toward the button if we never actually attached.
+    setTimeout(function(){ if (!port && !gotData) appendLog(MSG.noLogs + "\\n"); }, 6000);
   }
   // The Connect button always forces a fresh port: drop any stale handle, then
   // prompt, so the user can attach to the re-enumerated device after a reset.

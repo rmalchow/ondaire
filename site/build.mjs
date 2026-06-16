@@ -781,6 +781,9 @@ function flashPage(builds) {
     saving: "Saving configuration…",
     noPort: "No serial port selected.",
     consoleHint: "Connect over USB to watch the device boot.",
+    flashDone: "Flashing finished — startup logs will appear here soon…",
+    cfgReboot: "Configuration saved — the device is rebooting; startup logs will appear here soon…",
+    noReply: "No reply from the device. Make sure it’s plugged in over USB-C (not just power), then reconnect.",
   }).replace(/</g, "\\u003c");
 
   return `<!doctype html>
@@ -1109,7 +1112,7 @@ function flashPage(builds) {
       $("fl-next-install").disabled = false;   // unlock "Configure →"
       // esptool hard-resets into the app after flashing, so the board is already
       // booting — reuse the port ESP Web Tools was granted and show the boot log.
-      openConsole("fl-log-install", false, "fl-connect-install");
+      openConsole("fl-log-install", false, "fl-connect-install", MSG.flashDone);
     }
   }
   function watchDialog(dlg){
@@ -1153,18 +1156,35 @@ function flashPage(builds) {
     try { if (writer) writer.releaseLock(); } catch(e){}
     writer = null; port = null; buf = "";   // closed — e.g. a reboot re-enumerated the USB-JTAG
   }
-  async function openPort(p){ port = p; await port.open({ baudRate: 115200 }); writer = port.writable.getWriter(); readLoop(); }
+  async function openPort(p){ port = p; await port.open({ baudRate: 115200 }); writer = port.writable.getWriter(); buf = ""; readLoop(); }
+  async function dropPort(){
+    try { if (writer) writer.releaseLock(); } catch(e){}
+    try { if (port) await port.close(); } catch(e){}
+    writer = null; port = null; buf = "";
+  }
   function send(obj){
     if (!writer) return Promise.resolve(null);
     return writer.write(new TextEncoder().encode(JSON.stringify(obj) + "\\n")).then(function(){
-      return new Promise(function(res){ waiters.push(res); setTimeout(function(){ var i = waiters.indexOf(res); if (i >= 0){ waiters.splice(i,1); res(null); } }, 4000); });
+      return new Promise(function(res){ waiters.push(res); setTimeout(function(){ var i = waiters.indexOf(res); if (i >= 0){ waiters.splice(i,1); res(null); } }, 2500); });
+    }, function(){ return null; });
+  }
+  // The first line after opening the USB-JTAG is sometimes dropped while the
+  // device's console task spins up, so retry a few times before giving up.
+  async function sendRetry(obj, tries){
+    for (var i = 0; i < (tries || 3); i++){ var r = await send(obj); if (r) return r; }
+    return null;
+  }
+  // esp_restart() drops the native USB-JTAG and it re-enumerates as a fresh port.
+  if (navigator.serial){
+    navigator.serial.addEventListener("connect", function(ev){
+      if (wantConsole && !port){ appendLog("\\n[device reconnected]\\n"); openPort(ev.target).catch(function(){}); }
+    });
+    // Clear the stale handle when the device drops, so the next connect() opens a
+    // fresh port instead of writing into a dead one (the old "no response" trap).
+    navigator.serial.addEventListener("disconnect", function(){
+      if (port){ appendLog("\\n[device disconnected]\\n"); writer = null; port = null; buf = ""; }
     });
   }
-  // esp_restart() drops the native USB-JTAG and it re-enumerates as a fresh port;
-  // resume streaming so the boot log keeps flowing after a reset.
-  if (navigator.serial) navigator.serial.addEventListener("connect", function(ev){
-    if (wantConsole && !port){ appendLog("\\n[device reconnected]\\n"); openPort(ev.target).catch(function(){}); }
-  });
   async function connect(allowPrompt){
     if (port) return true;
     if (!navigator.serial) throw new Error(MSG.noSerial);
@@ -1176,8 +1196,10 @@ function flashPage(builds) {
   }
   // Reveal a step's console and attach to the device. allowPrompt=false reuses a
   // port the page was already granted (e.g. by ESP Web Tools) without a picker.
-  async function openConsole(logId, allowPrompt, connectBtnId){
+  // intro seeds an explanation so the user sees what's happening before logs flow.
+  async function openConsole(logId, allowPrompt, connectBtnId, intro){
     showConsole(logId); wantConsole = true;
+    if (intro) appendLog(intro + "\\n");
     try {
       var ok = await connect(allowPrompt);
       if (!ok && connectBtnId){ appendLog(MSG.consoleHint + "\\n"); $(connectBtnId).hidden = false; }
@@ -1206,10 +1228,17 @@ function flashPage(builds) {
       var ssid = $("cf-wifi_ssid").value.trim(); if (ssid) cfg.wifi_ssid = ssid;
       var pass = $("cf-wifi_pass").value; if (pass) cfg.wifi_pass = pass;
       cfgStatus("info", MSG.saving);
-      var r = await send({ cmd: "set", cfg: cfg });
-      if (!(r && r.ok)){ cfgStatus("err", MSG.cfgErr + (r && r.err ? " (" + r.err + ")" : " (no response)")); return; }
+      var r = await sendRetry({ cmd: "set", cfg: cfg }, 3);
+      // No reply usually means the handle we reused went stale (a prior reset
+      // re-enumerated the USB) — drop it, reconnect fresh, and try once more.
+      if (!r){
+        appendLog("[no reply — reconnecting…]\\n");
+        await dropPort();
+        if (await connect(true)) r = await sendRetry({ cmd: "set", cfg: cfg }, 3);
+      }
+      if (!(r && r.ok)){ cfgStatus("err", r && r.err ? MSG.cfgErr + " (" + r.err + ")" : MSG.noReply); return; }
       cfgStatus("ok", MSG.cfgOk);
-      appendLog("\\n[configuration saved \\u2014 rebooting\\u2026]\\n");
+      appendLog("\\n[" + MSG.cfgReboot + "]\\n");
       send({ cmd: "reboot" });                     // apply Wi-Fi + join the LAN
       $("fl-next-provision").disabled = false;     // unlock "Finish →"
     } catch(e){ cfgStatus("err", "Connect/save failed: " + e.message); }

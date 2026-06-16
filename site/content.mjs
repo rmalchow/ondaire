@@ -585,8 +585,10 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         note: "Dual-core ESP32-S3 + 2 MB PSRAM, native USB-C. Pair with a PCM5102A I2S DAC.",
         // Board photo (front + back) — canonical copy lives next to the board's
         // sheet in esp32/devices/; build.mjs copies it into the site like `wiring`.
+        // Marketing board photo (front + back). Lives in site/src/assets/img/ — the
+        // Docker build context is site/ only, so it ships via copyDir (the same
+        // photo also sits in esp32/devices/ for the GitLab device sheet).
         img: "assets/img/esp32-s3-super-mini.jpg",
-        imgSrc: "esp32-s3-super-mini.jpg",
         // The board's own page in the repo (wiring, pinouts, build notes). Since the
         // flasher knows the selected board, the finished step links straight to it.
         doc: `${REPO}/-/blob/main/esp32/devices/esp32-s3-super-mini.md`,

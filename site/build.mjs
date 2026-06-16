@@ -1188,8 +1188,6 @@ async function main() {
   await fs.writeFile(path.join(OUT, "flash.html"), flashPage(firmware));
   const fwOut = path.join(OUT, "assets", "firmware");
   await fs.mkdir(fwOut, { recursive: true });
-  const imgOut = path.join(OUT, "assets", "img");
-  await fs.mkdir(imgOut, { recursive: true });
   for (const b of firmware) {
     // Fresh-install (full erase) + keep-settings (prompt) manifest per board.
     await fs.writeFile(
@@ -1201,19 +1199,6 @@ async function main() {
       JSON.stringify(firmwareManifest(b, false), null, 2)
     );
     if (b.present) await fs.copyFile(b.src, path.join(fwOut, b.file.split("/").pop()));
-    // The board's photo lives next to its sheet under esp32/devices/ — single
-    // source of truth — so copy it into the site like the firmware image.
-    for (const [srcName, dest] of [[b.imgSrc, b.img]]) {
-      if (!srcName || !dest) continue;
-      try {
-        await fs.copyFile(
-          path.join(root, "..", "esp32", "devices", srcName),
-          path.join(imgOut, dest.split("/").pop())
-        );
-      } catch {
-        // asset not present in the repo yet — the page degrades gracefully
-      }
-    }
   }
 
   // Serve the installer at /get.sh (the "curl … | sudo bash" one-liner). Source of

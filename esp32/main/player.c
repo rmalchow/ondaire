@@ -9,22 +9,23 @@
 #include <string.h>
 #include "esp_log.h"
 #include "esp_rom_sys.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
 static const char *TAG = "player";
 
-#define JITTER_SLOTS   16                 // ~320 ms at 20 ms/frame (covers bufferMs up to 300)
+#define JITTER_SLOTS   32                 // ~640 ms at 20 ms/frame (covers bufferMs up to 300 with headroom)
 #define WATCHDOG_NS    ((int64_t)2 * 1000000000LL)
 #define PCM_SAMPLES    (WIRE_FRAME_SAMPLES * WIRE_CHANNELS)   // 1920 int16
 
-// We buffer the COMPRESSED opus packet (~320 B, decoded at playout), not the
-// 3840 B decoded frame — 12 slots is ~18 KB instead of ~46 KB, which is what lets
-// Wi-Fi + lwIP + mDNS coexist on the 320 KB S2. Opus packets are well under this;
-// raw-PCM frames (3840 B, wired/bench only) don't fit a slot, so this build is
-// effectively opus-only on the MCU (the Wi-Fi default; PCM fragments anyway, §1).
-#define SLOT_BYTES     1500
+// The slot stores one queued frame's payload. On the Wi-Fi path that's the
+// COMPRESSED opus packet (~320 B, decoded at playout); sizing it to a full raw
+// PCM frame (WIRE_FRAME_BYTES) means the wired/bench PCM path is accepted too,
+// instead of being dropped at push. The buffer lives in PSRAM (the S3FH4R2 has
+// 2 MB), so there's no reason to cramp it the way the 320 KB no-PSRAM parts did.
+#define SLOT_BYTES     WIRE_FRAME_BYTES   // 3840 B — opus packet or a full PCM frame
 
 typedef struct {
     bool     used;
@@ -51,7 +52,7 @@ static struct {
     bool     got_frame;
 } p;
 
-static slot_t  *s_slots;                  // jitter buffer (heap; off the BSS budget)
+static slot_t  *s_slots;                  // jitter buffer (PSRAM; see player_init)
 static int16_t s_pcm[PCM_SAMPLES];        // audio-task scratch (decode/output)
 static uint8_t s_stage[SLOT_BYTES];       // audio-task staging (copied under lock)
 
@@ -92,7 +93,10 @@ bool player_init(const ens_config_t *cfg) {
     p.codec = WIRE_CODEC_OPUS;
     p.buffer_ns = (int64_t)cfg->buffer_ms * 1000000;
 
-    s_slots = calloc(JITTER_SLOTS, sizeof(slot_t));   // ~46 KB off the heap
+    // Jitter buffer in PSRAM (~120 KB at 32 slots — trivial in the S3FH4R2's
+    // 2 MB). Fall back to internal RAM so the bare no-PSRAM bench board still boots.
+    s_slots = heap_caps_calloc(JITTER_SLOTS, sizeof(slot_t), MALLOC_CAP_SPIRAM);
+    if (!s_slots) s_slots = calloc(JITTER_SLOTS, sizeof(slot_t));
     if (!s_slots) { ESP_LOGE(TAG, "jitter buffer alloc failed"); return false; }
 
     volume_init(cfg->vol);
@@ -120,8 +124,8 @@ void player_arm(uint8_t codec, uint32_t gen, int buffer_ms) {
     ESP_LOGI(TAG, "armed codec=%s gen=%u buffer=%dms",
              codec == WIRE_CODEC_OPUS ? "opus" : "pcm", (unsigned)gen, buffer_ms);
     if (codec != WIRE_CODEC_OPUS)
-        ESP_LOGW(TAG, "group codec is PCM — this build is opus-only (RAM); audio "
-                      "will be silent. Set the group codec to opus.");
+        ESP_LOGW(TAG, "group codec is PCM — fine on the wired/local path, but raw "
+                      "PCM frames fragment over Wi-Fi (MTU); prefer opus for radio nodes.");
     if (buffer_ms > JITTER_SLOTS * 20)
         ESP_LOGW(TAG, "bufferMs=%d exceeds jitter capacity (%d ms) — may drop frames",
                  buffer_ms, JITTER_SLOTS * 20);
@@ -245,8 +249,8 @@ static void audio_task(void *arg) {
                 if (opus_dec_decode(s_stage, stage_len, s_pcm) < 0)
                     memset(s_pcm, 0, sizeof s_pcm);
             } else {
-                // Raw PCM (wired/bench): a full 3840 B frame won't fit a slot, so
-                // it was dropped at push and never reaches here; guard anyway.
+                // Raw PCM (wired/bench): a full 3840 B frame now fits a slot.
+                // Copy it straight through, clamped to the output frame size.
                 int nb = stage_len < (int)sizeof s_pcm ? stage_len : (int)sizeof s_pcm;
                 memset(s_pcm, 0, sizeof s_pcm);
                 memcpy(s_pcm, s_stage, nb);
@@ -279,7 +283,7 @@ void player_fill_status(wire_status_t *st) {
     unlock();
 
     int64_t off;
-    bool synced = clock_offset(&off);
+    bool synced = clock_offset_reported(&off);   // drift since lock, not the epoch gap
     st->offset_ns = synced ? off : 0;
     st->rtt_ns = clock_best_rtt_ns();
     st->rate_ppm_x1000 = servo_rate_ppm_x1000();

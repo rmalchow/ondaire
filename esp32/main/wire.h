@@ -45,7 +45,7 @@ enum {
 enum { WIRE_CODEC_PCM = 0, WIRE_CODEC_OPUS = 1 };
 enum { WIRE_TRANSPORT_UDP = 0, WIRE_TRANSPORT_TCP = 1 };
 
-#define WIRE_STATUS_LEN 87
+#define WIRE_STATUS_LEN 103
 
 // STATUS flag bits (§6.3).
 #define WIRE_ST_SYNCED     0x01
@@ -72,7 +72,9 @@ typedef struct {
     uint16_t buffer_ms;
 } wire_attach_t;
 
-// STATUS (§6.3) — 87 bytes.
+// STATUS (§6.3) — 103 bytes. The two trailing u64 counters (grounded resample
+// inject/drop) were added master-side; the payload MUST be 103 bytes or the
+// master's DecodeStatus rejects it (len < StatusLen) and the node never goes live.
 typedef struct {
     uint8_t  node_id[16];
     uint8_t  flags;
@@ -86,6 +88,8 @@ typedef struct {
     uint64_t late;
     int64_t  device_delay_ns;
     int64_t  phase_err_ns;
+    uint64_t samples_injected;   // grounded servo resample accounting (0 — MCU nudges whole frames)
+    uint64_t samples_dropped;
 } wire_status_t;
 
 // Header encode/decode. enc writes WIRE_HEADER_SIZE bytes; returns size.

@@ -1,0 +1,6 @@
+"-specs=/home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/bootloader/specs/picolibc.specs"
+-mlongcalls
+-fno-builtin-memcpy
+-fno-builtin-memset
+-fno-builtin-bzero
+-fno-rtti

@@ -1,0 +1,2 @@
+source /home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/gdbinit/symbols
+source /home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/gdbinit/connect

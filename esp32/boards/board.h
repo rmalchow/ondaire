@@ -16,6 +16,8 @@
 
 #if defined(CONFIG_ENSEMBLE_BOARD_ESP32S3)
 #include "board_esp32s3.h"
+#elif defined(CONFIG_ENSEMBLE_BOARD_ESP32S3_SUPERMINI)
+#include "board_esp32s3_supermini.h"
 #else
 #include "board_generic.h"
 #endif

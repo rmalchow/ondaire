@@ -36,9 +36,17 @@ bool i2s_out_init(int bclk, int lrck, int dout, int mclk) {
     g_bclk = bclk; g_lrck = lrck; g_dout = dout; g_mclk = mclk;
 
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-    // ~6 x 20 ms of DMA slack so brief scheduler hiccups don't underrun.
-    chan_cfg.dma_desc_num = 6;
-    chan_cfg.dma_frame_num = WIRE_FRAME_SAMPLES;   // 960 frames per DMA buffer
+    // Short DMA queue: 6 x 5 ms = 30 ms of output latency, ~matching the ALSA
+    // nodes (~36 ms) so L/R line up without huge cross-room equalization. (Was
+    // 6 x 20 ms = 120 ms, which made this node play ~90 ms behind the Pis.) The
+    // 640 ms PSRAM jitter buffer absorbs network jitter; the DMA only has to cover
+    // scheduler hiccups between the audio task's 20 ms writes.
+    chan_cfg.dma_desc_num  = I2S_DMA_DESC_NUM;
+    chan_cfg.dma_frame_num = I2S_DMA_FRAME_NUM;   // 5 ms per DMA buffer @ 48 kHz
+    // On underrun the driver must emit SILENCE, not replay the last DMA buffer —
+    // otherwise the DAC loops stale samples as buzzing noise (very audible once the
+    // queue is short). auto_clear zero-fills sent buffers so a gap plays as silence.
+    chan_cfg.auto_clear = true;
     if (i2s_new_channel(&chan_cfg, &tx, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "i2s_new_channel failed");
         return false;

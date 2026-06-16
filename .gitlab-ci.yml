@@ -136,9 +136,13 @@ build-release:
   # ESP32 firmware is bring-up, not shipped yet: never block the pipeline or the
   # release on it. Remove allow_failure once the firmware is release-ready.
   allow_failure: true
+  # BOARD is the board profile (esp32/boards/ + sdkconfig.defaults.<board>); TARGET
+  # is the IDF silicon (set-target). They differ when boards share a chip — the
+  # Super Mini is esp32s3 silicon with its own PSRAM-on config. CHIP names the
+  # dotenv var for the release asset links.
   parallel:
     matrix:
-      - { BOARD: esp32s3, CHIP: ESP32S3 }
+      - { BOARD: esp32s3-supermini, TARGET: esp32s3, CHIP: ESP32S3 }
   # Use the IDF + tools PRE-INSTALLED in the espressif/idf image. (This previously
   # overrode IDF_TOOLS_PATH to a project-local .espressif and cached it — but on a
   # cache miss that dir is empty, so export.sh cannot find the Python venv and the
@@ -149,7 +153,7 @@ build-release:
     - cd esp32
     # Per-board sdkconfig in the build dir so the matrix jobs never share config.
     - IDFARGS="-B build-$BOARD -DBOARD=$BOARD -DSDKCONFIG=build-$BOARD/sdkconfig"
-    - idf.py $IDFARGS set-target "$BOARD"
+    - idf.py $IDFARGS set-target "$TARGET"
     - idf.py $IDFARGS build
     - idf.py $IDFARGS merge-bin -o "ensemble-fw-$BOARD.bin"   # → build-$BOARD/
     - mkdir -p ../fw

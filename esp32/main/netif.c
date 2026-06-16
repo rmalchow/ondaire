@@ -13,12 +13,15 @@ static EventGroupHandle_t s_eg;
 #define BIT_GOT_IP BIT0
 
 static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
-    (void)arg; (void)data;
+    (void)arg;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(s_eg, BIT_GOT_IP);
-        ESP_LOGW(TAG, "disconnected; retrying");
+        // reason codes (esp_wifi_types.h): 15=4WAY_HANDSHAKE_TIMEOUT (bad PSK),
+        // 2=AUTH_EXPIRE, 201=NO_AP_FOUND, 205=CONNECTION_FAIL, 5=ASSOC_TOOMANY.
+        wifi_event_sta_disconnected_t *d = (wifi_event_sta_disconnected_t *)data;
+        ESP_LOGW(TAG, "disconnected (reason=%d); retrying", d ? d->reason : -1);
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;

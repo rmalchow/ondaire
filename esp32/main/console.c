@@ -14,6 +14,11 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
+#endif
 
 static const char *TAG = "console";
 #define CMD_LINE_MAX 512
@@ -157,6 +162,16 @@ static void console_task(void *arg) {
 }
 
 bool console_init(void) {
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    // Native USB-Serial-JTAG console (Super Mini / S3-Zero / DevKitC): install the
+    // driver and route the VFS through it, or read(STDIN) never receives bytes —
+    // the device never drains the USB OUT endpoint and host writes time out, so
+    // provisioning is impossible. UART0 consoles (e.g. the S2 CH341 board) already
+    // have a working stdin, hence the guard.
+    usb_serial_jtag_driver_config_t ucfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    usb_serial_jtag_driver_install(&ucfg);
+    usb_serial_jtag_vfs_use_driver();
+#endif
     xTaskCreate(console_task, "console", 4096, NULL, 7, NULL);
     ESP_LOGI(TAG, "USB JSON console ready ({\"cmd\":\"get\"})");
     return true;

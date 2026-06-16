@@ -10,6 +10,8 @@ menu "ensemble playback node"
 
         config ENSEMBLE_BOARD_ESP32S3
             bool "ESP32-S3-WROOM-1 / DevKitC-1"
+        config ENSEMBLE_BOARD_ESP32S3_SUPERMINI
+            bool "ESP32-S3 Super Mini (22.5x18mm, USB-C, WS2812 on GPIO48)"
         config ENSEMBLE_BOARD_GENERIC
             bool "Generic (compile-time pins, no board profile)"
     endchoice

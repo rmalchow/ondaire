@@ -25,6 +25,9 @@ static struct {
     sample_t samples[WINDOW];
     int      nsamples;       // count, capped at WINDOW (ring)
     int      head;           // ring write index
+
+    int64_t  off_base;       // reported-offset anchor (full offset at first lock)
+    bool     off_base_set;
 } c;
 
 static inline void lock(void)   { xSemaphoreTakeRecursive(c.mu, portMAX_DELAY); }
@@ -40,6 +43,7 @@ int64_t clock_now_ns(void) { return esp_timer_get_time() * 1000; }
 static void wipe_samples_locked(void) {
     c.nsamples = 0;
     c.head = 0;
+    c.off_base_set = false;   // re-anchor the reported offset on the next lock
     for (int i = 0; i < PENDING; i++) c.pend[i].used = false;
 }
 
@@ -136,6 +140,17 @@ bool clock_master_to_local(int64_t master_ns, int64_t *local_ns) {
     int64_t off;
     if (!clock_offset(&off)) return false;
     *local_ns = master_ns - off;
+    return true;
+}
+
+bool clock_offset_reported(int64_t *offset_ns) {
+    int64_t full;
+    if (!clock_offset(&full)) return false;   // unsynced
+    lock();
+    if (!c.off_base_set) { c.off_base = full; c.off_base_set = true; }
+    int64_t base = c.off_base;
+    unlock();
+    *offset_ns = full - base;   // drift since first lock, not the boot-vs-epoch gap
     return true;
 }
 

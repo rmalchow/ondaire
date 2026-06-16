@@ -1,11 +1,14 @@
 #include "servo.h"
 #include "wire.h"
+#include "i2s_out.h"
 
 #include <stdlib.h>
 
-// Nominal output latency through the I2S DMA + DAC. Used as the device-delay
-// baseline until the live phase error refines it.
-#define NOMINAL_DELAY_NS   (3 * WIRE_FRAME_NANOS)   // ~60 ms of DMA buffering
+// Nominal output latency = the actual I2S DMA depth (i2s_out.h), so the reported
+// device delay tracks the real buffer instead of a stale constant. 6 x 240 frames
+// @ 48 kHz = 30 ms. Used as the device-delay baseline until phase error refines it.
+#define NOMINAL_DELAY_NS \
+    ((int64_t)I2S_DMA_DESC_NUM * I2S_DMA_FRAME_NUM * 1000000000LL / WIRE_SAMPLE_RATE)
 #define CALIB_FRAMES       500                      // ~10 s of stable playout
 #define JITTER_OK_NS       (2 * 1000000)            // 2 ms RMS-ish threshold
 

@@ -554,7 +554,11 @@ function downloadPage(options) {
         <h2>${esc(t.title)}</h2>
         <span class="dl-soon">${esc(t.badge)}</span>
       </div>
-      <p class="dl-teaser-body">${esc(t.body)}</p>
+      <p class="dl-teaser-body">${esc(t.body)}</p>${
+        t.href
+          ? `\n      <a class="btn btn-ghost dl-link-btn" href="${esc(t.href)}">${esc(t.hrefLabel)}<span class="arrow">→</span></a>`
+          : ""
+      }
     </section>`
     : "";
   const inst = C.download.installer;
@@ -661,66 +665,118 @@ function downloadPage(options) {
 `;
 }
 
-// resolveFirmware enriches each firmware build with the staged merged-image's
-// SHA-256 + size (like resolveDownloads). A missing image renders as "not built"
-// so a plain `node build.mjs` still produces the flasher page + a valid manifest.
+// resolveFirmware enriches each board build with its merged-image's SHA-256 +
+// size (like resolveDownloads), and records the resolved `src` path so main()
+// can copy the image into ./dist. The image is looked up first where the build
+// staged it (src/assets/firmware/, as CI's docker-site job does), then falling
+// back to a local esp32 build (esp32/build-<id>/ensemble-fw-<id>.bin) so a bare
+// `node build.mjs` after `esp32/build.sh <id>` produces a working flasher too.
+// A missing image renders as "not built" — the page + manifests still build.
 async function resolveFirmware() {
   const out = [];
   for (const b of C.firmware.builds) {
-    try {
-      const buf = await fs.readFile(path.join(SRC, b.file));
-      out.push({ ...b, present: true, size: buf.length, hash: createHash("sha256").update(buf).digest("hex") });
-    } catch {
+    const fname = b.file.split("/").pop();
+    const candidates = [
+      path.join(SRC, b.file),
+      path.join(root, "..", "esp32", `build-${b.id}`, fname),
+    ];
+    let hit = null;
+    for (const p of candidates) {
+      try {
+        hit = { src: p, buf: await fs.readFile(p) };
+        break;
+      } catch {
+        // try the next location
+      }
+    }
+    if (hit) {
+      out.push({ ...b, present: true, src: hit.src, size: hit.buf.length, hash: createHash("sha256").update(hit.buf).digest("hex") });
+    } else {
       out.push({ ...b, present: false });
     }
   }
   return out;
 }
 
-// ESP Web Tools manifest: one build per detected chipFamily, each a single
-// merged image at offset 0. `path` is relative to the manifest's own location.
-function firmwareManifest(builds) {
+// Per-board ESP Web Tools manifest: a single merged image at offset 0 for the
+// board's chipFamily. `path` is relative to the manifest's own location. Two
+// variants per board so the wizard's "Fresh install" toggle picks the right one:
+//   manifest-<id>.json       fresh: new_install_prompt_erase:false ⇒ ESP Web
+//                            Tools full-erases the chip up front, then writes —
+//                            a clean install, no extra in-dialog question.
+//   manifest-<id>-keep.json  keep: new_install_prompt_erase:true ⇒ the installer
+//                            asks erase-or-keep, so a re-flash can preserve the
+//                            node's stored Wi-Fi/name (pick "Keep").
+// (ESP Web Tools has no silent "keep" — preserving NVS requires that one prompt.)
+// Several boards can share a chipFamily, hence one manifest pair per board.
+function firmwareManifest(b, fresh) {
   return {
-    name: C.firmware.manifestName,
+    name: `${C.firmware.manifestName} — ${b.label}`,
     version: VERSION || "dev",
-    new_install_prompt_erase: true,
-    builds: builds
-      .filter((b) => b.present)
-      .map((b) => ({ chipFamily: b.chipFamily, parts: [{ path: b.file.split("/").pop(), offset: 0 }] })),
+    new_install_prompt_erase: !fresh,
+    builds: [
+      {
+        chipFamily: b.chipFamily,
+        parts: [{ path: b.file.split("/").pop(), offset: 0 }],
+      },
+    ],
   };
 }
 
 function flashPage(builds) {
   const F = C.flash;
-  const anyBuild = builds.some((b) => b.present);
-  const buildRows = builds
-    .map((b) => {
-      const fname = b.file.split("/").pop();
-      const meta = b.present
-        ? `<span class="fl-ok">staged</span> <span class="dl-size">${esc(fmtBytes(b.size))}</span>`
-        : `<span class="fl-no">not built</span>`;
-      const sha = b.present ? `<code class="fl-sha">${esc(b.hash)}</code>` : "";
-      return `
-        <div class="fl-build">
-          <div><strong>${esc(b.label)}</strong> <span class="dl-rec">${esc(b.note)}</span></div>
-          <div class="fl-build-meta"><code>${esc(fname)}</code> ${meta} ${sha}</div>
-        </div>`;
-    })
-    .join("");
   const bom = F.bom.items.map((i) => `<li>${esc(i)}</li>`).join("");
-  const steps = F.steps
-    .map((s) => `<li class="step"><span class="step-n">${esc(s.n)}</span><h3>${esc(s.title)}</h3><p>${esc(s.body)}</p></li>`)
+
+  // The progress header — one numbered chip per wizard step. The first is current
+  // on load; pick()/show() in the page script move the is-current/is-done classes.
+  const stepChips = F.wizard
+    .map(
+      (s, i) =>
+        `<li class="fl-step-chip${i === 0 ? " is-current" : ""}" data-step="${esc(s.id)}">
+            <span class="fl-step-n">${i + 1}</span><span class="fl-step-label">${esc(s.label)}</span>
+          </li>`
+    )
     .join("");
 
-  // The install widget: ESP Web Tools when a build is staged, else a placeholder.
-  const installer = anyBuild
-    ? `<esp-web-install-button manifest="assets/firmware/manifest.json">
-        <button class="btn btn-solid" slot="activate">${esc(F.install.label)} <span class="arrow">↧</span></button>
-        <span slot="unsupported" class="fl-warn">This browser can’t flash — use Chrome or Edge on desktop.</span>
-        <span slot="not-allowed" class="fl-warn">Flashing needs a secure (https) page.</span>
-      </esp-web-install-button>
-      <p class="dl-rec">${esc(F.install.note)}</p>`
-    : `<p class="dl-missing">Firmware not staged — built by the CI <code>firmware</code> job (or run <code>esp32/build.sh</code>).</p>`;
+  // One photo card per board in a horizontal scroll row; nothing board-specific
+  // shows until one is picked.
+  const boardCards = builds
+    .map(
+      (b) =>
+        `<button type="button" class="fl-board-card" role="radio" aria-checked="false" data-id="${esc(b.id)}">
+            <img src="${esc(b.img)}" alt="${esc(b.label)}" loading="lazy" decoding="async" />
+            <span class="fl-board-name">${esc(b.label)}</span>
+          </button>`
+    )
+    .join("");
+
+  // Board metadata for the picker JS: image, both manifests (fresh / keep), the
+  // wiring diagram, staged state, and the merged-image filename/size/sha rendered
+  // once a board is selected.
+  const boardData = builds.map((b) => ({
+    id: b.id,
+    label: b.label,
+    note: b.note,
+    img: b.img,
+    doc: b.doc || "",
+    manifest: `assets/firmware/manifest-${b.id}.json`,
+    manifestKeep: `assets/firmware/manifest-${b.id}-keep.json`,
+    present: !!b.present,
+    file: b.file.split("/").pop(),
+    size: b.present ? fmtBytes(b.size) : "",
+    hash: b.present ? b.hash : "",
+  }));
+  // </ inside the JSON would close the <script>; escape the opening angle.
+  const boardJson = JSON.stringify(boardData).replace(/</g, "\\u003c");
+  // Status copy injected into the script the same way (avoids hand-escaping).
+  const msgJson = JSON.stringify({
+    flashOk: F.install.okMsg,
+    flashErr: F.install.errMsg,
+    flashUnknown: F.install.unknownMsg,
+    cfgOk: F.provision.okMsg,
+    cfgErr: F.provision.errMsg,
+    notBuilt: "Firmware isn’t staged for this board — built by the CI firmware job, or run esp32/build.sh ",
+  }).replace(/</g, "\\u003c");
 
   return `<!doctype html>
 <html lang="en">
@@ -735,18 +791,97 @@ function flashPage(builds) {
 <link rel="stylesheet" href="assets/styles.css" />
 <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 <style>
-  .fl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin:18px 0}
-  .fl-field{display:flex;flex-direction:column;gap:5px;font-size:14px}
-  .fl-field label{color:var(--muted,#8b93a3)}
-  .fl-field input,.fl-field select{background:#0f1218;border:1px solid #2c333f;border-radius:8px;color:inherit;padding:8px 10px;font:inherit}
-  .fl-actions{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}
-  .fl-build{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid #20262f}
-  .fl-build-meta{font-size:13px;color:#8b93a3;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  /* The flasher is themed off the site's mint accent (var(--accent)); only the
+     genuine cautions — the Unstable banner and the band-steering note — use a
+     warning amber so they read as warnings, not brand. */
+  .fl-warn-amber{--fl-amber:#e0a64a}
+
+  /* ── progress stepper ─────────────────────────────────────────────── */
+  .fl-steps{display:flex;list-style:none;padding:0;margin:26px 0 20px;gap:0;flex-wrap:wrap}
+  .fl-step-chip{display:flex;align-items:center;gap:10px;font-size:13.5px;font-weight:600;color:var(--faint);flex:1 1 0;min-width:140px}
+  .fl-step-chip::after{content:"";flex:1;height:1px;background:var(--line-2);margin:0 12px}
+  .fl-step-chip:last-child::after{display:none}
+  .fl-step-n{flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;border:1px solid var(--line-2);font-family:var(--mono);font-size:13px;color:var(--faint);background:var(--bg-2)}
+  .fl-step-chip.is-current{color:var(--ink)}
+  .fl-step-chip.is-current .fl-step-n{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+  .fl-step-chip.is-done{color:var(--ink)}
+  .fl-step-chip.is-done .fl-step-n{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  @media (max-width:560px){ .fl-step-label{display:none} .fl-step-chip{min-width:0;flex:0 0 auto} .fl-step-chip::after{min-width:18px} }
+
+  /* ── wizard card + per-step panels ────────────────────────────────── */
+  .fl-wizard{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:26px 28px;margin:0 0 22px}
+  /* these panels are <section>s, so zero out the global section{padding:clamp(72px…)} */
+  .fl-step{display:flex;flex-direction:column;padding:0;animation:flfade .25s ease}
+  .fl-step[hidden]{display:none}
+  @keyframes flfade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .fl-step h2{margin:0 0 6px;font-family:var(--serif);font-size:25px}
+  .fl-lead{margin:0 0 18px;color:var(--muted);max-width:60ch}
+
+  /* footer: action (primary) + next (outline), generously spaced */
+  .fl-foot{margin-top:24px;padding-top:20px;display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;border-top:1px solid var(--line)}
+  .fl-foot-r{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-left:auto}
+  .fl-foot .btn[disabled],.fl-foot .btn:disabled{opacity:.4;pointer-events:none}
+  .btn-back{padding-left:8px}
+
+  /* ── board picker ─────────────────────────────────────────────────── */
+  .fl-board-row{display:flex;gap:14px;overflow-x:auto;padding:6px 2px 14px;margin:0 -2px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+  .fl-board-card{flex:0 0 220px;scroll-snap-align:start;display:flex;flex-direction:column;gap:10px;align-items:center;text-align:center;background:var(--bg-2);border:1px solid var(--line-2);border-radius:12px;padding:14px;color:inherit;font:inherit;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+  .fl-board-card:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--line-2))}
+  .fl-board-card.is-active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 34px -16px var(--accent)}
+  .fl-board-card img{width:100%;aspect-ratio:4/3;object-fit:contain;border-radius:8px;background:var(--bg)}
+  .fl-board-name{font-size:14px;font-weight:600}
+
+  /* selected-board meta line (staged sha / not built) */
+  .fl-build{margin:4px 0 2px;padding:14px 0;border-top:1px solid var(--line)}
+  .fl-build strong{font-weight:600}
+  .fl-build-meta{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+  .fl-build-meta code{font-family:var(--mono);font-size:12px}
   .fl-sha{font-size:11px;word-break:break-all;max-width:100%}
-  .fl-ok{color:#46c46a}.fl-no{color:#c46a46}.fl-warn{color:#d9a441}
-  .fl-log{background:#0a0c10;border:1px solid #20262f;border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap;max-height:180px;overflow:auto;color:#9aa3b2}
-  .fl-card{background:#12151c;border:1px solid #20262f;border-radius:14px;padding:20px;margin:18px 0}
-  .fl-disabled{opacity:.5;pointer-events:none}
+  .fl-ok{color:var(--accent)}.fl-no{color:#e0764a}
+  .fl-muted{color:var(--muted)}
+
+  /* "what you need" aside on step 1 */
+  .fl-bom{margin:14px 0 0;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:6px 16px}
+  .fl-bom>summary{cursor:pointer;font-weight:600;font-size:14px;padding:10px 0;list-style:none}
+  .fl-bom>summary::-webkit-details-marker{display:none}
+  .fl-bom>summary::before{content:"+ ";color:var(--accent);font-family:var(--mono)}
+  .fl-bom[open]>summary::before{content:"– "}
+  .fl-bom ul{margin:0 0 12px;padding-left:20px;color:var(--muted);font-size:14.5px}
+
+  /* ── install step ─────────────────────────────────────────────────── */
+  .fl-check{display:flex;gap:12px;align-items:flex-start;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:16px 0;font-size:14px;line-height:1.55;cursor:pointer}
+  .fl-check input{margin-top:3px;width:17px;height:17px;accent-color:var(--accent);flex:none}
+  .fl-check strong{color:var(--ink)}
+  .fl-check span{color:var(--muted)}
+
+  /* ── provision step ───────────────────────────────────────────────── */
+  .fl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin:18px 0 6px}
+  .fl-field{display:flex;flex-direction:column;gap:6px;font-size:14px}
+  .fl-field label{color:var(--muted)}
+  .fl-field input{background:var(--bg-2);border:1px solid var(--line-2);border-radius:9px;color:inherit;padding:10px 12px;font:inherit}
+  .fl-field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+
+  /* warning/heads-up box (amber, semantic) */
+  .fl-warn-box{display:flex;gap:12px;align-items:flex-start;background:rgba(224,166,74,.08);border:1px solid rgba(224,166,74,.4);border-radius:12px;padding:14px 16px;margin:6px 0 4px;color:#e7d3a8;font-size:13.5px;line-height:1.55}
+  .fl-warn-box .fl-tag{flex:none;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--bg);background:#e0a64a;border-radius:999px;padding:3px 9px;margin-top:1px}
+  .fl-warn{color:#e0a64a}
+
+  /* status lines under install / configure */
+  .fl-status{margin:14px 0 2px;padding:11px 14px;border-radius:10px;font-size:14px;line-height:1.5}
+  .fl-status.ok{background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);color:color-mix(in srgb,var(--accent) 85%,white)}
+  .fl-status.err{background:rgba(224,118,74,.1);border:1px solid rgba(224,118,74,.45);color:#f0a988}
+  .fl-status.info{background:var(--bg-2);border:1px solid var(--line);color:var(--muted)}
+
+  /* ── finished step ────────────────────────────────────────────────── */
+  .fl-done{text-align:center;padding:8px 0 4px}
+  .fl-done-badge{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;margin:0 auto 16px;font-size:30px;color:var(--accent-ink);background:var(--accent);box-shadow:0 0 0 8px color-mix(in srgb,var(--accent) 16%,transparent),0 10px 40px -12px var(--accent)}
+  .fl-done h2{margin:0 0 8px}
+  .fl-done .fl-lead{margin:0 auto;text-align:center}
+  .fl-done-doc{margin-top:20px}
+
+  /* ── unstable banner (amber, semantic) ────────────────────────────── */
+  .fl-unstable{display:flex;gap:12px;align-items:flex-start;background:rgba(224,166,74,.09);border:1px solid rgba(224,166,74,.4);border-radius:12px;padding:14px 16px;margin:18px 0 2px;color:#e7d3a8;font-size:14px;line-height:1.55}
+  .fl-unstable .fl-tag{flex:none;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--bg);background:#e0a64a;border-radius:999px;padding:3px 9px;margin-top:1px}
 </style>
 </head>
 <body>
@@ -766,50 +901,89 @@ function flashPage(builds) {
       <p class="sec-intro">${esc(F.intro)}</p>
     </header>
 
-    <div class="fl-card">
-      <h2>1 · Install</h2>
-      <p class="dl-rec">${esc(F.requirements)}</p>
-      <div class="fl-actions">${installer}</div>
-      <div class="fl-builds">${buildRows}</div>
-    </div>
+    <div class="fl-unstable" role="note"><span class="fl-tag">Unstable</span><span>${esc(F.unstable)}</span></div>
 
-    <div class="fl-card">
-      <h2>2 · Configure over USB</h2>
-      <p class="dl-rec">After flashing, connect to set Wi-Fi and confirm the DAC + encoder pins. Defaults match the wiring guide.</p>
-      <div class="fl-actions">
-        <button class="btn btn-solid" id="fl-connect" type="button">Connect</button>
-        <button class="btn btn-ghost" id="fl-load" type="button" disabled>Load current</button>
-        <button class="btn btn-ghost" id="fl-tone" type="button" disabled>Test tone</button>
-        <button class="btn btn-ghost" id="fl-reboot" type="button" disabled>Reboot</button>
-      </div>
-      <div id="fl-form" class="fl-disabled">
-        <div class="fl-grid">
-          <div class="fl-field"><label>Player name</label><input id="cf-name" placeholder="e.g. kitchen" /></div>
-          <div class="fl-field"><label>Wi-Fi SSID (2.4 GHz)</label><input id="cf-wifi_ssid" /></div>
-          <div class="fl-field"><label>Wi-Fi password</label><input id="cf-wifi_pass" type="password" placeholder="(unchanged)" /></div>
-        </div>
-        <div class="fl-grid">
-          <div class="fl-field"><label>I2S BCK</label><input id="cf-i2s_bclk" type="number" /></div>
-          <div class="fl-field"><label>I2S LCK</label><input id="cf-i2s_lrck" type="number" /></div>
-          <div class="fl-field"><label>I2S DIN</label><input id="cf-i2s_dout" type="number" /></div>
-          <div class="fl-field"><label>I2S MCLK (-1 = none)</label><input id="cf-i2s_mclk" type="number" /></div>
-          <div class="fl-field"><label>Encoder CLK</label><input id="cf-enc_a" type="number" /></div>
-          <div class="fl-field"><label>Encoder DT</label><input id="cf-enc_b" type="number" /></div>
-          <div class="fl-field"><label>Encoder SW</label><input id="cf-enc_sw" type="number" /></div>
-          <div class="fl-field"><label>DAC</label><select id="cf-dac"><option value="0">PCM5102A (sw gain)</option><option value="1">PCM5122 (I2C)</option></select></div>
-          <div class="fl-field"><label>Codec pref</label><select id="cf-codec"><option value="0">opus</option><option value="1">pcm</option></select></div>
-          <div class="fl-field"><label>Buffer ms</label><input id="cf-buffer_ms" type="number" /></div>
-          <div class="fl-field"><label>Control port</label><input id="cf-control_port" type="number" /></div>
-        </div>
-        <div class="fl-actions"><button class="btn btn-solid" id="fl-save" type="button">Save to device</button></div>
-      </div>
-      <div class="fl-log" id="fl-log">Not connected.</div>
-    </div>
+    <ol class="fl-steps" id="fl-steps">${stepChips}</ol>
 
-    <div class="fl-card">
-      <h2>What you need</h2>
-      <ul class="dl-rec">${bom}</ul>
-      <ol class="steps" style="margin-top:14px">${steps}</ol>
+    <div class="fl-wizard">
+      <!-- Step 1 — select board -->
+      <section class="fl-step" data-step="board">
+        <h2>${esc(F.board.title)}</h2>
+        <p class="fl-lead">${esc(F.board.body)}</p>
+        <div class="fl-board-row" role="radiogroup" aria-label="${esc(F.board.title)}">
+          ${boardCards}
+        </div>
+        <div class="fl-build" id="fl-build" hidden></div>
+        <details class="fl-bom">
+          <summary>${esc(F.bom.title)}</summary>
+          <ul>${bom}</ul>
+        </details>
+        <div class="fl-foot">
+          <span></span>
+          <div class="fl-foot-r">
+            <button class="btn btn-solid fl-next" data-go="install" id="fl-next-board" disabled>${esc(F.board.next)} <span class="arrow">→</span></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 2 — install -->
+      <section class="fl-step" data-step="install" hidden>
+        <h2>${esc(F.install.title)}</h2>
+        <p class="fl-lead">${esc(F.install.requirements)}</p>
+        <div class="fl-build" id="fl-build-2"></div>
+        <label class="fl-check">
+          <input type="checkbox" id="fl-fresh" checked />
+          <span><strong>${esc(F.install.fresh.label)}</strong> — ${esc(F.install.fresh.note)}</span>
+        </label>
+        <div class="fl-status" id="fl-install-status" hidden></div>
+        <div class="fl-foot">
+          <button class="btn btn-ghost btn-back fl-back" data-go="board" type="button"><span class="arrow">←</span> Back</button>
+          <div class="fl-foot-r">
+            <esp-web-install-button id="fl-install">
+              <button class="btn btn-solid" slot="activate">${esc(F.install.action)} <span class="arrow">↧</span></button>
+              <span slot="unsupported" class="fl-warn">This browser can’t flash — use Chrome or Edge on desktop.</span>
+              <span slot="not-allowed" class="fl-warn">Flashing needs a secure (https) page.</span>
+            </esp-web-install-button>
+            <button class="btn btn-ghost fl-next" data-go="provision" id="fl-next-install" disabled>${esc(F.install.next)} <span class="arrow">→</span></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 3 — provision -->
+      <section class="fl-step" data-step="provision" hidden>
+        <h2>${esc(F.provision.title)}</h2>
+        <p class="fl-lead">${esc(F.provision.body)}</p>
+        <div class="fl-warn-box" role="note"><span class="fl-tag">Heads up</span><span>${esc(F.provision.warning)}</span></div>
+        <div class="fl-grid">
+          <div class="fl-field"><label for="cf-name">${esc(F.provision.fields.name.label)}</label><input id="cf-name" placeholder="${esc(F.provision.fields.name.placeholder)}" autocomplete="off" /></div>
+          <div class="fl-field"><label for="cf-wifi_ssid">${esc(F.provision.fields.ssid.label)}</label><input id="cf-wifi_ssid" placeholder="${esc(F.provision.fields.ssid.placeholder)}" autocomplete="off" /></div>
+          <div class="fl-field"><label for="cf-wifi_pass">${esc(F.provision.fields.pass.label)}</label><input id="cf-wifi_pass" type="password" placeholder="${esc(F.provision.fields.pass.placeholder)}" autocomplete="off" /></div>
+        </div>
+        <div class="fl-status" id="fl-cfg-status" hidden></div>
+        <div class="fl-foot">
+          <button class="btn btn-ghost btn-back fl-back" data-go="install" type="button"><span class="arrow">←</span> Back</button>
+          <div class="fl-foot-r">
+            <button class="btn btn-solid" id="fl-configure" type="button" disabled>${esc(F.provision.action)}</button>
+            <button class="btn btn-ghost fl-next" data-go="finished" id="fl-next-provision" disabled>${esc(F.provision.next)} <span class="arrow">→</span></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 4 — finished -->
+      <section class="fl-step" data-step="finished" hidden>
+        <div class="fl-done">
+          <div class="fl-done-badge" aria-hidden="true">✓</div>
+          <h2>${esc(F.finished.title)}</h2>
+          <p class="fl-lead">${esc(F.finished.body)}</p>
+          <a id="fl-doc-link" class="btn btn-ghost fl-done-doc" href="${esc(F.docHref)}" rel="noopener">${esc(F.finished.docLink)} <span class="arrow">→</span></a>
+        </div>
+        <div class="fl-foot">
+          <button class="btn btn-ghost btn-back fl-back" data-go="provision" type="button"><span class="arrow">←</span> Back</button>
+          <div class="fl-foot-r">
+            <a class="btn btn-solid" href="index.html">Done</a>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div class="dl-links">
@@ -833,32 +1007,115 @@ function flashPage(builds) {
 
 <script>
 (function () {
-  // Provision the node over Web Serial using the firmware's line-JSON protocol
-  // (docs/developer/esp32.md §6.2): {"cmd":"get|set|test|reboot"}. Chrome/Edge only.
-  var FIELDS = ["name","wifi_ssid","i2s_bclk","i2s_lrck","i2s_dout","i2s_mclk",
-    "enc_a","enc_b","enc_sw","dac","codec","buffer_ms","control_port"];
-  var NUM = ["i2s_bclk","i2s_lrck","i2s_dout","i2s_mclk","enc_a","enc_b","enc_sw","dac","codec","buffer_ms","control_port"];
-  var port, writer, buf = "", waiters = [];
-  var logEl = document.getElementById("fl-log");
-  function log(m){ logEl.textContent = (logEl.textContent + "\\n" + m).split("\\n").slice(-40).join("\\n"); logEl.scrollTop = logEl.scrollHeight; }
   function $(id){ return document.getElementById(id); }
-  function setEnabled(on){
-    ["fl-load","fl-tone","fl-reboot"].forEach(function(i){ $(i).disabled = !on; });
-    $("fl-form").classList.toggle("fl-disabled", !on);
+  var BOARDS = {};
+  (${boardJson}).forEach(function(b){ BOARDS[b.id] = b; });
+  var MSG = ${msgJson};
+  var ORDER = ["board","install","provision","finished"];
+  var selected = null;
+
+  // ── wizard navigation ─────────────────────────────────────────────────
+  // One panel visible at a time; the stepper chips track current/done. Forward
+  // moves are gated by per-step "next" buttons that JS only enables once that
+  // step's condition is met, so you can't skip ahead.
+  var panels = {}, chips = {};
+  ORDER.forEach(function(id){
+    panels[id] = document.querySelector('.fl-step[data-step="' + id + '"]');
+    chips[id]  = document.querySelector('.fl-step-chip[data-step="' + id + '"]');
+  });
+  function show(id){
+    var ci = ORDER.indexOf(id);
+    ORDER.forEach(function(s, i){
+      panels[s].hidden = s !== id;
+      chips[s].classList.toggle("is-current", i === ci);
+      chips[s].classList.toggle("is-done", i < ci);
+    });
+    var top = $("fl-steps");
+    if (top && top.scrollIntoView) top.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+  [].forEach.call(document.querySelectorAll(".fl-next,.fl-back"), function(btn){
+    btn.addEventListener("click", function(){ if (!btn.disabled) show(btn.getAttribute("data-go")); });
+  });
+
+  // ── step 1: board picker ──────────────────────────────────────────────
+  var install = $("fl-install");
+  var cards = [].slice.call(document.querySelectorAll(".fl-board-card"));
+  function buildMeta(b){
+    var head = "<strong>" + b.label + "</strong> <span class='fl-muted'>" + b.note + "</span>";
+    if (b.present)
+      return head + "<div class='fl-build-meta'><code>" + b.file + "</code> <span class='fl-ok'>staged</span> <span class='fl-muted'>" + b.size + "</span> <code class='fl-sha'>" + b.hash + "</code></div>";
+    return head + "<div class='fl-build-meta'><code>" + b.file + "</code> <span class='fl-no'>not built</span> <span class='fl-muted'>— " + MSG.notBuilt + b.id + ".</span></div>";
+  }
+  // Point ESP Web Tools at the fresh-erase or keep-settings manifest per toggle.
+  function applyManifest(){
+    if (!selected || !selected.present) return;
+    install.setAttribute("manifest", $("fl-fresh").checked ? selected.manifest : selected.manifestKeep);
+  }
+  function pick(id){
+    var b = BOARDS[id];
+    if (!b) return;
+    selected = b;
+    cards.forEach(function(c){ var on = c.getAttribute("data-id") === id; c.classList.toggle("is-active", on); c.setAttribute("aria-checked", on ? "true" : "false"); });
+    var m1 = $("fl-build"); m1.hidden = false; m1.innerHTML = buildMeta(b);
+    $("fl-build-2").innerHTML = buildMeta(b);
+    var doc = $("fl-doc-link");
+    if (b.doc){ doc.href = b.doc; doc.hidden = false; } else { doc.hidden = true; }
+    install.style.display = b.present ? "" : "none";
+    applyManifest();
+    // Re-arm the install gate whenever the board changes.
+    flashStatus(null);
+    $("fl-next-install").disabled = true;
+    $("fl-next-board").disabled = !b.present;   // can't flash a board with no image
+  }
+  cards.forEach(function(c){ c.addEventListener("click", function(){ pick(c.getAttribute("data-id")); }); });
+  $("fl-fresh").addEventListener("change", applyManifest);
+
+  // ── step 2: detect flash success ──────────────────────────────────────
+  // ESP Web Tools runs in its own dialog appended to <body>; it exposes no
+  // completion event, so we watch the dialog's reflected "state" attribute.
+  // ERROR ⇒ failure. Otherwise, once it has entered INSTALL and then closes we
+  // treat it as done (DASHBOARD looks identical before and after a flash, so the
+  // INSTALL→close round-trip is the most reliable success signal we get). A
+  // dialog dismissed without ever installing falls back to a neutral prompt that
+  // still lets you continue — we never trap the user behind a missed signal.
+  var sawInstall = false, sawError = false;
+  function flashStatus(kind){
+    var el = $("fl-install-status");
+    if (!kind){ el.hidden = true; el.className = "fl-status"; el.textContent = ""; return; }
+    el.hidden = false;
+    el.className = "fl-status " + (kind === "error" ? "err" : kind === "ok" ? "ok" : "info");
+    el.textContent = kind === "error" ? MSG.flashErr : kind === "ok" ? MSG.flashOk : MSG.flashUnknown;
+    if (kind !== "error") $("fl-next-install").disabled = false;   // unlock "Configure →"
+  }
+  function watchDialog(dlg){
+    sawInstall = false; sawError = false; flashStatus(null);
+    function read(){ var s = dlg.getAttribute("state"); if (s === "INSTALL") sawInstall = true; else if (s === "ERROR") sawError = true; }
+    read();
+    new MutationObserver(read).observe(dlg, { attributes: true, attributeFilter: ["state"] });
+  }
+  function isDialog(n){ return n.nodeName && n.nodeName.toLowerCase() === "ewt-install-dialog"; }
+  new MutationObserver(function(muts){
+    muts.forEach(function(m){
+      [].forEach.call(m.addedNodes, function(n){ if (isDialog(n)) watchDialog(n); });
+      [].forEach.call(m.removedNodes, function(n){ if (isDialog(n)) flashStatus(sawError ? "error" : sawInstall ? "ok" : "unknown"); });
+    });
+  }).observe(document.body, { childList: true });
+
+  // ── step 3: provision over Web Serial ─────────────────────────────────
+  // Line-JSON protocol (docs/developer/esp32.md §6.2): {"cmd":"set|reboot"}. The
+  // board bakes in its own pins/DAC, so we only push name + Wi-Fi, one direction.
+  var port, writer, buf = "", waiters = [];
+  function cfgCheck(){ $("fl-configure").disabled = !($("cf-name").value.trim() && $("cf-wifi_ssid").value.trim()); }
+  ["cf-name","cf-wifi_ssid"].forEach(function(id){ $(id).addEventListener("input", cfgCheck); });
+  function cfgStatus(kind, msg){ var el = $("fl-cfg-status"); el.hidden = false; el.className = "fl-status " + kind; el.textContent = msg; }
 
   function send(obj){
     var line = JSON.stringify(obj) + "\\n";
     return writer.write(new TextEncoder().encode(line)).then(function(){
-      return new Promise(function(res){ waiters.push(res); setTimeout(function(){ var i=waiters.indexOf(res); if(i>=0){waiters.splice(i,1); res(null);} }, 3000); });
+      return new Promise(function(res){ waiters.push(res); setTimeout(function(){ var i = waiters.indexOf(res); if (i >= 0){ waiters.splice(i,1); res(null); } }, 3000); });
     });
   }
-  function onLine(line){
-    line = line.trim(); if(!line) return;
-    var obj; try { obj = JSON.parse(line); } catch(e){ return; } // ignore log noise
-    log("← " + line);
-    var w = waiters.shift(); if (w) w(obj);
-  }
+  function onLine(line){ line = line.trim(); if (!line) return; var obj; try { obj = JSON.parse(line); } catch(e){ return; } var w = waiters.shift(); if (w) w(obj); }
   async function readLoop(){
     var dec = new TextDecoderStream();
     port.readable.pipeTo(dec.writable).catch(function(){});
@@ -871,43 +1128,31 @@ function flashPage(builds) {
       while ((nl = buf.indexOf("\\n")) >= 0) { onLine(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
     }
   }
-
-  $("fl-connect").addEventListener("click", async function(){
-    if (!navigator.serial) { log("Web Serial unavailable — use Chrome or Edge on desktop."); return; }
+  $("fl-configure").addEventListener("click", async function(){
+    if (!navigator.serial){ cfgStatus("err", "Web Serial unavailable — use Chrome or Edge on desktop."); return; }
+    cfgStatus("info", "Connecting over USB…");
     try {
-      port = await navigator.serial.requestPort();
-      await port.open({ baudRate: 115200 });
-      writer = port.writable.getWriter();
-      readLoop();
-      setEnabled(true);
-      log("connected. Click “Load current”.");
-    } catch(e){ log("connect failed: " + e.message); }
+      if (!port){
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        writer = port.writable.getWriter();
+        readLoop();
+      }
+      // Only send filled fields, so a blank box never clobbers a stored value.
+      var cfg = {};
+      var name = $("cf-name").value.trim(); if (name) cfg.name = name;
+      var ssid = $("cf-wifi_ssid").value.trim(); if (ssid) cfg.wifi_ssid = ssid;
+      var pass = $("cf-wifi_pass").value; if (pass) cfg.wifi_pass = pass;
+      var r = await send({ cmd: "set", cfg: cfg });
+      if (r && r.ok){
+        cfgStatus("ok", MSG.cfgOk);
+        $("fl-next-provision").disabled = false;   // unlock "Finish →"
+        send({ cmd: "reboot" });                    // apply Wi-Fi + join the LAN
+      } else {
+        cfgStatus("err", MSG.cfgErr + (r && r.err ? " (" + r.err + ")" : ""));
+      }
+    } catch(e){ cfgStatus("err", "Connect/save failed: " + e.message); }
   });
-
-  $("fl-load").addEventListener("click", async function(){
-    log("→ get");
-    var r = await send({ cmd: "get" });
-    if (!r || !r.cfg) { log("no response"); return; }
-    var c = r.cfg;
-    FIELDS.forEach(function(k){ if (k in c && $("cf-"+k)) $("cf-"+k).value = c[k]; });
-    if ("wifi_ssid" in c) $("cf-wifi_ssid").value = c.wifi_ssid || "";
-    $("cf-wifi_pass").value = "";
-    log("loaded id=" + (c.id || "?"));
-  });
-
-  $("fl-save").addEventListener("click", async function(){
-    var cfg = {};
-    FIELDS.forEach(function(k){ var el=$("cf-"+k); if(!el) return; var v=el.value;
-      cfg[k] = NUM.indexOf(k)>=0 ? parseInt(v,10) : v; });
-    var ssid = $("cf-wifi_ssid").value; if (ssid) cfg.wifi_ssid = ssid;
-    var pass = $("cf-wifi_pass").value; if (pass) cfg.wifi_pass = pass;
-    log("→ set");
-    var r = await send({ cmd: "set", cfg: cfg });
-    log(r && r.ok ? "saved ✓" : ("save failed: " + (r && r.err ? r.err : "?")));
-  });
-
-  $("fl-tone").addEventListener("click", async function(){ log("→ test tone"); var r = await send({cmd:"test",what:"tone"}); log(r&&r.ok?"tone done":"tone failed"); });
-  $("fl-reboot").addEventListener("click", async function(){ log("→ reboot"); send({cmd:"reboot"}); });
 })();
 </script>
 </body>
@@ -935,15 +1180,41 @@ async function main() {
   const dl = downloadPage(downloads);
   await fs.writeFile(path.join(OUT, "download.html"), dl);
 
-  // Flasher page + ESP Web Tools manifest. The merged firmware images (if staged)
-  // are copied by copyDir(assets); here we just emit flash.html + manifest.json.
+  // Flasher page + one ESP Web Tools manifest per board (manifest-<id>.json). Each
+  // present board's merged image is copied into ./dist here — resolveFirmware may
+  // have found it under src/assets/firmware/ OR a local esp32/build-<id>/, so we
+  // copy from wherever it resolved rather than relying on copyDir(assets) alone.
   const firmware = await resolveFirmware();
   await fs.writeFile(path.join(OUT, "flash.html"), flashPage(firmware));
-  await fs.mkdir(path.join(OUT, "assets", "firmware"), { recursive: true });
-  await fs.writeFile(
-    path.join(OUT, "assets", "firmware", "manifest.json"),
-    JSON.stringify(firmwareManifest(firmware), null, 2)
-  );
+  const fwOut = path.join(OUT, "assets", "firmware");
+  await fs.mkdir(fwOut, { recursive: true });
+  const imgOut = path.join(OUT, "assets", "img");
+  await fs.mkdir(imgOut, { recursive: true });
+  for (const b of firmware) {
+    // Fresh-install (full erase) + keep-settings (prompt) manifest per board.
+    await fs.writeFile(
+      path.join(fwOut, `manifest-${b.id}.json`),
+      JSON.stringify(firmwareManifest(b, true), null, 2)
+    );
+    await fs.writeFile(
+      path.join(fwOut, `manifest-${b.id}-keep.json`),
+      JSON.stringify(firmwareManifest(b, false), null, 2)
+    );
+    if (b.present) await fs.copyFile(b.src, path.join(fwOut, b.file.split("/").pop()));
+    // The board's photo lives next to its sheet under esp32/devices/ — single
+    // source of truth — so copy it into the site like the firmware image.
+    for (const [srcName, dest] of [[b.imgSrc, b.img]]) {
+      if (!srcName || !dest) continue;
+      try {
+        await fs.copyFile(
+          path.join(root, "..", "esp32", "devices", srcName),
+          path.join(imgOut, dest.split("/").pop())
+        );
+      } catch {
+        // asset not present in the repo yet — the page degrades gracefully
+      }
+    }
+  }
 
   // Serve the installer at /get.sh (the "curl … | sudo bash" one-liner). Source of
   // truth is ../scripts/get.sh; the CI docker-site job stages a copy to site/get.sh

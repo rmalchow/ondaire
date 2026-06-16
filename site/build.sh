@@ -26,6 +26,20 @@ for bin in "$repo"/bin/ensemble-linux-*; do
   rm -rf "$tmp"
 done
 
+# Stage any ESP32 firmware images already built locally (esp32/build-<board>/) so
+# the flasher in ./dist actually works — mirrors the CI docker-site job, which
+# stages fw/ensemble-fw-*.bin the same way. Build an image first with, e.g.,
+# `esp32/build.sh esp32s3-supermini`; if none exist the flasher just shows
+# "not built" for that board. (build.mjs also falls back to esp32/build-<id>/.)
+fw="$here/src/assets/firmware"
+mkdir -p "$fw"
+rm -f "$fw"/ensemble-fw-*.bin
+shopt -s nullglob
+for bin in "$repo"/esp32/build-*/ensemble-fw-*.bin; do
+  cp "$bin" "$fw/$(basename "$bin")"
+done
+shopt -u nullglob
+
 cd "$here"
 ENSEMBLE_VERSION="${ENSEMBLE_VERSION:-$(git -C "$repo" describe --tags --always 2>/dev/null || echo dev)}" \
   node build.mjs

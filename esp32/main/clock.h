@@ -30,4 +30,11 @@ void     clock_on_reply(uint32_t gen, uint64_t seq, int64_t t2, int64_t t3, int6
 // Current estimate. Returns false (unsynced) until >=1 sample exists.
 bool     clock_offset(int64_t *offset_ns);
 bool     clock_master_to_local(int64_t master_ns, int64_t *local_ns);
+
+// Offset for TELEMETRY/UI: the raw offset is master_ns - local_ns, which on the
+// MCU is dominated by the boot-vs-epoch gap (esp_timer is boot-relative; the
+// master stamps wall-clock epoch) — ~1.8e18 ns, useless and incomparable to the
+// NTP-disciplined Go nodes. This anchors at the first confident lock and reports
+// the DRIFT since then (small, meaningful). Playout still uses clock_offset().
+bool     clock_offset_reported(int64_t *offset_ns);
 int64_t  clock_best_rtt_ns(void);       // smallest RTT in the window (0 if none)

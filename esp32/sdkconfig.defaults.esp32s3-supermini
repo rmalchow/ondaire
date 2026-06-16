@@ -1,0 +1,22 @@
+# ESP32-S3 Super Mini (22.5x18mm USB-C). Same S3 silicon as the DevKitC, so the
+# console is the built-in USB-Serial-JTAG CDC (no external UART bridge) — exactly
+# what the web flasher's Improv + JSON config talk over.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Console + stdio over the built-in USB-Serial-JTAG CDC port.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Board selection (boards/board.h + default pin map).
+CONFIG_ENSEMBLE_BOARD_ESP32S3_SUPERMINI=y
+
+# PSRAM: the player target is the ESP32-S3FH4R2 variant (2 MB embedded quad
+# PSRAM) — see docs/developer/esp32.md §3.1 (players are PSRAM-only). QUAD mode,
+# auto-size. IGNORE_NOTFOUND lets the bare no-PSRAM Super Mini still boot as a
+# bench build instead of aborting in the bootloader.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y

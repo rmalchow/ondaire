@@ -348,14 +348,16 @@ export const content = {
     title: "Get ensemble for your hardware.",
     intro:
       "One small, static binary per device — pure Go, no runtime, no dependencies. Each archive is the build attached to the matching tagged release: verify its SHA-256, unpack it, and run ./ensemble. Prefer containers? Pull the master image with Spotify Connect built in.",
-    // Teaser for the (in-progress) hardware-player support. This block will
-    // eventually be the entry point to the browser flasher (flash.html); no link
-    // yet — the firmware isn't conformant. See docs/developer/esp32.md + docs/developer/player-protocol.md.
+    // Teaser + entry point to the browser flasher (flash.html). ESP32 support is
+    // marked Unstable (bring-up): the flasher is live, but the firmware can still
+    // change. See docs/developer/esp32.md + docs/developer/player-protocol.md.
     esp32: {
-      badge: "Coming soon",
-      title: "ESP32 players — support in progress",
+      badge: "Unstable",
+      title: "ESP32 players — experimental",
       body:
-        "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ensemble player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Supported boards are PSRAM ESP32s: ESP32-S3 (e.g. the ESP32-S3-DevKitC-1, or the tiny Waveshare ESP32-S3-Zero) and the classic ESP32-WROVER. The browser flasher will land right here soon.",
+        "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ensemble player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Support is still in bring-up, so expect rough edges. Tested on the ESP32-S3 Super Mini (PSRAM version) with a PCM5102A DAC.",
+      href: "flash.html",
+      hrefLabel: "Open the browser flasher",
     },
     // Guided installer (scripts/get.sh) — the fastest path onto a Linux box.
     // Rendered after the ESP32 teaser, before the per-arch download cards.
@@ -486,39 +488,110 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
   // The browser web-flasher page (flash.html). ESP Web Tools detects the chip
   // and flashes the matching merged firmware from `firmware.builds`; the custom
   // panel then provisions Wi-Fi + I2S/encoder over Web Serial (no toolchain).
+  // The browser web-flasher is a four-step wizard — one panel visible at a time:
+  // (1) select board → (2) install → (3) provision → (4) finished. Each step's
+  // "next" button stays disabled until that step's gate is met (board picked,
+  // flash succeeded, fields filled, config saved).
   flash: {
     eyebrow: "Build a node",
     title: "Flash a DIY speaker, right from your browser.",
+    // Shown as a prominent banner at the top of the flasher: ESP32 support is
+    // bring-up, not release-grade. The download page teaser links here with the
+    // same "Unstable" framing.
+    unstable:
+      "ESP32 support is unstable. The firmware is still in bring-up — it works, but expect rough edges, and the wiring, pins, and protocol can still change between releases.",
     intro:
-      "Turn an ESP32 + an I2S DAC into a real ensemble player — it shows up in the cluster, joins any group, and plays in lock-step like every other room. No toolchain, no app: plug it in over USB-C in Chrome or Edge, click Install, then set your Wi-Fi and pins. Receive-only, opus over Wi-Fi.",
-    requirements:
-      "Needs Chrome or Edge on desktop (Web Serial). Plug the board in via USB-C. First flash on an S2/S3 may need download mode: hold BOOT, tap RESET, release BOOT — the installer will tell you.",
-    install: { label: "Install firmware", note: "ESP Web Tools picks the right build for your chip automatically." },
+      "Turn an ESP32 + an I2S DAC into a real ensemble player — it shows up in the cluster, joins any group, and plays in lock-step like every other room. No toolchain, no app: plug it in over USB-C in Chrome or Edge, flash it, then set your Wi-Fi. Receive-only, opus over Wi-Fi.",
+    // Progress header — one chip per wizard step.
+    wizard: [
+      { id: "board", label: "Select board" },
+      { id: "install", label: "Install" },
+      { id: "provision", label: "Provision" },
+      { id: "finished", label: "Finished" },
+    ],
+    // Step 1 — board picker. Nothing downstream unlocks until a board is chosen.
+    board: {
+      title: "Select your board",
+      body: "Pick the board you’re flashing — the firmware bakes in that board’s pins and DAC wiring, so the only thing left to set later is your Wi-Fi.",
+      next: "Connect",
+    },
     bom: {
       title: "What you need",
       items: [
         "A PSRAM-equipped ESP32 board — an ESP32-S3 (DevKitC-1 or Waveshare S3-Zero) or a classic ESP32-WROVER.",
         "A PCM5102A I2S DAC (the common purple GY-PCM5102 module).",
         "A KY-040 / EC11 rotary encoder for local volume (optional).",
-        "Wiring + pinouts live in the repo under esp32/devices/.",
+        "A USB-C cable and Chrome or Edge on desktop.",
       ],
     },
-    steps: [
-      { n: "1", title: "Plug in & install", body: "Connect the board over USB-C, click Install, and wait for the flash to finish." },
-      { n: "2", title: "Set Wi-Fi", body: "Connect over serial and enter your 2.4 GHz network — credentials are written straight to the device." },
-      { n: "3", title: "Confirm wiring", body: "Set the I2S and encoder pins (defaults match the wiring guide), then hit Test tone to verify the DAC." },
-      { n: "4", title: "Reboot & play", body: "The node joins the LAN, the cluster discovers it, and it’s assignable to any group. Turn the knob for volume." },
-    ],
+    // Step 2 — install. ESP Web Tools detects the chip and flashes the merged
+    // image; the "fresh install" toggle swaps which manifest the installer uses.
+    install: {
+      title: "Install the firmware",
+      requirements:
+        "Plug the board in over USB-C. First flash on an S2/S3 may need download mode: hold BOOT, tap RESET, release BOOT — then click Flash. Needs Chrome or Edge on desktop (Web Serial).",
+      fresh: {
+        label: "Fresh install",
+        note: "Erases the whole chip and writes a clean image — recommended. Uncheck to keep an existing node’s Wi-Fi and name when re-flashing.",
+      },
+      action: "Flash",
+      next: "Configure",
+      okMsg: "Flashed successfully — continue to configuration.",
+      errMsg:
+        "Flashing didn’t finish. Check the USB-C cable, try download mode (hold BOOT, tap RESET, release BOOT), then flash again.",
+      unknownMsg: "When the installer reports it’s done, continue to configuration.",
+    },
+    // Step 3 — provision. Name + Wi-Fi written straight to the device over serial.
+    // No "load from device": one direction only, to keep the step focused.
+    provision: {
+      title: "Configure your node",
+      body: "Give the node a name and join it to your Wi-Fi. Settings are written straight to the device over USB — no app, no account.",
+      warning:
+        "ESP32 joins 2.4 GHz Wi-Fi only. If your router uses band steering (one shared name for the 2.4 and 5 GHz bands), give the 2.4 GHz band its own SSID if you can — otherwise the node may keep trying the 5 GHz radio and fail to connect.",
+      fields: {
+        name: { label: "Node name", placeholder: "e.g. kitchen" },
+        ssid: { label: "Wi-Fi SSID (2.4 GHz)", placeholder: "your-network" },
+        pass: { label: "Wi-Fi password", placeholder: "network password" },
+      },
+      action: "Configure",
+      next: "Finish",
+      okMsg: "Saved — the node is rebooting and will join your network.",
+      errMsg: "Couldn’t save. Reconnect over USB-C and try again.",
+    },
+    // Step 4 — finished. Congratulations + a link to the board's page (wiring,
+    // pinouts, build notes) in the repo.
+    finished: {
+      title: "You’ve flashed an ensemble node.",
+      body: "It’ll appear in the cluster within a few seconds, ready to join any group and play in lock-step with every other room. Wire up the PCM5102A DAC using the board’s guide, and turn the encoder for local volume.",
+      docLink: "Wiring & board guide",
+    },
     docHref: `${REPO}/-/blob/main/docs/developer/esp32.md`,
     docLabel: "Firmware & hardware guide",
   },
 
-  // Firmware builds offered by the flasher. Each `file` is resolved at build
-  // time (build.mjs resolveFirmware) into the ESP Web Tools manifest + SHA-256.
+  // Boards offered by the flasher, one entry per flashable board. Each is its own
+  // dropdown option; selecting it reveals the board photo + the matching ESP Web
+  // Tools manifest. `file` is resolved at build time (build.mjs resolveFirmware)
+  // into a per-board manifest (manifest-<id>.json) + SHA-256. `id` must match the
+  // esp32 board profile (esp32/boards/ + sdkconfig.defaults.<id>) so the locally
+  // built merged image (esp32/build-<id>/ensemble-fw-<id>.bin) lines up.
   firmware: {
     manifestName: "ensemble player",
     builds: [
-      { chipFamily: "ESP32-S3", label: "ESP32-S3", note: "ESP32-S3-WROOM-1 / DevKitC-1 (PSRAM)", file: "assets/firmware/ensemble-fw-esp32s3.bin" },
+      {
+        id: "esp32s3-supermini",
+        chipFamily: "ESP32-S3",
+        label: "ESP32-S3 Super Mini (PSRAM version)",
+        note: "Dual-core ESP32-S3 + 2 MB PSRAM, native USB-C. Pair with a PCM5102A I2S DAC.",
+        // Board photo (front + back) — canonical copy lives next to the board's
+        // sheet in esp32/devices/; build.mjs copies it into the site like `wiring`.
+        img: "assets/img/esp32-s3-super-mini.jpg",
+        imgSrc: "esp32-s3-super-mini.jpg",
+        // The board's own page in the repo (wiring, pinouts, build notes). Since the
+        // flasher knows the selected board, the finished step links straight to it.
+        doc: `${REPO}/-/blob/main/esp32/devices/esp32-s3-super-mini.md`,
+        file: "assets/firmware/ensemble-fw-esp32s3-supermini.bin",
+      },
     ],
   },
 

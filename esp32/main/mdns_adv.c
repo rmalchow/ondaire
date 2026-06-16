@@ -6,8 +6,30 @@
 #include <string.h>
 #include "esp_log.h"
 #include "mdns.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "mdns";
+
+// ESP-IDF mDNS fully announces (PTR+SRV+TXT+A) on registration and on any service
+// change, but the control-plane master browses with grandcat/zeroconf, which
+// catches that announcement yet does NOT re-derive an ESP-IDF service from its
+// periodic PTR browse queries. So if the master (re)starts after we've already
+// booted, it never discovers us (avahi does — it caches the boot announce). Fix:
+// re-announce on a timer. mdns_service_port_set() re-announces WITH the A record
+// (include_ip=true) and without a goodbye, so a freshly started master picks us
+// up within one interval and existing ones don't see us flap.
+#define MDNS_REANNOUNCE_MS  30000
+
+static uint16_t s_control_port;
+
+static void reannounce_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(MDNS_REANNOUNCE_MS));
+        mdns_service_port_set("_ensemble", "_tcp", s_control_port);
+    }
+}
 
 bool mdns_adv_start(void) {
     ens_config_t *cfg = config_get();
@@ -32,15 +54,16 @@ bool mdns_adv_start(void) {
     snprintf(ctrl, sizeof ctrl, "%u", (unsigned)cfg->control_port);
     snprintf(rate, sizeof rate, "%u", (unsigned)WIRE_SAMPLE_RATE);
 
-    // opus only on the MCU (the Wi-Fi default; PCM frames don't fit the jitter
-    // slots). queue=0 in v1 (no clean APLL actuation → accept drift, §9). hwvol=0
-    // (software gain). input=0.
+    // Advertise both codecs: the jitter buffer holds full PCM frames in PSRAM and
+    // the TCP path carries them, so a PCM group works (opus stays preferred over
+    // Wi-Fi/UDP since raw PCM fragments past the MTU). queue=0 in v1 (no clean APLL
+    // actuation → accept drift, §9). hwvol=0 (software gain). input=0.
     mdns_txt_item_t txt[] = {
         { "id",      idhex },
         { "role",    "playback" },
         { "control", ctrl },
         { "name",    cfg->name },
-        { "codecs",  "opus" },
+        { "codecs",  "opus,pcm" },
         { "rate",    rate },
         { "hwvol",   "0" },
         { "delayms", "0" },
@@ -52,5 +75,9 @@ bool mdns_adv_start(void) {
     if (err != ESP_OK) { ESP_LOGE(TAG, "service_add failed: %s", esp_err_to_name(err)); return false; }
     ESP_LOGI(TAG, "advertising _ensemble._tcp host=%s.local control=%u id=%s name=%s",
              host, (unsigned)cfg->control_port, idhex, cfg->name);
+
+    // Periodic re-announce so a master that (re)starts after us still finds us.
+    s_control_port = cfg->control_port;
+    xTaskCreate(reannounce_task, "mdns_reann", 2560, NULL, 4, NULL);
     return true;
 }

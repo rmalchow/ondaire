@@ -78,5 +78,7 @@ int wire_status_encode(uint8_t *p, size_t cap, const wire_status_t *s) {
     put_u64(p + 63, s->late);
     put_u64(p + 71, (uint64_t)s->device_delay_ns);
     put_u64(p + 79, (uint64_t)s->phase_err_ns);
+    put_u64(p + 87, s->samples_injected);
+    put_u64(p + 95, s->samples_dropped);
     return WIRE_STATUS_LEN;
 }

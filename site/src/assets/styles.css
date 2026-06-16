@@ -1053,6 +1053,8 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
   background: color-mix(in srgb, var(--accent-2) 12%, transparent);
 }
 .dl-teaser-body { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
+/* Flasher link sits below the body copy, spaced off it and pushed to the right. */
+.dl-teaser .dl-link-btn { display: flex; width: max-content; margin: 18px 0 0 auto; }
 
 /* installer card (download page) — same box as a download card, with a copy cmd */
 .dl-doc {

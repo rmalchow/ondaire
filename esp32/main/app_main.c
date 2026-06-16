@@ -71,10 +71,11 @@ void app_main(void) {
 
     clock_init();
 
-    // Bring Wi-Fi up FIRST: its driver allocates large contiguous RX/TX buffers
-    // at init, so it must get first dibs on the heap — before the jitter buffer
-    // + opus decoder carve it up. (Doing player_init first OOMs the Wi-Fi init on
-    // the 320 KB S2: "malloc buffer fail / Expected to init N rx buffer".)
+    // Bring Wi-Fi up FIRST so its driver gets first dibs on contiguous internal
+    // RAM for the large RX/TX buffers it allocates at init (the jitter buffer now
+    // lives in PSRAM, so this is just good hygiene — it was load-bearing on the
+    // 320 KB no-PSRAM parts, where player_init first OOMed Wi-Fi: "malloc buffer
+    // fail / Expected to init N rx buffer").
     bool have_wifi = cfg->wifi_ssid[0] != '\0';
     if (have_wifi) netif_wifi_start(cfg->wifi_ssid, cfg->wifi_pass);
 

@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/CMakeFiles/bootloader
+/home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/CMakeFiles/bootloader.rule
+/home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/CMakeFiles/bootloader-complete.rule
+/home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/home/rm/Git/gitlab.rand0m.me/share/ensemble/esp32/tools/dac-tone/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule

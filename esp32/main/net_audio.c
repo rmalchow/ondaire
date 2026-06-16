@@ -120,7 +120,10 @@ static void dispatch(const uint8_t *buf, int nbytes, int64_t t4) {
 }
 
 // --- tasks ------------------------------------------------------------------
-static uint8_t s_rxbuf[2048];
+// Sized to hold a full raw-PCM frame + wire header on the length-prefixed TCP
+// path (3840 + 24 B). Opus datagrams are far smaller; this only lifts the cap
+// that the no-PSRAM RAM budget used to impose on the wired/bench PCM path.
+static uint8_t s_rxbuf[WIRE_FRAME_BYTES + 256];
 
 static void udp_read_task(void *arg) {
     (void)arg;

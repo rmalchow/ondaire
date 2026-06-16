@@ -776,6 +776,11 @@ function flashPage(builds) {
     cfgOk: F.provision.okMsg,
     cfgErr: F.provision.errMsg,
     notBuilt: "Firmware isn’t staged for this board — built by the CI firmware job, or run esp32/build.sh ",
+    noSerial: "Web Serial needs Chrome or Edge on desktop.",
+    connecting: "Connecting over USB…",
+    saving: "Saving configuration…",
+    noPort: "No serial port selected.",
+    consoleHint: "Connect over USB to watch the device boot.",
   }).replace(/</g, "\\u003c");
 
   return `<!doctype html>
@@ -866,6 +871,13 @@ function flashPage(builds) {
   .fl-warn-box .fl-tag{flex:none;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--bg);background:#e0a64a;border-radius:999px;padding:3px 9px;margin-top:1px}
   .fl-warn{color:#e0a64a}
 
+  /* serial console / boot-log terminal, revealed on flash + configure success */
+  .fl-console{margin:14px 0 2px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg)}
+  .fl-console-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;background:var(--bg-2);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .fl-console-connect{font:inherit;text-transform:none;letter-spacing:0;color:var(--accent);background:none;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:7px;padding:4px 10px;cursor:pointer}
+  .fl-console-connect:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+  .fl-log{margin:0;padding:12px;font-family:var(--mono);font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;color:#9aa3b2}
+
   /* status lines under install / configure */
   .fl-status{margin:14px 0 2px;padding:11px 14px;border-radius:10px;font-size:14px;line-height:1.5}
   .fl-status.ok{background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);color:color-mix(in srgb,var(--accent) 85%,white)}
@@ -936,6 +948,10 @@ function flashPage(builds) {
           <span><strong>${esc(F.install.fresh.label)}</strong> — ${esc(F.install.fresh.note)}</span>
         </label>
         <div class="fl-status" id="fl-install-status" hidden></div>
+        <div class="fl-console" id="fl-console-install" hidden>
+          <div class="fl-console-bar"><span>Console</span><button type="button" class="fl-console-connect" id="fl-connect-install" hidden>Connect over USB</button></div>
+          <pre class="fl-log" id="fl-log-install" aria-live="polite"></pre>
+        </div>
         <div class="fl-foot">
           <button class="btn btn-ghost btn-back fl-back" data-go="board" type="button"><span class="arrow">←</span> Back</button>
           <div class="fl-foot-r">
@@ -960,6 +976,10 @@ function flashPage(builds) {
           <div class="fl-field"><label for="cf-wifi_pass">${esc(F.provision.fields.pass.label)}</label><input id="cf-wifi_pass" type="password" placeholder="${esc(F.provision.fields.pass.placeholder)}" autocomplete="off" /></div>
         </div>
         <div class="fl-status" id="fl-cfg-status" hidden></div>
+        <div class="fl-console" id="fl-console-provision" hidden>
+          <div class="fl-console-bar"><span>Console</span><button type="button" class="fl-console-connect" id="fl-connect-provision" hidden>Connect over USB</button></div>
+          <pre class="fl-log" id="fl-log-provision" aria-live="polite"></pre>
+        </div>
         <div class="fl-foot">
           <button class="btn btn-ghost btn-back fl-back" data-go="install" type="button"><span class="arrow">←</span> Back</button>
           <div class="fl-foot-r">
@@ -1085,7 +1105,12 @@ function flashPage(builds) {
     el.hidden = false;
     el.className = "fl-status " + (kind === "error" ? "err" : kind === "ok" ? "ok" : "info");
     el.textContent = kind === "error" ? MSG.flashErr : kind === "ok" ? MSG.flashOk : MSG.flashUnknown;
-    if (kind !== "error") $("fl-next-install").disabled = false;   // unlock "Configure →"
+    if (kind !== "error") {
+      $("fl-next-install").disabled = false;   // unlock "Configure →"
+      // esptool hard-resets into the app after flashing, so the board is already
+      // booting — reuse the port ESP Web Tools was granted and show the boot log.
+      openConsole("fl-log-install", false, "fl-connect-install");
+    }
   }
   function watchDialog(dlg){
     sawInstall = false; sawError = false; flashStatus(null);
@@ -1101,21 +1126,18 @@ function flashPage(builds) {
     });
   }).observe(document.body, { childList: true });
 
-  // ── step 3: provision over Web Serial ─────────────────────────────────
-  // Line-JSON protocol (docs/developer/esp32.md §6.2): {"cmd":"set|reboot"}. The
-  // board bakes in its own pins/DAC, so we only push name + Wi-Fi, one direction.
-  var port, writer, buf = "", waiters = [];
-  function cfgCheck(){ $("fl-configure").disabled = !($("cf-name").value.trim() && $("cf-wifi_ssid").value.trim()); }
-  ["cf-name","cf-wifi_ssid"].forEach(function(id){ $(id).addEventListener("input", cfgCheck); });
-  function cfgStatus(kind, msg){ var el = $("fl-cfg-status"); el.hidden = false; el.className = "fl-status " + kind; el.textContent = msg; }
-
-  function send(obj){
-    var line = JSON.stringify(obj) + "\\n";
-    return writer.write(new TextEncoder().encode(line)).then(function(){
-      return new Promise(function(res){ waiters.push(res); setTimeout(function(){ var i = waiters.indexOf(res); if (i >= 0){ waiters.splice(i,1); res(null); } }, 3000); });
-    });
-  }
-  function onLine(line){ line = line.trim(); if (!line) return; var obj; try { obj = JSON.parse(line); } catch(e){ return; } var w = waiters.shift(); if (w) w(obj); }
+  // ── shared serial console ─────────────────────────────────────────────
+  // Line-JSON protocol (docs/developer/esp32.md §6.2): {"cmd":"get|set|reboot"}
+  // replies {"ok":...}. Everything the firmware prints (boot + ESP_LOG lines)
+  // streams raw into a terminal box so flash + configure both end with a reset
+  // and a live look at the device booting.
+  var port = null, writer = null, buf = "", waiters = [], logEl = null, wantConsole = false;
+  function appendLog(s){ if (!logEl) return; var t = logEl.textContent + s; if (t.length > 12000) t = t.slice(-12000); logEl.textContent = t; logEl.scrollTop = logEl.scrollHeight; }
+  function showConsole(id){ logEl = $(id); var box = logEl && logEl.closest(".fl-console"); if (box) box.hidden = false; }
+  // Only an actual command reply ({"ok":...}) resolves a pending send() — plain
+  // log lines (and stray JSON) are shown but never mistaken for a response, which
+  // is what made the old configure return "ok" instantly without really working.
+  function onLine(line){ line = line.trim(); if (!line) return; var o; try { o = JSON.parse(line); } catch(e){ return; } if (!o || !("ok" in o)) return; var w = waiters.shift(); if (w) w(o); }
   async function readLoop(){
     var dec = new TextDecoderStream();
     port.readable.pipeTo(dec.writable).catch(function(){});
@@ -1123,34 +1145,73 @@ function flashPage(builds) {
     for(;;){
       var out; try { out = await r.read(); } catch(e){ break; }
       if (out.done) break;
+      appendLog(out.value);
       buf += out.value;
       var nl;
       while ((nl = buf.indexOf("\\n")) >= 0) { onLine(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
     }
+    try { if (writer) writer.releaseLock(); } catch(e){}
+    writer = null; port = null; buf = "";   // closed — e.g. a reboot re-enumerated the USB-JTAG
   }
-  $("fl-configure").addEventListener("click", async function(){
-    if (!navigator.serial){ cfgStatus("err", "Web Serial unavailable — use Chrome or Edge on desktop."); return; }
-    cfgStatus("info", "Connecting over USB…");
+  async function openPort(p){ port = p; await port.open({ baudRate: 115200 }); writer = port.writable.getWriter(); readLoop(); }
+  function send(obj){
+    if (!writer) return Promise.resolve(null);
+    return writer.write(new TextEncoder().encode(JSON.stringify(obj) + "\\n")).then(function(){
+      return new Promise(function(res){ waiters.push(res); setTimeout(function(){ var i = waiters.indexOf(res); if (i >= 0){ waiters.splice(i,1); res(null); } }, 4000); });
+    });
+  }
+  // esp_restart() drops the native USB-JTAG and it re-enumerates as a fresh port;
+  // resume streaming so the boot log keeps flowing after a reset.
+  if (navigator.serial) navigator.serial.addEventListener("connect", function(ev){
+    if (wantConsole && !port){ appendLog("\\n[device reconnected]\\n"); openPort(ev.target).catch(function(){}); }
+  });
+  async function connect(allowPrompt){
+    if (port) return true;
+    if (!navigator.serial) throw new Error(MSG.noSerial);
+    var ports = await navigator.serial.getPorts();
+    var p = ports[ports.length - 1] || (allowPrompt ? await navigator.serial.requestPort() : null);
+    if (!p) return false;
+    await openPort(p);
+    return true;
+  }
+  // Reveal a step's console and attach to the device. allowPrompt=false reuses a
+  // port the page was already granted (e.g. by ESP Web Tools) without a picker.
+  async function openConsole(logId, allowPrompt, connectBtnId){
+    showConsole(logId); wantConsole = true;
     try {
-      if (!port){
-        port = await navigator.serial.requestPort();
-        await port.open({ baudRate: 115200 });
-        writer = port.writable.getWriter();
-        readLoop();
-      }
-      // Only send filled fields, so a blank box never clobbers a stored value.
+      var ok = await connect(allowPrompt);
+      if (!ok && connectBtnId){ appendLog(MSG.consoleHint + "\\n"); $(connectBtnId).hidden = false; }
+    } catch(e){ appendLog(e.message + "\\n"); if (connectBtnId) $(connectBtnId).hidden = false; }
+  }
+  ["fl-connect-install","fl-connect-provision"].forEach(function(id){
+    var b = $(id); if (!b) return;
+    b.addEventListener("click", function(){ b.hidden = true; wantConsole = true; connect(true).then(function(ok){ appendLog(ok ? "[connected]\\n" : "[no port selected]\\n"); }).catch(function(e){ appendLog(e.message + "\\n"); }); });
+  });
+
+  // ── step 3: provision ─────────────────────────────────────────────────
+  // Push name + Wi-Fi (only filled fields, so a blank never clobbers a stored
+  // value), then reset so the firmware re-reads config and joins Wi-Fi while the
+  // console shows it boot.
+  function cfgCheck(){ $("fl-configure").disabled = !($("cf-name").value.trim() && $("cf-wifi_ssid").value.trim()); }
+  ["cf-name","cf-wifi_ssid"].forEach(function(id){ $(id).addEventListener("input", cfgCheck); });
+  function cfgStatus(kind, msg){ var el = $("fl-cfg-status"); el.hidden = false; el.className = "fl-status " + kind; el.textContent = msg; }
+  $("fl-configure").addEventListener("click", async function(){
+    try {
+      cfgStatus("info", MSG.connecting);
+      showConsole("fl-log-provision"); wantConsole = true;
+      var ok = await connect(true);
+      if (!ok){ cfgStatus("err", MSG.noPort); return; }
       var cfg = {};
       var name = $("cf-name").value.trim(); if (name) cfg.name = name;
       var ssid = $("cf-wifi_ssid").value.trim(); if (ssid) cfg.wifi_ssid = ssid;
       var pass = $("cf-wifi_pass").value; if (pass) cfg.wifi_pass = pass;
+      cfgStatus("info", MSG.saving);
       var r = await send({ cmd: "set", cfg: cfg });
-      if (r && r.ok){
-        cfgStatus("ok", MSG.cfgOk);
-        $("fl-next-provision").disabled = false;   // unlock "Finish →"
-        send({ cmd: "reboot" });                    // apply Wi-Fi + join the LAN
-      } else {
-        cfgStatus("err", MSG.cfgErr + (r && r.err ? " (" + r.err + ")" : ""));
-      }
+      if (!(r && r.ok)){ cfgStatus("err", MSG.cfgErr + (r && r.err ? " (" + r.err + ")" : " (no response)")); return; }
+      cfgStatus("ok", MSG.cfgOk);
+      appendLog("\\n[configuration saved \\u2014 rebooting\\u2026]\\n");
+      send({ cmd: "reboot" });                     // apply Wi-Fi + join the LAN
+      $("fl-next-provision").disabled = false;     // unlock "Finish →"
     } catch(e){ cfgStatus("err", "Connect/save failed: " + e.message); }
   });
 })();

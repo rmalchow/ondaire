@@ -8,6 +8,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/hajimehoshi/go-mp3 v0.3.4
+	github.com/hashicorp/mdns v1.0.7
 	github.com/hashicorp/memberlist v0.5.4
 	github.com/labstack/echo/v4 v4.15.2
 	github.com/mewkiz/flac v1.0.13
@@ -33,7 +34,7 @@ require (
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mewkiz/pkg v0.0.0-20250417130911-3f050ff8c56d // indirect
 	github.com/mewpkg/term v0.0.0-20241026122259-37a80af23985 // indirect
-	github.com/miekg/dns v1.1.68 // indirect
+	github.com/miekg/dns v1.1.72 // indirect
 	github.com/sean-/seed v0.0.0-20170313163322-e2103e2c3529 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect

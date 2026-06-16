@@ -9,10 +9,10 @@ import (
 	"ensemble/internal/id"
 )
 
-// parseEntry converts a raw zeroconf entry into a Peer, returning ok=false for
-// our own advertisement, malformed TXT, or an entry with no usable address
+// parseEntry converts a raw mDNS entry into a Peer, returning ok=false for our
+// own advertisement, malformed TXT, or an entry with no usable address
 // (§3 / §3.1). It is pure: no network, no locking.
-func parseEntry(e *zeroconfServiceEntry, self id.ID) (Peer, bool) {
+func parseEntry(e *mdnsEntry, self id.ID) (Peer, bool) {
 	if e == nil {
 		return Peer{}, false
 	}

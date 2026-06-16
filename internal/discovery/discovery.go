@@ -7,7 +7,11 @@ package discovery
 
 import (
 	"context"
+	"errors"
+	"io"
+	"log"
 	"log/slog"
+	"net"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -18,6 +22,7 @@ import (
 	"ensemble/internal/id"
 
 	"github.com/grandcat/zeroconf"
+	"github.com/hashicorp/mdns"
 )
 
 // ServiceName / Domain are the fixed mDNS coordinates for ensemble (§3).
@@ -34,11 +39,43 @@ var (
 	retryInterval = 5 * time.Second
 	// peersBuffer is the capacity of the Peers channel (§ edge cases).
 	peersBuffer = 64
+	// browseWindow bounds one hashicorp/mdns query: long enough to collect
+	// responses, short enough that the keeper re-queries promptly (so a freshly
+	// booted node is found within ~browseWindow+retryInterval). Close cancels the
+	// query's context, so this never delays shutdown.
+	browseWindow = 8 * time.Second
 )
 
-// zeroconfServiceEntry aliases the library entry type so parse.go (and its
-// table tests) need not import zeroconf directly.
-type zeroconfServiceEntry = zeroconf.ServiceEntry
+// mdnsLogger swallows hashicorp/mdns's per-packet logging (failed reads on the
+// other-family socket, etc.); browseKeeper logs the meaningful browse errors.
+var mdnsLogger = log.New(io.Discard, "", 0)
+
+// mdnsEntry is the parsed view parseEntry consumes: the subset of mDNS fields we
+// use, decoupled from the browse library. We browse with hashicorp/mdns because
+// it assembles SRV+TXT+A across packets and actively resolves the SRV target —
+// grandcat/zeroconf rebuilds its entry map per packet and silently drops any
+// service whose A record arrives in a separate packet (e.g. ESP-IDF nodes), even
+// though the advert is otherwise perfect (it resolves fine under avahi).
+type mdnsEntry struct {
+	Text     []string
+	AddrIPv4 []net.IP
+	AddrIPv6 []net.IP
+}
+
+// fromMDNS adapts a hashicorp/mdns entry to the subset parseEntry reads. It packs
+// the TXT (InfoFields) and the single resolved IPv4/IPv6 into slices.
+func fromMDNS(e *mdns.ServiceEntry) *mdnsEntry {
+	m := &mdnsEntry{Text: e.InfoFields}
+	if e.AddrV4 != nil {
+		m.AddrIPv4 = []net.IP{e.AddrV4}
+	}
+	if e.AddrV6 != nil {
+		m.AddrIPv6 = []net.IP{e.AddrV6}
+	} else if e.AddrV6IPAddr != nil {
+		m.AddrIPv6 = []net.IP{e.AddrV6IPAddr.IP}
+	}
+	return m
+}
 
 // Peer is one discovered ensemble node, as advertised in its mDNS TXT record
 // (§3 / PLAYER §5) plus the address the responder was reached on. It is the
@@ -136,8 +173,9 @@ type Discovery struct {
 	log   *slog.Logger
 	peers chan Peer
 
-	// newResolver is a test seam; defaults to zeroconf.NewResolver.
-	newResolver func() (*zeroconf.Resolver, error)
+	// browseFn runs one bounded browse window, emitting peers; a test seam,
+	// defaults to realBrowse (hashicorp/mdns). browseKeeper loops it.
+	browseFn func(context.Context) error
 
 	mu     sync.Mutex          // guards seen + server + closed
 	seen   map[id.ID]seenEntry // dedup / throttle state, keyed by peer ID
@@ -159,15 +197,16 @@ func New(cfg Config) *Discovery {
 		cfg.Instance = cfg.ID.String()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Discovery{
-		cfg:         cfg,
-		log:         cfg.Log,
-		peers:       make(chan Peer, peersBuffer),
-		newResolver: func() (*zeroconf.Resolver, error) { return zeroconf.NewResolver() },
-		seen:        make(map[id.ID]seenEntry),
-		ctx:         ctx,
-		cancel:      cancel,
+	d := &Discovery{
+		cfg:    cfg,
+		log:    cfg.Log,
+		peers:  make(chan Peer, peersBuffer),
+		seen:   make(map[id.ID]seenEntry),
+		ctx:    ctx,
+		cancel: cancel,
 	}
+	d.browseFn = d.realBrowse
+	return d
 }
 
 // Run registers the mDNS service and starts the continuous browse loop in the
@@ -350,7 +389,7 @@ func (d *Discovery) browseKeeper() {
 		if d.ctx.Err() != nil {
 			return
 		}
-		if err := d.browseOnce(); err != nil && d.ctx.Err() == nil {
+		if err := d.browseFn(d.ctx); err != nil && d.ctx.Err() == nil {
 			d.log.Warn("mDNS browse error, restarting", "err", err)
 		}
 		if d.ctx.Err() != nil {
@@ -362,30 +401,37 @@ func (d *Discovery) browseKeeper() {
 	}
 }
 
-// browseOnce creates a fresh resolver, drains its entries through parseEntry +
-// maybeEmit, and blocks in Browse until ctx is cancelled or it errors.
-func (d *Discovery) browseOnce() error {
-	resolver, err := d.newResolver()
-	if err != nil {
-		return err
-	}
-
-	entries := make(chan *zeroconf.ServiceEntry, 16)
+// realBrowse runs one bounded hashicorp/mdns query window, draining entries
+// through parseEntry + maybeEmit. It returns nil on a normal window end or on
+// ctx cancellation (Close) — browseKeeper re-queries on the next loop, and
+// maybeEmit's dedup throttles the resulting re-emits.
+func (d *Discovery) realBrowse(ctx context.Context) error {
+	entries := make(chan *mdns.ServiceEntry, 16)
 	var drain sync.WaitGroup
 	drain.Add(1)
 	go func() {
 		defer drain.Done()
 		for e := range entries {
-			if peer, ok := parseEntry(e, d.cfg.ID); ok {
+			if peer, ok := parseEntry(fromMDNS(e), d.cfg.ID); ok {
 				d.maybeEmit(peer)
 			}
 		}
 	}()
 
-	// Browse closes entries before returning (or we rely on ctx cancellation to
-	// unblock it). It owns the entries channel lifecycle.
-	err = resolver.Browse(d.ctx, ServiceName, Domain, entries)
+	qctx, cancel := context.WithTimeout(ctx, browseWindow)
+	defer cancel()
+	err := mdns.QueryContext(qctx, &mdns.QueryParam{
+		Service: ServiceName,
+		Domain:  strings.TrimSuffix(Domain, "."), // hashicorp wants "local", not "local."
+		Timeout: browseWindow,
+		Entries: entries,
+		Logger:  mdnsLogger,
+	})
+	close(entries) // hashicorp/mdns does not close the caller's channel
 	drain.Wait()
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil // window ended / shutting down — not a failure
+	}
 	return err
 }
 

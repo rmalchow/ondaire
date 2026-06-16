@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"ensemble/internal/id"
-
-	"github.com/grandcat/zeroconf"
 )
 
 var (
@@ -16,13 +14,9 @@ var (
 	peerID = id.MustParse("aabbccddeeff00112233445566778899")
 )
 
-// entry builds a *zeroconf.ServiceEntry with the given TXT and addresses.
-func entry(text []string, v4, v6 []net.IP) *zeroconf.ServiceEntry {
-	e := zeroconf.NewServiceEntry(peerID.String(), ServiceName, Domain)
-	e.Text = text
-	e.AddrIPv4 = v4
-	e.AddrIPv6 = v6
-	return e
+// entry builds an *mdnsEntry with the given TXT and addresses.
+func entry(text []string, v4, v6 []net.IP) *mdnsEntry {
+	return &mdnsEntry{Text: text, AddrIPv4: v4, AddrIPv6: v6}
 }
 
 func validTXT() []string {

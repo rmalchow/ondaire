@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"errors"
 	"net/netip"
 	"sync"
@@ -198,17 +199,18 @@ func TestRestartOnBrowseError(t *testing.T) {
 	var mu sync.Mutex
 	calls := 0
 	d := New(Config{ID: selfID})
-	d.newResolver = func() (*zeroconf.Resolver, error) {
+	d.browseFn = func(ctx context.Context) error {
 		mu.Lock()
 		calls++
 		n := calls
 		mu.Unlock()
 		if n == 1 {
-			return nil, errFakeResolver
+			return errFakeResolver
 		}
-		// Subsequent calls return a real resolver; Browse will block on ctx
-		// until Close cancels it. That is fine — we only assert it was retried.
-		return zeroconf.NewResolver()
+		// Subsequent calls block on ctx until Close cancels it. That is fine —
+		// we only assert the keeper retried after the first error.
+		<-ctx.Done()
+		return ctx.Err()
 	}
 	// Only run the browse keeper to avoid touching mDNS registration sockets.
 	d.wg.Add(1)

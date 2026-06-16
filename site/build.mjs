@@ -784,6 +784,7 @@ function flashPage(builds) {
     flashDone: "Flashing finished — startup logs will appear here soon…",
     cfgReboot: "Configuration saved — the device is rebooting; startup logs will appear here soon…",
     noReply: "No reply from the device. Make sure it’s plugged in over USB-C (not just power), then reconnect.",
+    noLogs: "No logs yet — the board re-enumerates after flashing. Click “Connect over USB” to attach to it.",
   }).replace(/</g, "\\u003c");
 
   return `<!doctype html>
@@ -1111,8 +1112,8 @@ function flashPage(builds) {
     if (kind !== "error") {
       $("fl-next-install").disabled = false;   // unlock "Configure →"
       // esptool hard-resets into the app after flashing, so the board is already
-      // booting — reuse the port ESP Web Tools was granted and show the boot log.
-      openConsole("fl-log-install", false, "fl-connect-install", MSG.flashDone);
+      // booting — try to reattach, but always offer an explicit Connect.
+      attachConsole("fl-log-install", "fl-connect-install", MSG.flashDone);
     }
   }
   function watchDialog(dlg){
@@ -1134,7 +1135,7 @@ function flashPage(builds) {
   // replies {"ok":...}. Everything the firmware prints (boot + ESP_LOG lines)
   // streams raw into a terminal box so flash + configure both end with a reset
   // and a live look at the device booting.
-  var port = null, writer = null, buf = "", waiters = [], logEl = null, wantConsole = false;
+  var port = null, writer = null, buf = "", waiters = [], logEl = null, wantConsole = false, gotData = false;
   function appendLog(s){ if (!logEl) return; var t = logEl.textContent + s; if (t.length > 12000) t = t.slice(-12000); logEl.textContent = t; logEl.scrollTop = logEl.scrollHeight; }
   function showConsole(id){ logEl = $(id); var box = logEl && logEl.closest(".fl-console"); if (box) box.hidden = false; }
   // Only an actual command reply ({"ok":...}) resolves a pending send() — plain
@@ -1148,6 +1149,7 @@ function flashPage(builds) {
     for(;;){
       var out; try { out = await r.read(); } catch(e){ break; }
       if (out.done) break;
+      gotData = true;
       appendLog(out.value);
       buf += out.value;
       var nl;
@@ -1194,20 +1196,28 @@ function flashPage(builds) {
     await openPort(p);
     return true;
   }
-  // Reveal a step's console and attach to the device. allowPrompt=false reuses a
-  // port the page was already granted (e.g. by ESP Web Tools) without a picker.
-  // intro seeds an explanation so the user sees what's happening before logs flow.
-  async function openConsole(logId, allowPrompt, connectBtnId, intro){
-    showConsole(logId); wantConsole = true;
+  // Reveal a step's console after flashing and attach. The auto-attempt reuses a
+  // port the page was already granted (no picker) — but esptool's hard-reset
+  // re-enumerates the USB-JTAG, so that handle is often stale and yields nothing.
+  // Hence the Connect button is ALWAYS offered, and a watchdog nudges toward it if
+  // no bytes arrive (the old code hid the button whenever a stale port "opened").
+  async function attachConsole(logId, connectBtnId, intro){
+    showConsole(logId); wantConsole = true; gotData = false;
     if (intro) appendLog(intro + "\\n");
-    try {
-      var ok = await connect(allowPrompt);
-      if (!ok && connectBtnId){ appendLog(MSG.consoleHint + "\\n"); $(connectBtnId).hidden = false; }
-    } catch(e){ appendLog(e.message + "\\n"); if (connectBtnId) $(connectBtnId).hidden = false; }
+    if (connectBtnId) $(connectBtnId).hidden = false;
+    try { await connect(false); } catch(e){ appendLog(e.message + "\\n"); }
+    setTimeout(function(){ if (!gotData) appendLog(MSG.noLogs + "\\n"); }, 4000);
   }
+  // The Connect button always forces a fresh port: drop any stale handle, then
+  // prompt, so the user can attach to the re-enumerated device after a reset.
   ["fl-connect-install","fl-connect-provision"].forEach(function(id){
     var b = $(id); if (!b) return;
-    b.addEventListener("click", function(){ b.hidden = true; wantConsole = true; connect(true).then(function(ok){ appendLog(ok ? "[connected]\\n" : "[no port selected]\\n"); }).catch(function(e){ appendLog(e.message + "\\n"); }); });
+    b.addEventListener("click", async function(){
+      wantConsole = true; gotData = false;
+      await dropPort();
+      try { var ok = await connect(true); appendLog(ok ? "[connected]\\n" : "[no port selected]\\n"); }
+      catch(e){ appendLog(e.message + "\\n"); }
+    });
   });
 
   // ── step 3: provision ─────────────────────────────────────────────────

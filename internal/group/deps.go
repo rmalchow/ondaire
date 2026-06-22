@@ -124,7 +124,3 @@ type SourceServer interface {
 	StopSession()
 	Stats() contracts.SourceStats
 }
-
-// FollowClient (contracts.FollowClient, D16) drives takeover (§5.2): POST
-// /api/follow|/unfollow on peers. Concrete impl injected by the API piece (I).
-type FollowClient = contracts.FollowClient

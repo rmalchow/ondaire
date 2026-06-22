@@ -1,6 +1,9 @@
 package clock
 
-import "sort"
+import (
+	"cmp"
+	"slices"
+)
 
 // sample is one completed NTP-style exchange.
 //
@@ -74,7 +77,7 @@ func (e *estimator) estimate() (offsetNanos, bestRTTNanos int64, ok bool) {
 	// Copy and sort by RTT ascending to pick the best-RTT samples.
 	byRTT := make([]sample, len(e.ring))
 	copy(byRTT, e.ring)
-	sort.Slice(byRTT, func(i, j int) bool { return byRTT[i].rtt < byRTT[j].rtt })
+	slices.SortFunc(byRTT, func(a, b sample) int { return cmp.Compare(a.rtt, b.rtt) })
 
 	n := bestN
 	if n > len(byRTT) {
@@ -84,7 +87,7 @@ func (e *estimator) estimate() (offsetNanos, bestRTTNanos int64, ok bool) {
 	for i := 0; i < n; i++ {
 		offsets[i] = byRTT[i].offset
 	}
-	sort.Slice(offsets, func(i, j int) bool { return offsets[i] < offsets[j] })
+	slices.Sort(offsets)
 	// Lower-middle median (deterministic, integer-only; avoids int64 averaging).
 	return offsets[(len(offsets)-1)/2], byRTT[0].rtt, true
 }

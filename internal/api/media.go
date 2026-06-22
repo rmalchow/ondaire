@@ -1,10 +1,11 @@
 package api
 
 import (
+	"cmp"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"ensemble/internal/audio"
@@ -66,7 +67,7 @@ func (l *fsLister) List() ([]MediaFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	slices.SortFunc(out, func(a, b MediaFile) int { return cmp.Compare(a.Path, b.Path) })
 	return out, nil
 }
 

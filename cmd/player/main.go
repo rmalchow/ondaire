@@ -28,6 +28,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -41,7 +42,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"sort"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -147,7 +148,7 @@ func medianOffset(ss []sample, window, best int) (int64, bool) {
 		ss = ss[len(ss)-window:]
 	}
 	byRTT := append([]sample(nil), ss...)
-	sort.Slice(byRTT, func(i, j int) bool { return byRTT[i].rtt < byRTT[j].rtt })
+	slices.SortFunc(byRTT, func(a, b sample) int { return cmp.Compare(a.rtt, b.rtt) })
 	n := best
 	if n > len(byRTT) {
 		n = len(byRTT)
@@ -156,7 +157,7 @@ func medianOffset(ss []sample, window, best int) (int64, bool) {
 	for i := 0; i < n; i++ {
 		offs[i] = byRTT[i].offset
 	}
-	sort.Slice(offs, func(i, j int) bool { return offs[i] < offs[j] })
+	slices.Sort(offs)
 	return offs[(len(offs)-1)/2], true // lower-middle median (integer-only)
 }
 

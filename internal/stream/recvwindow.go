@@ -1,6 +1,6 @@
 package stream
 
-import "sort"
+import "slices"
 
 // reorderBuffer delivers frames in Seq order, at most once, tolerating bounded
 // out-of-order arrival and gaps. It does NOT buffer for the jitter deadline
@@ -110,6 +110,6 @@ func (b *reorderBuffer) pendingSeqs() []uint64 {
 	for s := range b.pend {
 		out = append(out, s)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	slices.Sort(out)
 	return out
 }

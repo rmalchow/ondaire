@@ -348,14 +348,16 @@ export const content = {
     title: "Get ensemble for your hardware.",
     intro:
       "One small, static binary per device — pure Go, no runtime, no dependencies. Each archive is the build attached to the matching tagged release: verify its SHA-256, unpack it, and run ./ensemble. Prefer containers? Pull the master image with Spotify Connect built in.",
-    // Teaser + entry point to the browser flasher (flash.html). ESP32 support is
-    // marked Unstable (bring-up): the flasher is live, but the firmware can still
-    // change. See docs/developer/esp32.md + docs/developer/player-protocol.md.
+    // Caveat rendered as a tip under the page intro: a uniform fleet syncs best.
+    note:
+      "For the tightest sync, use the same TYPE of player throughout — e.g. all Raspberry Pi nodes, or all ESP32 nodes. Mixed fleets work (the master equalizes each node's output latency), but identical hardware shares the same latency and clock behaviour, so it lines up best.",
+    // Teaser + entry point to the browser flasher (flash.html).
+    // See docs/developer/esp32.md + docs/developer/player-protocol.md.
     esp32: {
-      badge: "Unstable",
-      title: "ESP32 players — experimental",
+      badge: "DIY",
+      title: "ESP32 players",
       body:
-        "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ensemble player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Support is still in bring-up, so expect rough edges. Tested on the ESP32-S3 Super Mini and the Waveshare ESP32-S3-Zero (both PSRAM) with a PCM5102A DAC.",
+        "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ensemble player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Tested on the ESP32-S3 Super Mini and the Waveshare ESP32-S3-Zero (both PSRAM) with a PCM5102A DAC.",
       href: "flash.html",
       hrefLabel: "Open the browser flasher",
     },
@@ -495,11 +497,6 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
   flash: {
     eyebrow: "Build a node",
     title: "Flash a DIY speaker, right from your browser.",
-    // Shown as a prominent banner at the top of the flasher: ESP32 support is
-    // bring-up, not release-grade. The download page teaser links here with the
-    // same "Unstable" framing.
-    unstable:
-      "ESP32 support is unstable. The firmware is still in bring-up — it works, but expect rough edges, and the wiring, pins, and protocol can still change between releases.",
     intro:
       "Turn an ESP32 + an I2S DAC into a real ensemble player — it shows up in the cluster, joins any group, and plays in lock-step like every other room. No toolchain, no app: plug it in over USB-C in Chrome or Edge, flash it, then set your Wi-Fi. Receive-only, opus over Wi-Fi.",
     // Progress header — one chip per wizard step.

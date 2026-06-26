@@ -633,7 +633,11 @@ function downloadPage(options) {
     <header class="sec-head">
       <span class="eyebrow">${eq(6)}${esc(C.download.eyebrow)}${VERSION ? " · " + esc(VERSION) : ""}</span>
       <h1>${esc(C.download.title)}</h1>
-      <p class="sec-intro">${esc(C.download.intro)}</p>
+      <p class="sec-intro">${esc(C.download.intro)}</p>${
+        C.download.note
+          ? `\n      <p class="sec-intro"><strong>Tip:</strong> ${esc(C.download.note)}</p>`
+          : ""
+      }
     </header>
     <div class="dl-list">${esp32}${installer}${cards}</div>
     ${flags}
@@ -894,10 +898,6 @@ function flashPage(builds) {
   .fl-done h2{margin:0 0 8px}
   .fl-done .fl-lead{margin:0 auto;text-align:center}
   .fl-done-doc{margin-top:20px}
-
-  /* ── unstable banner (amber, semantic) ────────────────────────────── */
-  .fl-unstable{display:flex;gap:12px;align-items:flex-start;background:rgba(224,166,74,.09);border:1px solid rgba(224,166,74,.4);border-radius:12px;padding:14px 16px;margin:18px 0 2px;color:#e7d3a8;font-size:14px;line-height:1.55}
-  .fl-unstable .fl-tag{flex:none;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--bg);background:#e0a64a;border-radius:999px;padding:3px 9px;margin-top:1px}
 </style>
 </head>
 <body>
@@ -916,8 +916,6 @@ function flashPage(builds) {
       <h1>${esc(F.title)}</h1>
       <p class="sec-intro">${esc(F.intro)}</p>
     </header>
-
-    <div class="fl-unstable" role="note"><span class="fl-tag">Unstable</span><span>${esc(F.unstable)}</span></div>
 
     <ol class="fl-steps" id="fl-steps">${stepChips}</ol>
 

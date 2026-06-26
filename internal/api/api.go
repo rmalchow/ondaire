@@ -111,6 +111,8 @@ func New(cfg Config) *Server {
 	g.GET("/group/settings", s.handleGetSettings)
 	g.POST("/group/settings", s.handleSetSettings)
 	g.POST("/tone", s.handleTone)
+	g.POST("/calibrate/start", s.handleCalibrateStart)
+	g.POST("/calibrate/stop", s.handleCalibrateStop)
 	g.GET("/ws", s.handleWS)
 
 	// SPA: everything not under /api. Registered on the root Echo, last.

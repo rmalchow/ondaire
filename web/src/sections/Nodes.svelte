@@ -1,6 +1,8 @@
 <script>
-  // Nodes section (J arch §4): one NodeRow per known node.
+  // Nodes section (J arch §4): one NodeRow per known node, plus the whole-cluster
+  // by-ear calibration panel.
   import NodeRow from "../components/NodeRow.svelte";
+  import CalibrateMode from "../components/CalibrateMode.svelte";
 
   let { snapshot, self } = $props();
 
@@ -14,6 +16,7 @@
 </script>
 
 <section class="section">
+  <CalibrateMode {snapshot} {self} />
   {#if nodes.length === 0}
     <div class="empty">No nodes yet.</div>
   {:else}

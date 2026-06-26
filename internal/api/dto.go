@@ -118,6 +118,16 @@ type PlayReq struct {
 	File string `json:"file,omitempty"`
 }
 
+// --- POST /api/calibrate/start (by-ear alignment signal) -------------------
+// Plays a synchronized calibration signal to this node's group so the user can
+// null the inter-speaker flam via each node's output-delay. Maps to an internal
+// "calib:" media source (audio/synthetic.go). Mode is "click" (default) or "noise".
+type CalibrateReq struct {
+	Mode    string  `json:"mode,omitempty"`    // "click" | "noise"
+	ClickHz int     `json:"clickHz,omitempty"` // clicks/sec for click mode (default 2)
+	Level   float64 `json:"level,omitempty"`   // 0..1 peak (default 0.5)
+}
+
 // --- POST /api/queue (file-source play queue) ------------------------------
 // Add one or more file URIs to the END of the queue (the [+] buttons). A bare
 // scheme-less path folds to a "file:" URI, like /play.

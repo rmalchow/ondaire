@@ -1,7 +1,9 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -662,6 +664,48 @@ func (s *Server) handleResume(c echo.Context) error {
 		return s.fail(c, err)
 	}
 	s.log.Info("ui mutation", auditAttrs(c, "resume")...)
+	return c.NoContent(http.StatusNoContent)
+}
+
+// handleCalibrateStart plays a synchronized by-ear alignment signal (a click
+// train, or correlated noise) to this node's group; master only. It's an ordinary
+// session over an internal "calib:" source, so it replaces any current playback
+// and stops via the normal /stop. The user nulls the inter-speaker flam by
+// adjusting each node's OutputDelayMs while it runs.
+func (s *Server) handleCalibrateStart(c echo.Context) error {
+	var req CalibrateReq
+	if err := c.Bind(&req); err != nil {
+		return failCode(c, http.StatusBadRequest, "bad_request", "")
+	}
+	mode := req.Mode
+	if mode == "" {
+		mode = "click"
+	}
+	if mode != "click" && mode != "noise" {
+		return failCode(c, http.StatusBadRequest, "bad_mode", "")
+	}
+	hz := req.ClickHz
+	if hz <= 0 {
+		hz = 2
+	}
+	level := req.Level
+	if level <= 0 {
+		level = 0.5
+	}
+	uri := fmt.Sprintf("calib:%s?hz=%d&level=%s", mode, hz, strconv.FormatFloat(level, 'f', -1, 64))
+	if err := s.cfg.Group.Play(c.Request().Context(), uri); err != nil {
+		return s.fail(c, err)
+	}
+	s.log.Info("ui mutation", append(auditAttrs(c, "calibrate"), "uri", uri)...)
+	return c.NoContent(http.StatusNoContent)
+}
+
+// handleCalibrateStop stops the calibration signal; master only. It's just /stop.
+func (s *Server) handleCalibrateStop(c echo.Context) error {
+	if err := s.cfg.Group.Stop(c.Request().Context()); err != nil {
+		return s.fail(c, err)
+	}
+	s.log.Info("ui mutation", auditAttrs(c, "calibrate-stop")...)
 	return c.NoContent(http.StatusNoContent)
 }
 

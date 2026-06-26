@@ -225,6 +225,19 @@ export function resume(masterId) {
   return toasted(req("POST", base(masterId) + "/resume"));
 }
 
+// --- by-ear calibration: a synchronized alignment signal to a room ---
+// Plays an internal "calib:" signal to the master's group so the user can null
+// the inter-speaker flam via each node's output delay. Replaces current playback;
+// calibrateStop is just /stop. mode: "click" (default) | "noise".
+export function calibrateStart(masterId, { mode = "click", clickHz = 2, level = 0.5 } = {}) {
+  return toasted(
+    req("POST", base(masterId) + "/calibrate/start", { mode, clickHz, level }),
+  );
+}
+export function calibrateStop(masterId) {
+  return toasted(req("POST", base(masterId) + "/calibrate/stop"));
+}
+
 // --- group settings (master only for POST) ---
 export function setGroupSettings(masterId, settings) {
   return toasted(req("POST", base(masterId) + "/group/settings", settings));

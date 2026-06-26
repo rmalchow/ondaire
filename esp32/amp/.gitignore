@@ -1,0 +1,12 @@
+# KiCad working / generated-by-tool files
+*-backups/
+*.kicad_prl
+*.kicad_pcb-bak
+*_autosave-*
+fp-info-cache
+/erc.rpt
+/amp.net
+__pycache__/
+*.lck
+~*
+.history/

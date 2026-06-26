@@ -1,0 +1,4 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "amp")(type "KiCad")(uri "${KIPRJMOD}/amp.pretty")(options "")(descr "Project-local footprints: ESP32-S3 dev-board sockets"))
+)

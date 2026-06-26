@@ -347,6 +347,12 @@ func TestReleaseFrameNeverBlocksOnWedgedTCP(t *testing.T) {
 	s.onSubscribe(ap("127.0.0.1:6000"), stream.TransportTCP, c1, time.Now(), false, false)
 	waitForN(t, func() int { return s.Stats().Clients }, 1, time.Second)
 
+	// Release back-to-back (no inter-frame sleep): the wedged conn is retired by
+	// writeTCP's 50 ms write deadline, so a paced producer can drain fewer than
+	// tcpSendQueue (32) frames into the buffer before the sub dies via the
+	// write-error path — surfacing zero drops and flaking on slow CI. Firing all
+	// 100 frames at once guarantees the queue overflows (drops) while the conn is
+	// still live, and is a stronger test of the never-block guarantee anyway.
 	var worst time.Duration
 	for i := 0; i < 100; i++ {
 		start := time.Now()
@@ -354,7 +360,6 @@ func TestReleaseFrameNeverBlocksOnWedgedTCP(t *testing.T) {
 		if d := time.Since(start); d > worst {
 			worst = d
 		}
-		time.Sleep(time.Millisecond)
 	}
 	if worst > 5*time.Millisecond {
 		t.Fatalf("ReleaseFrame stalled %v on a wedged TCP sub; the producer cadence must be sink-independent", worst)

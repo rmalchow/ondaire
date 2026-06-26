@@ -20,6 +20,12 @@ static const char *TAG = "player";
 #define WATCHDOG_NS    ((int64_t)2 * 1000000000LL)
 #define PCM_SAMPLES    (WIRE_FRAME_SAMPLES * WIRE_CHANNELS)   // 1920 int16
 
+// Consecutive gap (silence) frames before we declare the jitter buffer drained
+// and re-anchor: drop has_next so the next arriving frame re-primes origin_seq to
+// the live stream, instead of marching next_seq past every arrival forever (the
+// old permanent-underrun trap). ~500 ms — under the master's 2 s starvation watchdog.
+#define REANCHOR_FRAMES    25
+
 // The slot stores one queued frame's payload. On the Wi-Fi path that's the
 // COMPRESSED opus packet (~320 B, decoded at playout); sizing it to a full raw
 // PCM frame (WIRE_FRAME_BYTES) means the wired/bench PCM path is accepted too,
@@ -48,12 +54,14 @@ static struct {
     int64_t  origin_pts;
 
     uint64_t played, silence, late;
+    uint64_t injected, dropped;           // grounded servo: extra/removed sample-pairs
     int64_t  last_frame_ns;
     bool     got_frame;
 } p;
 
 static slot_t  *s_slots;                  // jitter buffer (PSRAM; see player_init)
-static int16_t s_pcm[PCM_SAMPLES];        // audio-task scratch (decode/output)
+// One extra sample-pair of headroom so a servo INSERT (+1) frame fits in place.
+static int16_t s_pcm[(WIRE_FRAME_SAMPLES + 1) * WIRE_CHANNELS]; // audio-task scratch
 static uint8_t s_stage[SLOT_BYTES];       // audio-task staging (copied under lock)
 
 static inline void lock(void)   { xSemaphoreTakeRecursive(p.mu, portMAX_DELAY); }
@@ -193,6 +201,8 @@ static void sleep_until(int64_t local_deadline) {
 
 static void audio_task(void *arg) {
     (void)arg;
+    const size_t frame_bytes = PCM_SAMPLES * sizeof(int16_t);
+    int silence_run = 0;       // consecutive gap frames (for re-anchor)
     for (;;) {
         lock();
         if (!p.attached || !p.has_next) {
@@ -204,8 +214,13 @@ static void audio_task(void *arg) {
         int64_t slot_pts = p.origin_pts + (int64_t)(seq - p.origin_seq) * WIRE_FRAME_NANOS;
         int64_t target_master = slot_pts + p.buffer_ns + p.eq_ns;
         int64_t delay_ns = p.delay_ns;
+        uint8_t codec = p.codec;
         unlock();
 
+        // Master-paced playout: this frame's slot is due at master time
+        // target_master; convert to local and sleep to it. This holds absolute phase
+        // (so all nodes line up); the feed-forward sample insert/drop below keeps the
+        // I2S DMA fed despite the local crystal's ppm offset (no APLL to trim it).
         int64_t local;
         if (!clock_master_to_local(target_master, &local)) {  // unsynced → withhold
             vTaskDelay(pdMS_TO_TICKS(5));
@@ -215,11 +230,9 @@ static void audio_task(void *arg) {
         sleep_until(local);
 
         // Decide what to emit for this slot.
-        bool present = false, skip = false;
+        bool present = false;
         int  stage_len = 0;
-        uint8_t codec;
         lock();
-        codec = p.codec;
         slot_t *s = find_slot(seq);
         if (clock_now_ns() > local + WIRE_FRAME_NANOS) {
             // A full frame late: skip without writing (else every later frame is late).
@@ -241,34 +254,56 @@ static void audio_task(void *arg) {
         p.last_seq = seq;
         p.next_seq++;
         unlock();
-        (void)skip;
 
         // Produce one 20 ms PCM frame (outside the lock; opus state is task-local).
         if (present) {
             if (codec == WIRE_CODEC_OPUS) {
                 if (opus_dec_decode(s_stage, stage_len, s_pcm) < 0)
-                    memset(s_pcm, 0, sizeof s_pcm);
+                    memset(s_pcm, 0, frame_bytes);
             } else {
-                // Raw PCM (wired/bench): a full 3840 B frame now fits a slot.
-                // Copy it straight through, clamped to the output frame size.
-                int nb = stage_len < (int)sizeof s_pcm ? stage_len : (int)sizeof s_pcm;
-                memset(s_pcm, 0, sizeof s_pcm);
+                // Raw PCM (wired/bench): a full 3840 B frame fits a slot.
+                int nb = stage_len < (int)frame_bytes ? stage_len : (int)frame_bytes;
+                memset(s_pcm, 0, frame_bytes);
                 memcpy(s_pcm, s_stage, nb);
             }
+            silence_run = 0;
         } else {
             // Gap: opus PLC keeps decoder state continuous; pcm → silence.
             if (codec == WIRE_CODEC_OPUS) {
-                if (opus_dec_plc(s_pcm) < 0) memset(s_pcm, 0, sizeof s_pcm);
+                if (opus_dec_plc(s_pcm) < 0) memset(s_pcm, 0, frame_bytes);
             } else {
-                memset(s_pcm, 0, sizeof s_pcm);
+                memset(s_pcm, 0, frame_bytes);
+            }
+            // Jitter buffer drained too long → re-anchor so the next push re-primes us
+            // to the live stream, instead of marching next_seq past every arrival.
+            if (++silence_run >= REANCHOR_FRAMES) {
+                lock(); p.has_next = false; unlock();
+                opus_dec_reset();
+                servo_reset();
+                silence_run = 0;
+                continue;
             }
         }
 
-        volume_apply(s_pcm, PCM_SAMPLES);
-        i2s_out_write(s_pcm, WIRE_FRAME_BYTES);
-
-        // Phase error = how late the emission actually landed vs the deadline.
+        // Phase telemetry = how late the emission landed vs the deadline.
         if (present) servo_update(clock_now_ns() - local);
+
+        // Feed-forward rate match: nudge the frame ±1 sample-pair per the MEASURED
+        // crystal drift so the long-run output rate equals the master's and the DMA
+        // never chronically drains. No phase feedback ⇒ it cannot rail on offset steps.
+        servo_set_drift_ppm((float)clock_drift_ppm_x1000() / 1000.0f);
+        int adj = servo_sample_adjust();
+        int out_pairs = WIRE_FRAME_SAMPLES + adj;
+        if (adj > 0) {
+            s_pcm[WIRE_FRAME_SAMPLES * 2]     = s_pcm[(WIRE_FRAME_SAMPLES - 1) * 2];
+            s_pcm[WIRE_FRAME_SAMPLES * 2 + 1] = s_pcm[(WIRE_FRAME_SAMPLES - 1) * 2 + 1];
+            lock(); p.injected++; unlock();
+        } else if (adj < 0) {
+            lock(); p.dropped++; unlock();
+        }
+
+        volume_apply(s_pcm, out_pairs * WIRE_CHANNELS);
+        i2s_out_write(s_pcm, (size_t)out_pairs * WIRE_CHANNELS * sizeof(int16_t));
     }
 }
 
@@ -279,6 +314,8 @@ void player_fill_status(wire_status_t *st) {
     st->played   = p.played;
     st->silence  = p.silence;
     st->late     = p.late;
+    st->samples_injected = p.injected;
+    st->samples_dropped  = p.dropped;
     bool playing = p.attached && p.got_frame;
     unlock();
 

@@ -31,6 +31,15 @@ void     clock_on_reply(uint32_t gen, uint64_t seq, int64_t t2, int64_t t3, int6
 bool     clock_offset(int64_t *offset_ns);
 bool     clock_master_to_local(int64_t master_ns, int64_t *local_ns);
 
+// Estimated LOCAL-vs-master crystal frequency error, in ppm x1000 (positive ⇒
+// the local crystal runs FAST). A long-baseline slope of offset vs local time
+// (the offset value is noisy/quantized, but its slope over tens of seconds is
+// the true ppm), EWMA-smoothed. 0 until a confident baseline exists. The playout
+// servo feeds this FORWARD to insert/drop samples — no phase feedback loop, so
+// it can't rail on the offset estimate's millisecond steps. Re-anchors (→0) on
+// any endpoint/gen change that wipes the sample window.
+int32_t  clock_drift_ppm_x1000(void);
+
 // Offset for TELEMETRY/UI: the raw offset is master_ns - local_ns, which on the
 // MCU is dominated by the boot-vs-epoch gap (esp_timer is boot-relative; the
 // master stamps wall-clock epoch) — ~1.8e18 ns, useless and incomparable to the

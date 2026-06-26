@@ -9,6 +9,8 @@
 #define WINDOW   30      // keep the last N samples
 #define BEST     5       // median over the 5 smallest-RTT
 #define PENDING  48      // in-flight probes ring
+#define DRIFT_N  32      // (local_time, offset) points for the drift regression
+#define DRIFT_DT_NS  ((int64_t)1000000000LL)   // sample the drift series ~1 Hz
 
 typedef struct { int64_t offset, rtt; } sample_t;
 typedef struct { uint64_t seq; int64_t t1; bool used; } pend_t;
@@ -28,6 +30,12 @@ static struct {
 
     int64_t  off_base;       // reported-offset anchor (full offset at first lock)
     bool     off_base_set;
+
+    int64_t  dr_t[DRIFT_N];  // drift regression: local-time samples (ns)
+    int64_t  dr_off[DRIFT_N];//                   matching offset samples (ns)
+    int      dr_n, dr_head;  // ring fill + write index
+    int64_t  dr_last;        // last time we appended a drift sample
+    float    drift_ppm;      // regressed offset slope, as ppm (local fast ⇒ +)
 } c;
 
 static inline void lock(void)   { xSemaphoreTakeRecursive(c.mu, portMAX_DELAY); }
@@ -44,6 +52,7 @@ static void wipe_samples_locked(void) {
     c.nsamples = 0;
     c.head = 0;
     c.off_base_set = false;   // re-anchor the reported offset on the next lock
+    c.dr_n = 0; c.dr_head = 0; c.dr_last = 0; c.drift_ppm = 0;  // re-measure drift
     for (int i = 0; i < PENDING; i++) c.pend[i].used = false;
 }
 
@@ -141,6 +150,47 @@ bool clock_master_to_local(int64_t master_ns, int64_t *local_ns) {
     if (!clock_offset(&off)) return false;
     *local_ns = master_ns - off;
     return true;
+}
+
+int32_t clock_drift_ppm_x1000(void) {
+    int64_t off;
+    if (!clock_offset(&off)) return 0;     // unsynced
+    int64_t now = clock_now_ns();
+    lock();
+    // Append a (time, offset) point ~1 Hz; the slope of this series over tens of
+    // seconds IS the crystal ppm. Least-squares over the window rejects the
+    // per-sample quantization that wrecks a two-point slope.
+    if (c.dr_n == 0 || now - c.dr_last >= DRIFT_DT_NS) {
+        c.dr_t[c.dr_head] = now; c.dr_off[c.dr_head] = off;
+        c.dr_head = (c.dr_head + 1) % DRIFT_N;
+        if (c.dr_n < DRIFT_N) c.dr_n++;
+        c.dr_last = now;
+    }
+    int n = c.dr_n;
+    if (n >= 8) {
+        // Subtract the first point (int64) before going to double — raw offsets are
+        // ~1.8e18 ns (boot-vs-epoch) and would lose precision in a 53-bit mantissa.
+        int oldest = (c.dr_n < DRIFT_N) ? 0 : c.dr_head;   // ring tail
+        int64_t bt = c.dr_t[oldest], bo = c.dr_off[oldest];
+        double sx = 0, sy = 0, sxx = 0, sxy = 0;
+        for (int k = 0; k < n; k++) {
+            int i = (oldest + k) % DRIFT_N;
+            double x = (double)(c.dr_t[i] - bt);
+            double y = (double)(c.dr_off[i] - bo);
+            sx += x; sy += y; sxx += x * x; sxy += x * y;
+        }
+        double den = n * sxx - sx * sx;
+        if (den != 0) {
+            double slope = (n * sxy - sx * sy) / den;   // d(offset)/d(local), ns/ns
+            float ppm = (float)(-slope * 1e6);           // local fast ⇒ slope<0 ⇒ ppm>0
+            if (ppm >  500.0f) ppm =  500.0f;
+            if (ppm < -500.0f) ppm = -500.0f;
+            c.drift_ppm += (ppm - c.drift_ppm) * 0.3f;   // light EWMA on the regression
+        }
+    }
+    int32_t out = (int32_t)(c.drift_ppm * 1000.0f);
+    unlock();
+    return out;
 }
 
 bool clock_offset_reported(int64_t *offset_ns) {

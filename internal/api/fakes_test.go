@@ -105,6 +105,15 @@ func (f *fakeCluster) SetSpotifyEndpoints(eps []contracts.SpotifyEndpoint) {
 	f.mu.Unlock()
 }
 
+func (f *fakeCluster) SetStreamPreset(pid id.ID, name, url string, auth *contracts.StreamAuth) id.ID {
+	if pid.IsZero() {
+		pid = id.New()
+	}
+	return pid
+}
+
+func (f *fakeCluster) DeleteStreamPreset(pid id.ID) {}
+
 func (f *fakeCluster) ForgetNode(nid id.ID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

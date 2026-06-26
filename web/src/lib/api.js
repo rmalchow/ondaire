@@ -171,6 +171,21 @@ export function renameGroup(groupId, name) {
   return toasted(req("POST", "/api/group/name", { group: groupId, name }));
 }
 
+// --- stream presets (cluster-wide; LWW from any node; issued locally) ---
+// preset = {id?, name, url, auth?: {scheme, user, pass, token}}. Empty id creates.
+// Returns {id}. On edit, a scheme with blank secret keeps the stored secret.
+export function setStreamPreset(preset) {
+  return toasted(req("POST", "/api/stream/presets", preset));
+}
+export function deleteStreamPreset(id) {
+  return toasted(req("POST", "/api/stream/presets/delete", { id }));
+}
+// playStream plays a saved preset on a group's master (resolves stream:<id> →
+// the preset's URL + auth at the master, at play time).
+export function playStream(nodeId, presetId) {
+  return playOnNode(nodeId, "stream:" + presetId);
+}
+
 // --- media + playback ---
 export function getMedia(nodeId) {
   return toasted(req("GET", base(nodeId) + "/media"));

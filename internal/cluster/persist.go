@@ -32,6 +32,10 @@ type clusterState struct {
 	// PlaybackChannels persists each playback node's channel mode (nodeID →
 	// "stereo"|"L"|"R", D59), restored on re-discovery so a master restart keeps it.
 	PlaybackChannels map[id.ID]string `json:"playbackChannels,omitempty"`
+	// StreamPresets persists the cluster-wide stream presets. Like the group-names
+	// map these are persisted by EVERY node (not self-keyed), so a restarting node
+	// still knows the library before gossip re-converges.
+	StreamPresets map[id.ID]*StreamPresetRecord `json:"streamPresets,omitempty"`
 }
 
 // snapshotState clones the doc's override-names map and this node's OWN settings
@@ -46,6 +50,12 @@ func (c *Cluster) snapshotState() clusterState {
 	for k, v := range c.doc.Groups {
 		cp := *v
 		st.Groups[k] = &cp
+	}
+	if len(c.doc.StreamPresets) > 0 {
+		st.StreamPresets = make(map[id.ID]*StreamPresetRecord, len(c.doc.StreamPresets))
+		for k, v := range c.doc.StreamPresets {
+			st.StreamPresets[k] = cloneStreamPreset(v) // persisted by every node, includes soft-deletes
+		}
 	}
 	// D47: persist only the self-keyed settings record (this node's own group
 	// settings when it is a master); other groups' settings are master-keyed live
@@ -82,6 +92,9 @@ func (s clusterState) into(doc *Document) {
 	}
 	for g, r := range s.Settings {
 		doc.mergeSettings(g, r)
+	}
+	for pid, r := range s.StreamPresets {
+		doc.mergeStreamPreset(pid, r)
 	}
 }
 

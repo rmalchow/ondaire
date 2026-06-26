@@ -17,7 +17,7 @@
     base,
   } from "../lib/api.js";
 
-  let { group, expanded = false } = $props();
+  let { group, expanded = false, streamPresets = [] } = $props();
 
   let pb = $derived(group.playback || { state: "idle" });
   let playing = $derived(pb.state === "playing");
@@ -55,17 +55,22 @@
       });
   });
 
+  // saved name of the stream preset currently playing (stream:<id>), or "".
+  let presetName = $derived(streamPresetName(pb.uri));
   // a friendly one-line name + a type glyph for the source uri.
-  let track = $derived(friendlyTrack(pb.uri));
+  let track = $derived(friendlyTrack(pb.uri, presetName));
   let icon = $derived(iconFor(pb.uri));
 
   // now-playing metadata (the D57 source channel): title/artist/album/cover art.
   // Falls back to the URI-derived label when the source supplies none (line-in).
   let meta = $derived(pb.metadata || null);
   let title = $derived(meta && meta.title ? meta.title : track);
-  let subtitle = $derived(
-    meta ? [meta.artist, meta.album].filter(Boolean).join(" · ") : "",
-  );
+  let subtitle = $derived.by(() => {
+    const parts = meta ? [meta.artist, meta.album] : [];
+    // A stream: keep the saved station name visible even while a song plays.
+    if (presetName && (meta?.title || "") !== presetName) parts.push(presetName);
+    return parts.filter(Boolean).join(" · ");
+  });
   // track length for the transport bar (seconds); 0 = unknown (live/line-in →
   // the bar shows elapsed time only, no scrub track). Files report it from the
   // decoder, Spotify from go-librespot.
@@ -138,10 +143,18 @@
     seek(group.master, v).catch(() => {});
   }
 
-  function friendlyTrack(uri) {
+  // resolve a stream:<id> URI to its saved preset name (cluster-wide list).
+  function streamPresetName(uri) {
+    if (!uri || !uri.startsWith("stream:")) return "";
+    const id = uri.slice(7);
+    const p = (streamPresets || []).find((s) => s.id === id);
+    return p ? p.name : "";
+  }
+  function friendlyTrack(uri, presetName) {
     if (!uri) return "";
     if (uri.startsWith("spotify:")) return "Spotify";
     if (uri.startsWith("input:")) return "line-in";
+    if (uri.startsWith("stream:")) return presetName || "stream";
     if (uri.startsWith("file:")) {
       const p = uri.slice(5);
       return p.split("/").pop() || p;
@@ -152,7 +165,7 @@
     if (!uri) return "";
     if (uri.startsWith("spotify:")) return "🟢";
     if (uri.startsWith("input:")) return "🎙";
-    if (uri.startsWith("http")) return "📻";
+    if (uri.startsWith("http") || uri.startsWith("stream:")) return "📻";
     return "♪"; // file
   }
 

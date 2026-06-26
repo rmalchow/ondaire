@@ -59,6 +59,9 @@ func (d *delegate) NotifyMsg(msg []byte) {
 		if changed {
 			ownSnap = c.scrubOwnAgainstTombstonesLocked() // purge our own refs to the deleted node
 		}
+	case kindStreamPreset:
+		changed = c.doc.mergeStreamPreset(dl.Group, dl.Preset)
+		persist = changed // presets persist on every node, like group names
 	}
 	c.mu.Unlock()
 	if persist {

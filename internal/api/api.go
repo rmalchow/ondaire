@@ -98,6 +98,8 @@ func New(cfg Config) *Server {
 	g.POST("/playback/assign", s.handleAssignPlayback)
 	g.POST("/playback/patch", s.handlePatchPlayback)
 	g.POST("/group/name", s.handleGroupName)
+	g.POST("/stream/presets", s.handleStreamPresetSet)
+	g.POST("/stream/presets/delete", s.handleStreamPresetDelete)
 	g.POST("/play", s.handlePlay)
 	g.GET("/queue", s.handleQueueList)
 	g.POST("/queue", s.handleEnqueue)

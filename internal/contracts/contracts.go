@@ -121,8 +121,9 @@ type StateStore interface {
 // Snapshot is the resolved cluster view behind GET /api/cluster and the WS
 // "cluster" event (§9.1/§9.2). Plain JSON-serializable data, no methods.
 type Snapshot struct {
-	Nodes  []NodeView  `json:"nodes"`
-	Groups []GroupView `json:"groups"`
+	Nodes         []NodeView         `json:"nodes"`
+	Groups        []GroupView        `json:"groups"`
+	StreamPresets []StreamPresetView `json:"streamPresets,omitempty"` // cluster-wide saved HTTP stream presets
 }
 
 // NodeView is one node record resolved with liveness and observed addrs.
@@ -165,6 +166,28 @@ type SpotifyEndpoint struct {
 	ID      string  `json:"id"`      // stable per-node slug; carried in the spotify:<id> URI
 	Name    string  `json:"name"`    // display name + Connect device suffix
 	Players []id.ID `json:"players"` // playback nodes grouped while this endpoint plays
+}
+
+// StreamAuth carries optional credentials for an authenticated HTTP stream
+// preset. Scheme is "" (none), "basic" (User/Pass), or "bearer" (Token). The
+// secret fields are cluster state (gossiped + persisted plaintext on a trusted
+// LAN) and are NEVER copied into a Snapshot/StreamPresetView sent to the browser.
+type StreamAuth struct {
+	Scheme string `json:"scheme"`          // "basic" | "bearer"
+	User   string `json:"user,omitempty"`  // basic
+	Pass   string `json:"pass,omitempty"`  // basic (secret)
+	Token  string `json:"token,omitempty"` // bearer (secret)
+}
+
+// StreamPresetView is one saved stream preset as exposed in the cluster Snapshot
+// (and thus the browser). It deliberately omits all secrets: HasAuth/AuthScheme
+// are the only auth signal the UI gets.
+type StreamPresetView struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	URL        string `json:"url"`
+	HasAuth    bool   `json:"hasAuth"`
+	AuthScheme string `json:"authScheme,omitempty"`
 }
 
 // Capabilities mirror §1.

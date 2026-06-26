@@ -6,8 +6,9 @@
   // "playing into" label: the card it lives in IS the target.
   import { bytes, relTime } from "../lib/fmt.js";
   import { nodeById } from "../lib/derive.js";
-  import { getMedia, playOnNode, enqueue } from "../lib/api.js";
+  import { getMedia, playOnNode, enqueue, playStream } from "../lib/api.js";
   import { entriesFor, crumbs, parentDir, joinDir, filesUnder } from "../lib/tree.js";
+  import StreamEditModal from "./StreamEditModal.svelte";
 
   let { snapshot, nodeId } = $props();
 
@@ -16,8 +17,21 @@
   let loading = $state(false);
   let dir = $state(""); // current directory within the media tree ("" == root)
 
-  // Stream-URL + line-in blocks are hidden for now (kept for when they return /
-  // Spotify lands alongside them). Flip to re-enable.
+  let tab = $state("files"); // "files" | "streams"
+  // cluster-wide saved stream presets (from the snapshot; secrets never included)
+  let presets = $derived(snapshot?.streamPresets ?? []);
+  let modalOpen = $state(false);
+  let modalPreset = $state(null); // null == add; a preset == edit
+  function openAdd() {
+    modalPreset = null;
+    modalOpen = true;
+  }
+  function openEdit(p) {
+    modalPreset = p;
+    modalOpen = true;
+  }
+
+  // Line-in block is hidden for now (kept for when it returns). Flip to re-enable.
   const streamSourcesEnabled = false;
 
   let picked = $derived(nodeById(snapshot, nodeId));
@@ -94,6 +108,9 @@
   function playUrl() {
     if (urlValid) playHere(url.trim());
   }
+  function playPreset(p) {
+    if (nodeId) playStream(nodeId, p.id).catch(() => {});
+  }
   function playInput() {
     playHere("input:" + inputDeviceId);
   }
@@ -110,6 +127,12 @@
 </script>
 
 <div class="media">
+  <div class="tabs row" role="tablist">
+    <button class="tab" class:active={tab === "files"} role="tab" aria-selected={tab === "files"} onclick={() => (tab = "files")}>Local files</button>
+    <button class="tab" class:active={tab === "streams"} role="tab" aria-selected={tab === "streams"} onclick={() => (tab = "streams")}>Streams</button>
+  </div>
+
+  {#if tab === "files"}
   <div class="media-block">
     <div class="crumbs row wrap">
       {#each trail as c, i (c.dir)}
@@ -177,20 +200,51 @@
       </div>
     {/if}
   </div>
-
-  {#if streamSourcesEnabled && canHttp}
-    <div class="media-block">
-      <span class="media-label">Stream URL</span>
-      <div class="row wrap">
-        <input
-          type="text"
-          placeholder="http(s)://stream-url"
-          bind:value={url}
-          style="flex: 1; min-width: 200px;"
-        />
-        <button class="btn btn-accent" disabled={!urlValid} onclick={playUrl}>Play</button>
-      </div>
+  {:else}
+  <div class="media-block">
+    <div class="row wrap streams-head">
+      <span class="media-label">Saved streams</span>
+      <span class="spacer"></span>
+      <button class="btn btn-accent" onclick={openAdd}>Add</button>
     </div>
+    {#if presets.length === 0}
+      <div class="empty">No saved streams.</div>
+    {:else}
+      <div class="file-list">
+        {#each presets as p (p.id)}
+          <div class="media-file">
+            <span class="fname" title={p.url}>{p.name}</span>
+            {#if p.hasAuth}<span class="muted small" title="authenticated">🔒</span>{/if}
+            <span class="spacer"></span>
+            <button class="btn" onclick={() => openEdit(p)} title="edit stream" aria-label="edit stream">Edit</button>
+            <button
+              class="btn btn-play"
+              onclick={() => playPreset(p)}
+              title="play here"
+              aria-label="play here"
+            >
+              <svg width="10" height="11" viewBox="0 0 10 11" fill="currentColor" aria-hidden="true"><polygon points="1,0.5 9.5,5.5 1,10.5" /></svg>
+            </button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    {#if canHttp}
+      <div class="adhoc">
+        <span class="media-label">Play a URL without saving</span>
+        <div class="row wrap">
+          <input
+            type="text"
+            placeholder="http(s)://stream-url"
+            bind:value={url}
+            style="flex: 1; min-width: 200px;"
+          />
+          <button class="btn btn-accent" disabled={!urlValid} onclick={playUrl}>Play</button>
+        </div>
+      </div>
+    {/if}
+  </div>
   {/if}
 
   {#if streamSourcesEnabled && canInput}
@@ -210,6 +264,10 @@
   {/if}
 </div>
 
+{#if modalOpen}
+  <StreamEditModal preset={modalPreset} onclose={() => (modalOpen = false)} />
+{/if}
+
 <style>
   /* the media block is set off from the card's other rows by a rule above and
      below, with vertical breathing room. */
@@ -222,6 +280,40 @@
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
   }
+  /* tab bar: Local files | Streams */
+  .tabs {
+    gap: 4px;
+  }
+  .tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 4px 10px;
+    font: inherit;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .tab:hover {
+    color: var(--fg);
+  }
+  .tab.active {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+  }
+  .streams-head {
+    align-items: center;
+  }
+  .adhoc {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+  }
+  .spacer {
+    flex: 1;
+  }
+
   /* each source type is a labeled block, separated by a thin rule */
   .media-block {
     display: flex;

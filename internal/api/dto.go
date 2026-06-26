@@ -111,6 +111,30 @@ type GroupNameReq struct {
 	Name  string `json:"name"`
 }
 
+// --- POST /api/stream/presets (cluster-wide HTTP stream presets) -----------
+// Create (empty id) or update a named stream preset. Auth is optional; on an
+// update a scheme with blank secret keeps the stored secret (write-only UI).
+type StreamPresetReq struct {
+	ID   string         `json:"id,omitempty"` // empty == create
+	Name string         `json:"name"`
+	URL  string         `json:"url"`
+	Auth *StreamAuthDTO `json:"auth,omitempty"` // nil/"" scheme == no auth
+}
+
+// StreamAuthDTO carries optional credentials from the browser. Scheme is "",
+// "basic" (User/Pass), or "bearer" (Token).
+type StreamAuthDTO struct {
+	Scheme string `json:"scheme"`
+	User   string `json:"user,omitempty"`
+	Pass   string `json:"pass,omitempty"`
+	Token  string `json:"token,omitempty"`
+}
+
+// --- POST /api/stream/presets/delete ---------------------------------------
+type StreamPresetDeleteReq struct {
+	ID string `json:"id"`
+}
+
 // --- POST /api/play (§6, §9.1) ---------------------------------------------
 // Body is {uri}; back-compat {file} folds to a "file:" URI. uri wins.
 type PlayReq struct {

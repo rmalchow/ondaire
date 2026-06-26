@@ -7,11 +7,12 @@ import (
 
 // Document is the whole replicated state (§4). In-memory only; never persisted.
 type Document struct {
-	Nodes      map[id.ID]*NodeRecord          `json:"nodes"`
-	Groups     map[id.ID]*GroupNameRecord     `json:"groups"`               // group names map
-	Playback   map[id.ID]*PlaybackRecord      `json:"playback"`             // per-group playback
-	Settings   map[id.ID]*GroupSettingsRecord `json:"settings"`             // per-group settings
-	Tombstones map[id.ID]*TombstoneRecord     `json:"tombstones,omitempty"` // operator-deleted nodes (D-del)
+	Nodes         map[id.ID]*NodeRecord          `json:"nodes"`
+	Groups        map[id.ID]*GroupNameRecord     `json:"groups"`                  // group names map
+	Playback      map[id.ID]*PlaybackRecord      `json:"playback"`                // per-group playback
+	Settings      map[id.ID]*GroupSettingsRecord `json:"settings"`                // per-group settings
+	Tombstones    map[id.ID]*TombstoneRecord     `json:"tombstones,omitempty"`    // operator-deleted nodes (D-del)
+	StreamPresets map[id.ID]*StreamPresetRecord  `json:"streamPresets,omitempty"` // cluster-wide saved HTTP stream presets (LWW, any writer)
 }
 
 // TombstoneRecord marks a node id as deleted up to KilledVersion. It is a
@@ -29,11 +30,12 @@ type TombstoneRecord struct {
 // newDocument returns an empty document with initialised maps.
 func newDocument() *Document {
 	return &Document{
-		Nodes:      map[id.ID]*NodeRecord{},
-		Groups:     map[id.ID]*GroupNameRecord{},
-		Playback:   map[id.ID]*PlaybackRecord{},
-		Settings:   map[id.ID]*GroupSettingsRecord{},
-		Tombstones: map[id.ID]*TombstoneRecord{},
+		Nodes:         map[id.ID]*NodeRecord{},
+		Groups:        map[id.ID]*GroupNameRecord{},
+		Playback:      map[id.ID]*PlaybackRecord{},
+		Settings:      map[id.ID]*GroupSettingsRecord{},
+		Tombstones:    map[id.ID]*TombstoneRecord{},
+		StreamPresets: map[id.ID]*StreamPresetRecord{},
 	}
 }
 
@@ -90,6 +92,33 @@ type GroupNameRecord struct {
 	Version   uint64 `json:"version"`
 	UpdatedAt int64  `json:"updatedAt"`
 	Writer    id.ID  `json:"writer"`
+}
+
+// StreamPresetRecord — a cluster-wide saved HTTP stream preset (LWW, any writer),
+// keyed by a generated id. Like group names it is persisted by every node and is
+// exempt from purge. Delete is a soft-delete (Deleted=true at a higher version
+// wins by LWW and is filtered from the snapshot) since this map is grow-only on
+// disk. Auth carries optional credentials (plaintext, trusted-LAN model) and is
+// never exposed to the browser.
+type StreamPresetRecord struct {
+	Name      string                `json:"name"`
+	URL       string                `json:"url"`
+	Auth      *contracts.StreamAuth `json:"auth,omitempty"` // nil = no auth
+	Deleted   bool                  `json:"deleted,omitempty"`
+	Version   uint64                `json:"version"`
+	UpdatedAt int64                 `json:"updatedAt"`
+	Writer    id.ID                 `json:"writer"`
+}
+
+// cloneStreamPreset deep-copies a preset record, including its *Auth pointer, so
+// replicas/snapshots never alias the writer's struct.
+func cloneStreamPreset(r *StreamPresetRecord) *StreamPresetRecord {
+	cp := *r
+	if r.Auth != nil {
+		a := *r.Auth
+		cp.Auth = &a
+	}
+	return &cp
 }
 
 // PlaybackRecord — per-group playback status (§4, written by group master).
@@ -242,6 +271,18 @@ func (d *Document) mergePlayback(g id.ID, r *PlaybackRecord) bool {
 	return true
 }
 
+func (d *Document) mergeStreamPreset(pid id.ID, r *StreamPresetRecord) bool {
+	if r == nil {
+		return false
+	}
+	cur, ok := d.StreamPresets[pid]
+	if ok && !versionedLater(cur.Version, cur.Writer, r.Version, r.Writer) {
+		return false
+	}
+	d.StreamPresets[pid] = cloneStreamPreset(r)
+	return true
+}
+
 func (d *Document) mergeSettings(g id.ID, r *GroupSettingsRecord) bool {
 	if r == nil {
 		return false
@@ -300,6 +341,12 @@ func (d *Document) mergeAllTracked(self id.ID, remote *Document) (changed, looku
 			if g == self {
 				lookupChanged = true // D47: only our own settings record persists
 			}
+		}
+	}
+	for pid, r := range remote.StreamPresets {
+		if d.mergeStreamPreset(pid, r) {
+			changed = true
+			lookupChanged = true // presets persist on every node, like group names
 		}
 	}
 	return changed, lookupChanged
@@ -377,6 +424,9 @@ func (d *Document) clone() *Document {
 	for k, v := range d.Tombstones {
 		cp := *v
 		out.Tombstones[k] = &cp
+	}
+	for k, v := range d.StreamPresets {
+		out.StreamPresets[k] = cloneStreamPreset(v)
 	}
 	return out
 }

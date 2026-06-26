@@ -51,7 +51,26 @@ func (c *Cluster) Snapshot() contracts.Snapshot {
 
 	groups := DeriveGroups(doc.Nodes, doc.Groups, doc.Playback, doc.Settings, alive, c.self)
 
-	return contracts.Snapshot{Nodes: nodes, Groups: groups}
+	presets := make([]contracts.StreamPresetView, 0, len(doc.StreamPresets))
+	for pid, r := range doc.StreamPresets {
+		if r.Deleted {
+			continue
+		}
+		v := contracts.StreamPresetView{ID: pid.String(), Name: r.Name, URL: r.URL}
+		if r.Auth != nil { // expose only that auth exists + its scheme — never secrets
+			v.HasAuth = true
+			v.AuthScheme = r.Auth.Scheme
+		}
+		presets = append(presets, v)
+	}
+	sort.Slice(presets, func(i, j int) bool {
+		if presets[i].Name != presets[j].Name {
+			return presets[i].Name < presets[j].Name
+		}
+		return presets[i].ID < presets[j].ID
+	})
+
+	return contracts.Snapshot{Nodes: nodes, Groups: groups, StreamPresets: presets}
 }
 
 func nodeView(nid id.ID, r *NodeRecord, alive map[id.ID]bool, seen map[id.ID]int64, nowUnix int64) contracts.NodeView {

@@ -29,6 +29,12 @@ type Cluster interface {
 	SetDisabled(disabled []string)
 	// SetSpotifyEndpoints replicates THIS node's Spotify Connect presets (D57).
 	SetSpotifyEndpoints(eps []contracts.SpotifyEndpoint)
+	// SetStreamPreset creates (zero pid) or updates a cluster-wide HTTP stream
+	// preset (name + URL + optional auth); returns the preset id. Replicated +
+	// persisted. An update with a scheme but blank secret preserves the stored one.
+	SetStreamPreset(pid id.ID, name, url string, auth *contracts.StreamAuth) id.ID
+	// DeleteStreamPreset soft-deletes a stream preset cluster-wide.
+	DeleteStreamPreset(pid id.ID)
 	// ForgetNode deletes an OFFLINE node (tombstone + purge references); errors if
 	// the node is self or currently online (POST /api/node/forget).
 	ForgetNode(nid id.ID) error

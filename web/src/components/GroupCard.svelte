@@ -184,7 +184,7 @@
     </h3>
 
     <div class="playbar-slot">
-      <PlaybackBar {group} expanded={selected} />
+      <PlaybackBar {group} expanded={selected} streamPresets={snapshot.streamPresets || []} />
     </div>
   </div>
 

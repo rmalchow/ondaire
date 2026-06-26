@@ -309,6 +309,98 @@ func (c *Cluster) SetGroupSettings(group id.ID, s contracts.GroupSettings) {
 	c.notify()
 }
 
+// SetStreamPreset creates or updates a cluster-wide stream preset (LWW, any
+// writer; persisted on every node, like group names). A zero pid creates a new
+// preset with a fresh id; a non-zero pid updates in place. auth is deep-copied;
+// nil clears auth. Returns the preset id.
+func (c *Cluster) SetStreamPreset(pid id.ID, name, url string, auth *contracts.StreamAuth) id.ID {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return pid
+	}
+	if pid.IsZero() {
+		pid = id.New()
+	}
+	cur := c.doc.StreamPresets[pid]
+	var ver uint64
+	if cur != nil {
+		ver = cur.Version
+	}
+	rec := &StreamPresetRecord{
+		Name:      name,
+		URL:       url,
+		Version:   ver + 1,
+		UpdatedAt: c.clock().Unix(),
+		Writer:    c.self,
+	}
+	if auth != nil && auth.Scheme != "" {
+		a := *auth
+		// Secret preservation (write-only UI): an update keeping the same scheme but
+		// with a blank secret retains the previously stored secret.
+		if cur != nil && cur.Auth != nil && cur.Auth.Scheme == a.Scheme {
+			if a.Scheme == "basic" && a.Pass == "" {
+				a.Pass = cur.Auth.Pass
+				if a.User == "" {
+					a.User = cur.Auth.User
+				}
+			}
+			if a.Scheme == "bearer" && a.Token == "" {
+				a.Token = cur.Auth.Token
+			}
+		}
+		rec.Auth = &a
+	}
+	c.doc.StreamPresets[pid] = rec
+	snap := cloneStreamPreset(rec)
+	c.mu.Unlock()
+	c.enqueueBroadcast(kindStreamPreset, pid, delta{Group: pid, Preset: snap})
+	c.markDirty()
+	c.notify()
+	return pid
+}
+
+// DeleteStreamPreset soft-deletes a preset (a higher-versioned Deleted record
+// wins by LWW and is filtered from the snapshot).
+func (c *Cluster) DeleteStreamPreset(pid id.ID) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	cur := c.doc.StreamPresets[pid]
+	if cur == nil {
+		c.mu.Unlock()
+		return
+	}
+	rec := &StreamPresetRecord{
+		Name:      cur.Name,
+		URL:       cur.URL,
+		Deleted:   true,
+		Version:   cur.Version + 1,
+		UpdatedAt: c.clock().Unix(),
+		Writer:    c.self,
+	}
+	c.doc.StreamPresets[pid] = rec
+	snap := cloneStreamPreset(rec)
+	c.mu.Unlock()
+	c.enqueueBroadcast(kindStreamPreset, pid, delta{Group: pid, Preset: snap})
+	c.markDirty()
+	c.notify()
+}
+
+// StreamPreset returns a deep copy of a live (non-deleted) preset for play-time
+// resolution. ok is false when unknown or soft-deleted.
+func (c *Cluster) StreamPreset(pid id.ID) (StreamPresetRecord, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r := c.doc.StreamPresets[pid]
+	if r == nil || r.Deleted {
+		return StreamPresetRecord{}, false
+	}
+	return *cloneStreamPreset(r), true
+}
+
 // Observe records that we saw `peer` sending from IP `ip` now (§3.1). Fed by the
 // HTTP layer and gossip events. Updates our own observed map; re-broadcasts at
 // most once per observeBroadcastInterval per (peer, ip) to avoid churn.

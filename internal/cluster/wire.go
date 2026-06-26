@@ -11,11 +11,12 @@ import (
 
 // kind tags a NotifyMsg broadcast payload (first byte before the JSON).
 const (
-	kindNodeDelta byte = 'n' // one NodeRecord
-	kindGroupName byte = 'g' // one group-name entry
-	kindPlayback  byte = 'p' // one playback entry
-	kindSettings  byte = 's' // one settings entry
-	kindTombstone byte = 't' // one node tombstone (operator delete, keyed by node id in Group)
+	kindNodeDelta    byte = 'n' // one NodeRecord
+	kindGroupName    byte = 'g' // one group-name entry
+	kindPlayback     byte = 'p' // one playback entry
+	kindSettings     byte = 's' // one settings entry
+	kindTombstone    byte = 't' // one node tombstone (operator delete, keyed by node id in Group)
+	kindStreamPreset byte = 'r' // one stream preset ('r' for radio; keyed by preset id in Group)
 )
 
 // delta is the JSON body of a single-record broadcast: exactly one of the
@@ -28,6 +29,7 @@ type delta struct {
 	Playback  *PlaybackRecord      `json:"playback,omitempty"`
 	Settings  *GroupSettingsRecord `json:"settings,omitempty"`
 	Tombstone *TombstoneRecord     `json:"tombstone,omitempty"`
+	Preset    *StreamPresetRecord  `json:"preset,omitempty"` // map key (preset id) in Group, for kindStreamPreset
 }
 
 var errBadDelta = errors.New("cluster: empty delta payload")

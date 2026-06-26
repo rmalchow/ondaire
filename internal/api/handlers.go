@@ -451,6 +451,66 @@ func (s *Server) handleGroupName(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// handleStreamPresetSet creates or updates a cluster-wide HTTP stream preset.
+// Secrets are accepted but never echoed back (the Snapshot exposes only hasAuth).
+func (s *Server) handleStreamPresetSet(c echo.Context) error {
+	var req StreamPresetReq
+	if err := c.Bind(&req); err != nil {
+		return failCode(c, http.StatusBadRequest, "bad_request", "")
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return failCode(c, http.StatusBadRequest, "bad_name", "")
+	}
+	if !isHTTPURL(req.URL) {
+		return failCode(c, http.StatusBadRequest, "bad_url", "")
+	}
+	var pid id.ID
+	if req.ID != "" {
+		var err error
+		if pid, err = id.Parse(req.ID); err != nil {
+			return failCode(c, http.StatusBadRequest, "bad_id", "")
+		}
+	}
+	var auth *contracts.StreamAuth
+	if req.Auth != nil && req.Auth.Scheme != "" {
+		switch req.Auth.Scheme {
+		case "basic", "bearer":
+			auth = &contracts.StreamAuth{
+				Scheme: req.Auth.Scheme,
+				User:   req.Auth.User,
+				Pass:   req.Auth.Pass,
+				Token:  req.Auth.Token,
+			}
+		default:
+			return failCode(c, http.StatusBadRequest, "bad_auth", "")
+		}
+	}
+	pid = s.cfg.Cluster.SetStreamPreset(pid, strings.TrimSpace(req.Name), strings.TrimSpace(req.URL), auth)
+	s.log.Info("ui mutation", append(auditAttrs(c, "streamPreset"), "id", pid.String(), "name", req.Name, "hasAuth", auth != nil)...)
+	return c.JSON(http.StatusOK, map[string]string{"id": pid.String()})
+}
+
+// handleStreamPresetDelete soft-deletes a stream preset cluster-wide.
+func (s *Server) handleStreamPresetDelete(c echo.Context) error {
+	var req StreamPresetDeleteReq
+	if err := c.Bind(&req); err != nil {
+		return failCode(c, http.StatusBadRequest, "bad_request", "")
+	}
+	pid, err := id.Parse(req.ID)
+	if err != nil {
+		return failCode(c, http.StatusBadRequest, "bad_id", "")
+	}
+	s.cfg.Cluster.DeleteStreamPreset(pid)
+	s.log.Info("ui mutation", append(auditAttrs(c, "streamPresetDelete"), "id", pid.String())...)
+	return c.NoContent(http.StatusNoContent)
+}
+
+// isHTTPURL reports whether u is a syntactically plausible http(s) URL.
+func isHTTPURL(u string) bool {
+	l := strings.ToLower(strings.TrimSpace(u))
+	return strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://")
+}
+
 // handlePlay serves a media-source URI to THIS node's group; master only
 // (§6/§9.1). {file} folds to a "file:" URI; a bare scheme-less path too.
 func (s *Server) handlePlay(c echo.Context) error {

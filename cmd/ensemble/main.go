@@ -718,8 +718,19 @@ func runCombined(ctx context.Context, opt options, cfg *config.Config, base *slo
 		disabled = newDisableState(cfg.Disabled)
 	}
 
-	// Media + opus factories (D's audio package), bound to MediaDir.
-	media := mediaFactory{mediaDir: cfg.MediaDir, disabled: disabled}
+	// Media + opus factories (D's audio package), bound to MediaDir. The stream
+	// resolver reads a preset's URL + auth from cluster state at play time.
+	media := mediaFactory{
+		mediaDir: cfg.MediaDir,
+		disabled: disabled,
+		resolveStream: func(pid id.ID) (string, *contracts.StreamAuth, bool) {
+			rec, ok := cl.StreamPreset(pid)
+			if !ok {
+				return "", nil, false
+			}
+			return rec.URL, rec.Auth, true
+		},
+	}
 	var opusFac group.OpusFactory
 	if audio.OpusAvailable() {
 		opusFac = opusFactory{log: log, disabled: disabled}
@@ -1261,11 +1272,29 @@ func memberStatsLoop(ctx context.Context, sk *sink.Playout, fol *clock.Follower,
 type mediaFactory struct {
 	mediaDir string
 	disabled *disableState
+	// resolveStream maps a stream:<id> preset to its URL + optional auth from
+	// cluster state at play time (credentials never travel in the URI). nil-safe.
+	resolveStream func(pid id.ID) (url string, auth *contracts.StreamAuth, ok bool)
 }
 
 func (m mediaFactory) Open(uri string) (group.MediaSource, error) {
 	if m.disabled.has("input") && uriScheme(uri) == "input" {
 		return nil, errInputDisabled
+	}
+	// stream:<preset-id> — resolve to a (possibly authenticated) HTTP source.
+	if uriScheme(uri) == "stream" {
+		if m.resolveStream == nil {
+			return nil, errUnknownStream
+		}
+		pid, err := id.Parse(strings.TrimPrefix(uri, "stream:"))
+		if err != nil {
+			return nil, errBadStream
+		}
+		url, auth, ok := m.resolveStream(pid)
+		if !ok {
+			return nil, errUnknownStream
+		}
+		return audio.OpenHTTPAuth(context.Background(), url, auth)
 	}
 	src, err := audio.Open(context.Background(), uri, m.mediaDir)
 	if err != nil {
@@ -1288,7 +1317,11 @@ func uriScheme(uri string) string {
 	return strings.ToLower(uri[:i])
 }
 
-var errInputDisabled = errors.New("audio: input capture disabled on this node")
+var (
+	errInputDisabled = errors.New("audio: input capture disabled on this node")
+	errBadStream     = errors.New("audio: malformed stream preset id")
+	errUnknownStream = errors.New("audio: unknown stream preset")
+)
 
 // opusFactory adapts audio.NewOpusEncoder to group.OpusFactory. It refuses when
 // "opus" is operator-disabled on this node (D40) — dl.ErrUnavailable so the group

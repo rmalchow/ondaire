@@ -91,7 +91,10 @@ static void on_setdelay(int16_t ms) {
     bool changed = !c.have_delay || c.delay_ms != ms;
     c.have_delay = true; c.delay_ms = ms;
     unlock();
-    if (changed) player_set_delay(ms);   // re-anchoring every heartbeat is audible
+    if (changed) {
+        player_set_delay(ms);            // re-anchoring every heartbeat is audible
+        ESP_LOGI(TAG, "output delay set to %d ms", ms);
+    }
 }
 
 static void on_seteq(uint16_t ms) {

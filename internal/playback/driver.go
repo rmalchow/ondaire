@@ -221,12 +221,16 @@ func (d *Driver) reconcile(snap contracts.Snapshot) {
 		// listener dedups, so a steady value re-applies only once.
 		dr.player.SetVolume(volPct(nv.Volume), false)
 		dr.player.SetChannel(chanModeByte(nv.Channel)) // dual-mono select; sink dedups
-		// Output delay is the NODE's property (its fixed device latency), set at
-		// startup from node.json and persisted there. The master must NOT push it
-		// routinely — that would clobber the node's own value with the proxied
-		// record's default (0), which is exactly the regression that broke sync.
-		// Calibration is the one exception (a deliberate, measured one-shot) and
-		// rides its own path, not this heartbeat.
+		// Output delay (D36) — pushed like volume/channel. The replicated cluster
+		// record IS the persisted source of truth for these per-node settings (it's
+		// seeded from node.json at boot and gossiped), so the master asserts it to
+		// EVERY player it drives. The node dedups (only re-anchors on a real change),
+		// so for a non-gossiping ESP32 this is the only path that carries the value,
+		// and for a gossiping full node it's idempotent with its own local apply —
+		// same persisted value, same result. (Earlier this was gated off to avoid a
+		// transient default-0 clobber; the record now always carries the real value
+		// from boot, so the gate is gone — unify the local + remote control plane.)
+		dr.player.SetDelay(nv.OutputDelayMs)
 		if playing && epOK {
 			dr.player.Attach(Attach{
 				Source:    source,

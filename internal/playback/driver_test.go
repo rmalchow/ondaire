@@ -96,13 +96,30 @@ func TestDriverAttachesPlayingAssignedNode(t *testing.T) {
 
 	ctrl := netip.MustParseAddrPort("10.0.0.7:9300")
 	hs := packetsTo(w, ctrl)
-	// ATTACH + SETVOL only. Output delay is the node's own property (set from its
-	// node.json), so the driver must NOT push SETDELAY on the heartbeat.
+	// ATTACH + SETVOL + SETDELAY. A non-gossiping playback node keeps no node.json,
+	// so the master's record is the only source of its output delay — the driver
+	// MUST push SETDELAY (the node dedups). It carries the record's OutputDelayMs.
 	if !hasType(hs, stream.TypeAttach) || !hasType(hs, stream.TypeSetVol) {
 		t.Fatalf("expected ATTACH+SETVOL, got %d packets", len(hs))
 	}
-	if hasType(hs, stream.TypeSetDelay) {
-		t.Fatal("driver must not push SETDELAY routinely (output delay is node-owned)")
+	if !hasType(hs, stream.TypeSetDelay) {
+		t.Fatal("driver must push SETDELAY to a playback node (its delay is master-owned)")
+	}
+	// The pushed delay must equal the node record's OutputDelayMs (20 ms).
+	var sawDelay bool
+	for _, wr := range w.writes {
+		h, payload, err := stream.DecodeFrame(wr.pkt)
+		if err != nil || h.Type != stream.TypeSetDelay {
+			continue
+		}
+		sd, _ := stream.DecodeSetDelay(payload)
+		if sd.DelayMs != 20 {
+			t.Fatalf("SETDELAY DelayMs = %d, want 20", sd.DelayMs)
+		}
+		sawDelay = true
+	}
+	if !sawDelay {
+		t.Fatal("no SETDELAY packet decoded")
 	}
 
 	// Verify the ATTACH carries the master's own endpoints + the group settings.

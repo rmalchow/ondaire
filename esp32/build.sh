@@ -26,7 +26,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "$BOARD" in
   esp32s3|esp32|esp32c3|esp32c6) TARGET="$BOARD" ;;
   esp32s3-supermini)             TARGET="esp32s3" ;;
-  *) echo "unknown board '$BOARD' (esp32s3|esp32s3-supermini|esp32|esp32c3|esp32c6)"; exit 2 ;;
+  esp32s3-zero)                  TARGET="esp32s3" ;;
+  *) echo "unknown board '$BOARD' (esp32s3|esp32s3-supermini|esp32s3-zero|esp32|esp32c3|esp32c6)"; exit 2 ;;
 esac
 
 BUILD_DIR="build-$BOARD"

@@ -355,7 +355,7 @@ export const content = {
       badge: "Unstable",
       title: "ESP32 players — experimental",
       body:
-        "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ensemble player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Support is still in bring-up, so expect rough edges. Tested on the ESP32-S3 Super Mini (PSRAM version) with a PCM5102A DAC.",
+        "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ensemble player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Support is still in bring-up, so expect rough edges. Tested on the ESP32-S3 Super Mini and the Waveshare ESP32-S3-Zero (both PSRAM) with a PCM5102A DAC.",
       href: "flash.html",
       hrefLabel: "Open the browser flasher",
     },
@@ -593,6 +593,18 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         // flasher knows the selected board, the finished step links straight to it.
         doc: `${REPO}/-/blob/main/esp32/devices/esp32-s3-super-mini.md`,
         file: "assets/firmware/ensemble-fw-esp32s3-supermini.bin",
+      },
+      {
+        id: "esp32s3-zero",
+        chipFamily: "ESP32-S3",
+        label: "Waveshare ESP32-S3-Zero",
+        note: "Dual-core ESP32-S3 + 2 MB PSRAM, native USB-C, 23.5 × 18 mm. Pair with a PCM5102A I2S DAC.",
+        // Marketing board photo. Lives in site/src/assets/img/ — the Docker build
+        // context is site/ only, so it ships via copyDir (the same photo also sits
+        // in esp32/devices/ for the GitLab device sheet).
+        img: "assets/img/esp32-s3-zero.jpg",
+        doc: `${REPO}/-/blob/main/esp32/devices/esp32-s3-zero.md`,
+        file: "assets/firmware/ensemble-fw-esp32s3-zero.bin",
       },
     ],
   },

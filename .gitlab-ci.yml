@@ -143,6 +143,7 @@ build-release:
   parallel:
     matrix:
       - { BOARD: esp32s3-supermini, TARGET: esp32s3, CHIP: ESP32S3 }
+      - { BOARD: esp32s3-zero, TARGET: esp32s3, CHIP: ESP32S3ZERO }
   # Use the IDF + tools PRE-INSTALLED in the espressif/idf image. (This previously
   # overrode IDF_TOOLS_PATH to a project-local .espressif and cached it — but on a
   # cache miss that dir is empty, so export.sh cannot find the Python venv and the

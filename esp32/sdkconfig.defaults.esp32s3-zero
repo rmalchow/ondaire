@@ -1,0 +1,23 @@
+# Waveshare ESP32-S3-Zero (23.5x18mm USB-C). Same S3FH4R2 silicon as the Super
+# Mini, so the console is the built-in USB-Serial-JTAG CDC (no external UART
+# bridge) — exactly what the web flasher's Improv + JSON config talk over. The
+# only board difference is the WS2812 status LED (GPIO21 vs GPIO48).
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Console + stdio over the built-in USB-Serial-JTAG CDC port.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Board selection (boards/board.h + default pin map).
+CONFIG_ENSEMBLE_BOARD_ESP32S3_ZERO=y
+
+# PSRAM: the S3-Zero is the ESP32-S3FH4R2 variant (2 MB embedded quad PSRAM) —
+# see docs/developer/esp32.md §3.1 (players are PSRAM-only). QUAD mode, auto-size.
+# IGNORE_NOTFOUND keeps a bare no-PSRAM unit booting as a bench build rather than
+# aborting in the bootloader.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y

@@ -101,8 +101,9 @@ they are not products.
 | Generic / bring-your-own-pins (PSRAM) | S3 / WROVER | required | varies | varies | — | [ ] |
 
 Boards in hand: an **ESP32-WROVER** DevKitC (8 MB PSRAM, classic dual-core **with**
-APLL — the first PSRAM target on the bench). The **S3-Zero** (2 MB PSRAM) is the
-inbound small-form pick. Out of scope: non-PSRAM ESP32s (above); **Nordic** parts
+APLL — the first PSRAM target on the bench), an **ESP32-S3 Super Mini** and a
+**Waveshare ESP32-S3-Zero** (both S3FH4R2, 2 MB PSRAM — the small-form picks, board
+profiles `esp32s3-supermini` / `esp32s3-zero`). Out of scope: non-PSRAM ESP32s (above); **Nordic** parts
 (BLE/Thread radios, no Wi-Fi); and the **RP2040 / Pico W** family (a different SDK,
 and the plain Pico W is RAM-tight at 264 KB — the **Pico 2 W**, 520 KB, would be the
 only sane non-Espressif port).

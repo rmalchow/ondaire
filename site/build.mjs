@@ -23,302 +23,96 @@ const esc = (s = "") =>
 const eq = (n = 7) =>
   `<span class="eq" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i style="--i:${i}"></i>`).join("")}</span>`;
 
-// Nav links, with in-page anchors prefixed so they also work from a sub-page
-// (download.html → index.html#why). prefix is "" on the home page.
 // GitHub mark, sized to sit inline with the nav text (fills currentColor).
 const GITHUB_ICON =
   '<svg class="gh-mark" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 012-.27c.68 0 1.36.09 2 .27 1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
 
-const renderNav = (prefix = "") =>
+// The nav is now a shortlist of page links (install/ui/tech) + the source — no
+// in-page anchors, so no prefix juggling: every link is a real URL or external.
+// `active` is the current page's href (e.g. "ui.html") so its link highlights.
+const renderNav = (active = "") =>
   C.nav
     .map((l) => {
-      const href = l.href.startsWith("#") ? prefix + l.href : l.href;
-      const rel = l.href.startsWith("#") ? "" : ' rel="noopener"';
+      const ext = /^https?:/.test(l.href);
+      const rel = ext ? ' rel="noopener"' : "";
       const icon = l.icon === "github" ? GITHUB_ICON : "";
-      const cls = icon ? ' class="nav-gh"' : "";
-      return `<a${cls} href="${esc(href)}"${rel}>${icon}${esc(l.label)}</a>`;
+      const current = l.href === active;
+      const classes = [icon ? "nav-gh" : "", current ? "is-current" : ""].filter(Boolean).join(" ");
+      const cls = classes ? ` class="${classes}"` : "";
+      const aria = current ? ' aria-current="page"' : "";
+      return `<a${cls} href="${esc(l.href)}"${rel}${aria}>${icon}${esc(l.label)}</a>`;
     })
     .join("");
 
-const features = C.why.features
-  .map(
-    (f) => `
-      <article class="feat">
-        <div class="feat-top"><span class="feat-n">${esc(f.n)}</span><span class="tag">${esc(f.tag)}</span></div>
-        <h3>${esc(f.title)}</h3>
-        <p>${esc(f.body)}</p>
-      </article>`
-  )
-  .join("");
-
-const screens = C.screens.items
-  .map(
-    (s, i) => `
-      <article class="screen${i % 2 ? " flip" : ""}">
-        <figure class="screen-shot">
-          <img class="lb-thumb" data-lb="${i}" role="button" tabindex="0" aria-label="Open “${esc(s.title)}” full size" src="${esc(s.src)}" alt="${esc(s.alt)}" loading="lazy" decoding="async" />
-        </figure>
-        <div class="screen-copy">
-          <span class="kicker">${eq(5)}${esc(s.kicker)}</span>
-          <h3>${esc(s.title)}</h3>
-          <p>${esc(s.body)}</p>
-        </div>
-      </article>`
-  )
-  .join("");
-
-// Theme carousel — one framed screenshot per built-in theme, in a scroll-snap row.
-const themeSlides = C.themes.items
-  .map(
-    (t, i) => `
-      <figure class="tc-slide" data-i="${i}">
-        <div class="tc-frame"><img src="${esc(t.img)}" alt="ensemble in the ${esc(t.name)} theme" loading="lazy" decoding="async" /></div>
-        <figcaption class="tc-cap"><span class="tc-name">${esc(t.name)}</span><span class="tc-blurb">${esc(t.blurb)}</span></figcaption>
-      </figure>`
-  )
-  .join("");
-const themeDots = C.themes.items
-  .map(
-    (t, i) =>
-      `<button class="tc-dot" data-i="${i}" aria-label="Show the ${esc(t.name)} theme"${i === 0 ? ' aria-current="true"' : ""}></button>`
-  )
-  .join("");
-
-// Lightbox carousel — the screenshot gallery followed by the measured-coherence
-// graphs, in order. data-lb indices on the thumbs are global across both sets, so
-// the proof graphs open at C.screens.items.length + their own index. The graphs are
-// wide (not portrait phone shots), so they carry a `wide` flag for a larger cap.
-const lbItems = [
-  ...C.screens.items.map((s) => ({ src: s.src, alt: s.alt, cap: `${s.kicker} — ${s.title}` })),
-  ...C.proof.items.map((s) => ({ src: s.src, alt: s.alt, cap: `${s.kicker} — ${s.title}`, wide: true })),
-];
-
-const lbSlides = lbItems
-  .map(
-    (s) => `
-      <figure class="lb-slide${s.wide ? " wide" : ""}" data-cap="${esc(s.cap)}">
-        <img src="${esc(s.src)}" alt="${esc(s.alt)}" loading="lazy" decoding="async" />
-      </figure>`
-  )
-  .join("");
-
-const lbDots = lbItems
-  .map(
-    (s, i) =>
-      `<button class="lb-dot" type="button" data-i="${i}" aria-label="View “${esc(s.cap)}”"></button>`
-  )
-  .join("");
-
-// The hero reuses one of the gallery shots; open the lightbox at its slide.
-const heroLbIdx = Math.max(0, C.screens.items.findIndex((s) => s.src === C.hero.shot.src));
-
-const steps = C.quickstart.steps
-  .map(
-    (s) => `
-      <li class="step">
-        <span class="step-n">${esc(s.n)}</span>
-        <h3>${esc(s.title)}</h3>
-        <p>${esc(s.body)}</p>
-      </li>`
-  )
-  .join("");
-
-const techItems = C.tech.items
-  .map(
-    (t) => `
-      <article class="tech">
-        <span class="tag">${esc(t.tag)}</span>
-        <p class="tech-problem">${esc(t.problem)}</p>
-        <p class="tech-solution"><span class="tech-arrow" aria-hidden="true">→</span>${esc(t.solution)}</p>
-      </article>`
-  )
-  .join("");
-
-// Measured-coherence proof: a branded graph (bare PNG from tools/calib/) with the
-// headline + honest judgement set in the brand font. Alternates side like screens.
-const proofLbBase = C.screens.items.length;
-const proof = C.proof.items
-  .map(
-    (s, i) => `
-      <article class="proof-item${i % 2 ? " flip" : ""}">
-        <figure class="proof-shot">
-          <img class="lb-thumb" data-lb="${proofLbBase + i}" role="button" tabindex="0" aria-label="Open “${esc(s.title)}” full size" src="${esc(s.src)}" alt="${esc(s.alt)}" loading="lazy" decoding="async" />
-        </figure>
-        <div class="proof-copy">
-          <span class="kicker">${eq(5)}${esc(s.kicker)}</span>
-          ${s.metric ? `<span class="proof-metric">${esc(s.metric)}</span>` : ""}
-          <h3>${esc(s.title)}</h3>
-          <p>${esc(s.body)}</p>
-        </div>
-      </article>`
-  )
-  .join("");
-
-const testimonials = C.testimonials.items
-  .map(
-    (t) => `
-      <figure class="quote">
-        <img class="quote-photo" src="${esc(t.img)}" alt="${esc(t.name)}" loading="lazy" decoding="async" width="72" height="72" />
-        <blockquote>“${esc(t.quote)}”</blockquote>
-        <figcaption><span class="quote-name">${esc(t.name)}</span><span class="quote-role">${esc(t.role)}</span></figcaption>
-        ${
-          t.credit
-            ? `<span class="quote-credit">image: <a href="${esc(t.credit.href)}" target="_blank" rel="noopener license" title="source on Wikimedia Commons">${esc([t.credit.author, t.credit.license].filter(Boolean).join(" · "))}</a></span>`
-            : ""
-        }
-      </figure>`
-  )
-  .join("");
-
-const footLinks = C.footer.links
-  .map((l) => `<a href="${esc(l.href)}" rel="noopener">${esc(l.label)}</a>`)
-  .join("");
-
-const page = `<!doctype html>
-<html lang="en">
-<head>
+// ── shared page chrome ──────────────────────────────────────────────────
+// <head> contents shared by every page (og:image defaults to the overview shot).
+const head = (title, description, og = "assets/img/overview.png") => `
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${esc(C.meta.title)}</title>
-<meta name="description" content="${esc(C.meta.description)}" />
+<title>${esc(title)}</title>
+<meta name="description" content="${esc(description)}" />
 <meta name="theme-color" content="${esc(C.meta.themeColor)}" />
-<meta property="og:title" content="${esc(C.meta.title)}" />
-<meta property="og:description" content="${esc(C.meta.description)}" />
+<meta property="og:title" content="${esc(title)}" />
+<meta property="og:description" content="${esc(description)}" />
 <meta property="og:type" content="website" />
-<meta property="og:image" content="assets/img/overview.png" />
+<meta property="og:image" content="${esc(og)}" />
 <link rel="preload" href="assets/fonts/fraunces-wght.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin />
-<link rel="stylesheet" href="assets/styles.css" />
-</head>
-<body>
-<div class="grain" aria-hidden="true"></div>
+<link rel="stylesheet" href="assets/styles.css" />`;
 
+// Right-hand nav CTA: "Get it" on the marketing pages, "← Home" on download/flash.
+const GET_IT_CTA = `<a class="btn btn-solid nav-cta" href="${esc(C.hero.primary.href)}" rel="noopener">${esc(C.hero.primary.label)}</a>`;
+const HOME_CTA = `<a class="btn btn-ghost nav-cta" href="index.html">← Home</a>`;
+
+const navHeader = (brandHref, cta, active = "") => `
 <header class="nav">
-  <a class="brand" href="#top">${esc(C.brand.name)}<span class="brand-dot"></span></a>
-  <nav class="nav-links">${renderNav("")}</nav>
-  <a class="btn btn-solid nav-cta" href="${esc(C.hero.primary.href)}" rel="noopener">${esc(C.hero.primary.label)}</a>
-</header>
+  <a class="brand" href="${esc(brandHref)}">${esc(C.brand.name)}<span class="brand-dot"></span></a>
+  <nav class="nav-links">${renderNav(active)}</nav>
+  ${cta}
+</header>`;
 
-<main id="top">
-  <section class="hero">
-    <div class="hero-copy">
-      <span class="eyebrow">${eq(6)}${esc(C.hero.eyebrow)}</span>
-      <h1>${C.hero.title.map((t) => `<span>${esc(t)}</span>`).join("")}</h1>
-      <p class="lede">${esc(C.hero.lede)}</p>
-      <div class="actions">
-        <a class="btn btn-solid" href="${esc(C.hero.primary.href)}" rel="noopener">${esc(C.hero.primary.label)}<span class="arrow">→</span></a>
-        <a class="btn btn-ghost" href="${esc(C.hero.secondary.href)}" rel="noopener">${esc(C.hero.secondary.label)}</a>
-      </div>
-      <div class="snippet">
-        <code><span class="prompt">$</span> ${esc(C.hero.snippet.cmd)}</code>
-        <span class="snippet-cap">${esc(C.hero.snippet.caption)}</span>
-      </div>
-    </div>
-    <figure class="hero-shot">
-      <div class="frame"><img class="lb-thumb" data-lb="${heroLbIdx}" role="button" tabindex="0" aria-label="Open screenshots full size" src="${esc(C.hero.shot.src)}" alt="${esc(C.hero.shot.alt)}" /></div>
-    </figure>
-  </section>
-
-  <section id="why" class="why">
-    <header class="sec-head">
-      <span class="eyebrow">${esc(C.why.eyebrow)}</span>
-      <h2>${esc(C.why.title)}</h2>
-    </header>
-    <div class="feat-grid">${features}</div>
-  </section>
-
-  <section id="screens" class="screens">
-    <header class="sec-head">
-      <span class="eyebrow">${esc(C.screens.eyebrow)}</span>
-      <h2>${esc(C.screens.title)}</h2>
-    </header>
-    <div class="screen-list">${screens}</div>
-  </section>
-
-  <section id="themes" class="themes">
-    <header class="sec-head">
-      <span class="eyebrow">${esc(C.themes.eyebrow)}</span>
-      <h2>${esc(C.themes.title)}</h2>
-      <p class="sec-intro">${esc(C.themes.intro)}</p>
-    </header>
-    <div class="tc">
-      <button class="tc-arrow tc-prev" type="button" aria-label="Previous theme">‹</button>
-      <div class="tc-track">${themeSlides}</div>
-      <button class="tc-arrow tc-next" type="button" aria-label="Next theme">›</button>
-    </div>
-    <div class="tc-dots">${themeDots}</div>
-  </section>
-
-  <section id="quickstart" class="how">
-    <header class="sec-head">
-      <span class="eyebrow">${esc(C.quickstart.eyebrow)}</span>
-      <h2>${esc(C.quickstart.title)}</h2>
-    </header>
-    <ol class="steps">${steps}</ol>
-    <div class="qs-cta">
-      <p class="qs-cta-text">${esc(C.quickstart.cta.text)}</p>
-      <a class="btn btn-solid qs-cta-btn" href="${esc(C.quickstart.cta.href)}" rel="noopener">${esc(C.quickstart.cta.label)}<span class="arrow">→</span></a>
-    </div>
-  </section>
-
-  <section id="tech" class="tech-sec">
-    <header class="sec-head">
-      <span class="eyebrow">${esc(C.tech.eyebrow)}</span>
-      <h2>${esc(C.tech.title)}</h2>
-      <p class="sec-intro">${esc(C.tech.intro)}</p>
-    </header>
-    <div class="tech-grid">${techItems}</div>
-    <header class="sec-head tech-proof-head">
-      <span class="eyebrow">${esc(C.proof.eyebrow)}</span>
-      <h2>${esc(C.proof.title)}</h2>
-      <p class="sec-intro">${esc(C.proof.intro)}</p>
-    </header>
-    <div class="proof-list">${proof}</div>
-  </section>
-
-  <section id="praise" class="praise">
-    <header class="sec-head">
-      <span class="eyebrow">${esc(C.testimonials.eyebrow)}</span>
-      <h2>${esc(C.testimonials.title)}</h2>
-      <p class="sec-intro">${esc(C.testimonials.note)}</p>
-    </header>
-    <div class="quote-grid">${testimonials}</div>
-  </section>
-
-  <section id="colophon" class="colophon">
-    <header class="sec-head">
-      <span class="eyebrow">${esc(C.authorship.eyebrow)}</span>
-      <h2>${esc(C.authorship.title)}</h2>
-    </header>
-    <div class="colophon-body">${C.authorship.body.map((p) => `<p>${esc(p)}</p>`).join("")}</div>
-  </section>
-
-  <section class="cta">
-    <h2>${esc(C.cta.title)}</h2>
-    <p>${esc(C.cta.body)}</p>
-    <div class="actions">
-      <a class="btn btn-solid" href="${esc(C.cta.primary.href)}" rel="noopener">${esc(C.cta.primary.label)}<span class="arrow">→</span></a>
-      <a class="btn btn-ghost" href="${esc(C.cta.secondary.href)}" rel="noopener">${esc(C.cta.secondary.label)}</a>
-    </div>
-  </section>
-</main>
-
+const footer = () => `
 <footer class="foot">
   <div class="foot-brand">${esc(C.brand.name)}${eq(4)}</div>
   <p class="foot-note">${esc(C.footer.note)}</p>
-  <nav class="foot-links">${footLinks}</nav>
-</footer>
+  <nav class="foot-links">${C.footer.links
+    .map((l) => `<a href="${esc(l.href)}" rel="noopener">${esc(l.label)}</a>`)
+    .join("")}</nav>
+</footer>`;
 
+// Lightbox markup for a given image set. Thumbs elsewhere on the page open it via
+// a data-lb index into this same array. Pages that have no zoomable image just
+// omit it (and the LIGHTBOX_SCRIPT no-ops when #lightbox is absent).
+const lightbox = (items) => {
+  const slides = items
+    .map(
+      (s) => `
+      <figure class="lb-slide${s.wide ? " wide" : ""}" data-cap="${esc(s.cap)}">
+        <img src="${esc(s.src)}" alt="${esc(s.alt)}" loading="lazy" decoding="async" />
+      </figure>`
+    )
+    .join("");
+  const dots = items
+    .map(
+      (s, i) =>
+        `<button class="lb-dot" type="button" data-i="${i}" aria-label="View “${esc(s.cap)}”"></button>`
+    )
+    .join("");
+  return `
 <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Screenshots" hidden>
   <button class="lb-btn lb-close" type="button" aria-label="Close (Esc)">✕</button>
   <button class="lb-btn lb-nav lb-prev" type="button" aria-label="Previous">‹</button>
   <button class="lb-btn lb-nav lb-next" type="button" aria-label="Next">›</button>
-  <div class="lb-track">${lbSlides}</div>
+  <div class="lb-track">${slides}</div>
   <p class="lb-cap" aria-live="polite"></p>
-  <div class="lb-dots">${lbDots}</div>
-</div>
+  <div class="lb-dots">${dots}</div>
+</div>`;
+};
 
-<script>
+// Lightbox behaviour — scroll-snap track, arrows, dots, keyboard. Shared verbatim
+// by every page that calls lightbox(); guards on #lightbox so it's safe to include
+// (or omit) anywhere.
+const LIGHTBOX_SCRIPT = `
 (function () {
   var lb = document.getElementById("lightbox");
   if (!lb) return;
@@ -383,9 +177,11 @@ const page = `<!doctype html>
     else if (e.key === "ArrowLeft") goTo(idx - 1, true);
     else if (e.key === "ArrowRight") goTo(idx + 1, true);
   });
-})();
+})();`;
 
-// Theme carousel: scroll-snap track with arrows, dots, and gentle autoplay.
+// Theme carousel — scroll-snap track with arrows, dots, and gentle autoplay.
+// Shared by ui.html; no-ops when there's no .tc-track on the page.
+const THEME_CAROUSEL_SCRIPT = `
 (function () {
   var track = document.querySelector(".tc-track");
   if (!track) return;
@@ -426,11 +222,346 @@ const page = `<!doctype html>
   }
   ["pointerdown", "mouseenter", "focusin"].forEach(function (ev) { track.addEventListener(ev, stop); });
   render(); start();
-})();
-</script>
+})();`;
+
+// Theme carousel — one framed screenshot per built-in theme, in a scroll-snap row.
+const themeSlides = C.themes.items
+  .map(
+    (t, i) => `
+      <figure class="tc-slide" data-i="${i}">
+        <div class="tc-frame"><img src="${esc(t.img)}" alt="ensemble in the ${esc(t.name)} theme" loading="lazy" decoding="async" /></div>
+        <figcaption class="tc-cap"><span class="tc-name">${esc(t.name)}</span><span class="tc-blurb">${esc(t.blurb)}</span></figcaption>
+      </figure>`
+  )
+  .join("");
+const themeDots = C.themes.items
+  .map(
+    (t, i) =>
+      `<button class="tc-dot" data-i="${i}" aria-label="Show the ${esc(t.name)} theme"${i === 0 ? ' aria-current="true"' : ""}></button>`
+  )
+  .join("");
+
+// The three prominent home blocks. Each is an image (or a faux-terminal mock for
+// the install block) beside copy + a "learn more" link to its own page; they
+// alternate sides via .flip.
+const homeBlocks = C.home.blocks
+  .map((b, i) => {
+    const media = b.term
+      ? `<div class="block-term" aria-hidden="true">
+          <div class="term-bar"><span></span><span></span><span></span></div>
+          <pre class="term-body"><code>${b.term
+            .map((l) =>
+              l.p
+                ? `<span class="term-line"><span class="term-prompt">${esc(l.p)}</span> <span class="term-cmd">${esc(l.t)}</span></span>`
+                : `<span class="term-line term-out">${esc(l.c)}</span>`
+            )
+            .join("")}</code></pre>
+        </div>`
+      : `<figure class="block-shot${b.phone ? " phone" : ""}">
+          <img src="${esc(b.img)}" alt="${esc(b.alt)}" loading="lazy" decoding="async" />
+        </figure>`;
+    return `
+      <article class="block${i % 2 ? " flip" : ""}">
+        ${media}
+        <div class="block-copy">
+          <span class="kicker">${eq(5)}${esc(b.kicker)}</span>
+          <h2>${esc(b.title)}</h2>
+          <p>${esc(b.body)}</p>
+          <a class="btn btn-ghost block-cta" href="${esc(b.cta.href)}">${esc(b.cta.label)}<span class="arrow">→</span></a>
+        </div>
+      </article>`;
+  })
+  .join("");
+
+const techItems = C.tech.items
+  .map(
+    (t) => `
+      <article class="tech">
+        <span class="tag">${esc(t.tag)}</span>
+        <p class="tech-problem">${esc(t.problem)}</p>
+        <p class="tech-solution"><span class="tech-arrow" aria-hidden="true">→</span>${esc(t.solution)}</p>
+      </article>`
+  )
+  .join("");
+
+const testimonials = C.testimonials.items
+  .map(
+    (t) => `
+      <figure class="quote">
+        <img class="quote-photo" src="${esc(t.img)}" alt="${esc(t.name)}" loading="lazy" decoding="async" width="72" height="72" />
+        <blockquote>“${esc(t.quote)}”</blockquote>
+        <figcaption><span class="quote-name">${esc(t.name)}</span><span class="quote-role">${esc(t.role)}</span></figcaption>
+        ${
+          t.credit
+            ? `<span class="quote-credit">image: <a href="${esc(t.credit.href)}" target="_blank" rel="noopener license" title="source on Wikimedia Commons">${esc([t.credit.author, t.credit.license].filter(Boolean).join(" · "))}</a></span>`
+            : ""
+        }
+      </figure>`
+  )
+  .join("");
+
+// ── home page (index.html) ──────────────────────────────────────────────
+// Deliberately slim: hero → three prominent topic blocks (linking to install /
+// ui / tech) → testimonials → the AI colophon → a closing CTA. The depth lives
+// on the three sub-pages; this page is the overview.
+const page = `<!doctype html>
+<html lang="en">
+<head>${head(C.meta.title, C.meta.description)}
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+${navHeader("#top", GET_IT_CTA)}
+<main id="top">
+  <section class="hero">
+    <div class="hero-copy">
+      <span class="eyebrow">${eq(6)}${esc(C.hero.eyebrow)}</span>
+      <h1>${C.hero.title.map((t) => `<span>${esc(t)}</span>`).join("")}</h1>
+      <p class="lede">${esc(C.hero.lede)}</p>
+      <div class="actions">
+        <a class="btn btn-solid" href="${esc(C.hero.primary.href)}" rel="noopener">${esc(C.hero.primary.label)}<span class="arrow">→</span></a>
+        <a class="btn btn-ghost btn-gh" href="${esc(C.hero.secondary.href)}" rel="noopener">${GITHUB_ICON}${esc(C.hero.secondary.label)}</a>
+      </div>
+    </div>
+    <figure class="hero-shot">
+      <div class="frame"><img src="${esc(C.hero.shot.src)}" alt="${esc(C.hero.shot.alt)}" fetchpriority="high" /></div>
+    </figure>
+  </section>
+
+  <section class="blocks">${homeBlocks}</section>
+
+  <section id="praise" class="praise">
+    <header class="sec-head">
+      <span class="eyebrow">${esc(C.testimonials.eyebrow)}</span>
+      <h2>${esc(C.testimonials.title)}</h2>
+      <p class="sec-intro">${esc(C.testimonials.note)}</p>
+    </header>
+    <div class="quote-grid">${testimonials}</div>
+  </section>
+
+  <section id="colophon" class="colophon">
+    <header class="sec-head">
+      <span class="eyebrow">${esc(C.authorship.eyebrow)}</span>
+      <h2>${esc(C.authorship.title)}</h2>
+    </header>
+    <div class="colophon-body">${C.authorship.body.map((p) => `<p>${esc(p)}</p>`).join("")}</div>
+  </section>
+
+  <section class="cta">
+    <h2>${esc(C.cta.title)}</h2>
+    <p>${esc(C.cta.body)}</p>
+    <div class="actions">
+      <a class="btn btn-solid" href="${esc(C.cta.primary.href)}" rel="noopener">${esc(C.cta.primary.label)}<span class="arrow">→</span></a>
+      <a class="btn btn-ghost" href="${esc(C.cta.secondary.href)}" rel="noopener">${esc(C.cta.secondary.label)}</a>
+    </div>
+  </section>
+</main>
+${footer()}
 </body>
 </html>
 `;
+
+// ── install methods page (install.html) ─────────────────────────────────
+// Each method is a card: heading + body, an optional code block (copy:true makes
+// it copyable), an optional note callout, and an optional CTA or doc link. The
+// binaries + SHA-256s themselves live on download.html (the first method links there).
+function installPage() {
+  const I = C.install;
+  const methods = I.methods
+    .map((m) => {
+      let code = "";
+      if (m.code && m.copy) {
+        const multi = m.code.includes("\n") ? " dl-cmd-multi" : "";
+        code = `
+        <div class="dl-cmd${multi}">
+          <code>${esc(m.code)}</code>
+          <button class="dl-copy" type="button" data-copy="${esc(m.code)}" aria-label="Copy command">copy</button>
+        </div>`;
+      } else if (m.code) {
+        code = `\n        <pre class="qs-code"><code>${esc(m.code)}</code></pre>`;
+      }
+      const note = m.note ? `\n        <p class="dl-note">${m.note}</p>` : "";
+      let foot = "";
+      if (m.cta) {
+        const rel = /^https?:/.test(m.cta.href) ? ' rel="noopener"' : "";
+        foot = `\n        <div class="method-foot"><a class="btn btn-ghost" href="${esc(m.cta.href)}"${rel}>${esc(m.cta.label)}<span class="arrow">→</span></a></div>`;
+      } else if (m.doc) {
+        foot = `\n        <div class="method-foot"><a class="qs-doc" href="${esc(m.doc.href)}" rel="noopener">${esc(m.doc.label)}<span class="arrow">→</span></a></div>`;
+      }
+      return `
+      <article class="method">
+        <div class="method-top"><h3>${esc(m.title)}</h3><span class="tag">${esc(m.tag)}</span></div>
+        <p class="method-body">${esc(m.body)}</p>${code}${note}${foot}
+      </article>`;
+    })
+    .join("");
+  const links = I.links
+    .map((l) => {
+      const rel = /^https?:/.test(l.href) ? ' rel="noopener"' : "";
+      return `
+      <div class="dl-link-row">
+        <p class="dl-link-desc">${esc(l.desc)}</p>
+        <a class="btn btn-ghost dl-link-btn" href="${esc(l.href)}"${rel}>${esc(l.label)}<span class="arrow">→</span></a>
+      </div>`;
+    })
+    .join("");
+  return `<!doctype html>
+<html lang="en">
+<head>${head(`Install — ${C.meta.title}`, "Install ensemble: just run the binary, a guided one-liner, Docker, a systemd boot service, or a DIY ESP32 player flashed from your browser.")}
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+${navHeader("index.html", GET_IT_CTA, "install.html")}
+<main id="top">
+  <section class="sub-page">
+    <header class="sec-head">
+      <span class="eyebrow">${eq(6)}${esc(I.eyebrow)}</span>
+      <h1>${esc(I.title)}</h1>
+      <p class="sec-intro">${esc(I.intro)}</p>
+    </header>
+    <div class="methods">${methods}</div>
+    <div class="dl-links">${links}</div>
+  </section>
+</main>
+${footer()}
+</body>
+</html>
+`;
+}
+
+// ── UI tour page (ui.html) ──────────────────────────────────────────────
+// Reuses screens.items grouped by page (rooms / nodes) in the alternating
+// screenshot layout, then the themes carousel. The lightbox holds the screens.
+function uiPage() {
+  const U = C.ui;
+  const lbImgs = C.screens.items.map((s) => ({ src: s.src, alt: s.alt, cap: `${s.kicker} — ${s.title}` }));
+  const screenCard = (s) => {
+    const i = C.screens.items.indexOf(s);
+    return `
+      <article class="screen${i % 2 ? " flip" : ""}">
+        <figure class="screen-shot">
+          <img class="lb-thumb" data-lb="${i}" role="button" tabindex="0" aria-label="Open “${esc(s.title)}” full size" src="${esc(s.src)}" alt="${esc(s.alt)}" loading="lazy" decoding="async" />
+        </figure>
+        <div class="screen-copy">
+          <span class="kicker">${eq(5)}${esc(s.kicker)}</span>
+          <h3>${esc(s.title)}</h3>
+          <p>${esc(s.body)}</p>
+        </div>
+      </article>`;
+  };
+  const group = (key) => C.screens.items.filter((s) => s.page === key).map(screenCard).join("");
+  return `<!doctype html>
+<html lang="en">
+<head>${head(`The UI — ${C.meta.title}`, "A tour of the ensemble web app: grouping rooms, the media library and shared queue, multi-room Spotify, live per-node stats, and one-click themes.")}
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+${navHeader("index.html", GET_IT_CTA, "ui.html")}
+<main id="top">
+  <section class="screens">
+    <header class="sec-head">
+      <span class="eyebrow">${eq(6)}${esc(U.eyebrow)}</span>
+      <h1>${esc(U.title)}</h1>
+      <p class="sec-intro">${esc(U.intro)}</p>
+    </header>
+    <header class="sec-head sub-head">
+      <span class="eyebrow">${esc(U.rooms.kicker)}</span>
+      <h2>${esc(U.rooms.title)}</h2>
+    </header>
+    <div class="screen-list">${group("rooms")}</div>
+    <header class="sec-head sub-head">
+      <span class="eyebrow">${esc(U.nodes.kicker)}</span>
+      <h2>${esc(U.nodes.title)}</h2>
+    </header>
+    <div class="screen-list">${group("nodes")}</div>
+  </section>
+
+  <section id="themes" class="themes">
+    <header class="sec-head">
+      <span class="eyebrow">${esc(C.themes.eyebrow)}</span>
+      <h2>${esc(C.themes.title)}</h2>
+      <p class="sec-intro">${esc(C.themes.intro)}</p>
+    </header>
+    <div class="tc">
+      <button class="tc-arrow tc-prev" type="button" aria-label="Previous theme">‹</button>
+      <div class="tc-track">${themeSlides}</div>
+      <button class="tc-arrow tc-next" type="button" aria-label="Next theme">›</button>
+    </div>
+    <div class="tc-dots">${themeDots}</div>
+  </section>
+</main>
+${footer()}
+${lightbox(lbImgs)}
+<script>${LIGHTBOX_SCRIPT}
+${THEME_CAROUSEL_SCRIPT}</script>
+</body>
+</html>
+`;
+}
+
+// ── under-the-hood page (tech.html) ─────────────────────────────────────
+// The four sync problems + the measured-coherence graphs. The lightbox holds
+// only the (wide) graphs, opened by the proof thumbs' 0-based data-lb.
+function techPage() {
+  // Both proof blocks (acoustic mic + clock telemetry) share one lightbox; the
+  // thumbs' data-lb index into this combined, in-order list. All are wide graphs.
+  const lbItems = [...C.proof.items, ...C.clocks.items].map((s) => ({
+    src: s.src, alt: s.alt, cap: `${s.kicker} — ${s.title}`, wide: true,
+  }));
+  // One proof/measurement row; `base` offsets data-lb so the second block's
+  // thumbs continue the lightbox index where the first left off.
+  const proofRows = (items, base) =>
+    items
+      .map(
+        (s, i) => `
+      <article class="proof-item${i % 2 ? " flip" : ""}">
+        <figure class="proof-shot">
+          <img class="lb-thumb" data-lb="${base + i}" role="button" tabindex="0" aria-label="Open “${esc(s.title)}” full size" src="${esc(s.src)}" alt="${esc(s.alt)}" loading="lazy" decoding="async" />
+        </figure>
+        <div class="proof-copy">
+          <span class="kicker">${eq(5)}${esc(s.kicker)}</span>
+          ${s.metric ? `<span class="proof-metric">${esc(s.metric)}</span>` : ""}
+          <h3>${esc(s.title)}</h3>
+          <p>${esc(s.body)}</p>
+        </div>
+      </article>`
+      )
+      .join("");
+  return `<!doctype html>
+<html lang="en">
+<head>${head(`How it works — ${C.meta.title}`, "How ensemble keeps rooms in sync: beating network jitter, packet loss, system-clock and DAC drift — with microphone and live-telemetry measurements that prove it.")}
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+${navHeader("index.html", GET_IT_CTA, "tech.html")}
+<main id="top">
+  <section class="tech-sec">
+    <header class="sec-head">
+      <span class="eyebrow">${eq(6)}${esc(C.tech.eyebrow)}</span>
+      <h1>${esc(C.tech.title)}</h1>
+      <p class="sec-intro">${esc(C.tech.intro)}</p>
+    </header>
+    <div class="tech-grid">${techItems}</div>
+    <header class="sec-head tech-proof-head">
+      <span class="eyebrow">${esc(C.proof.eyebrow)}</span>
+      <h2>${esc(C.proof.title)}</h2>
+      <p class="sec-intro">${esc(C.proof.intro)}</p>
+    </header>
+    <div class="proof-list">${proofRows(C.proof.items, 0)}</div>
+    <header class="sec-head tech-proof-head">
+      <span class="eyebrow">${esc(C.clocks.eyebrow)}</span>
+      <h2>${esc(C.clocks.title)}</h2>
+      <p class="sec-intro">${esc(C.clocks.intro)}</p>
+    </header>
+    <div class="proof-list">${proofRows(C.clocks.items, C.proof.items.length)}</div>
+  </section>
+</main>
+${footer()}
+${lightbox(lbItems)}
+<script>${LIGHTBOX_SCRIPT}</script>
+</body>
+</html>
+`;
+}
 
 const footLinksHtml = C.footer.links
   .map((l) => `<a href="${esc(l.href)}" rel="noopener">${esc(l.label)}</a>`)
@@ -1309,6 +1440,11 @@ async function main() {
   await fs.mkdir(OUT, { recursive: true });
   await copyDir(path.join(SRC, "assets"), path.join(OUT, "assets"));
   await fs.writeFile(path.join(OUT, "index.html"), page);
+
+  // The three home blocks each link to a dedicated topic page.
+  await fs.writeFile(path.join(OUT, "install.html"), installPage());
+  await fs.writeFile(path.join(OUT, "ui.html"), uiPage());
+  await fs.writeFile(path.join(OUT, "tech.html"), techPage());
 
   const downloads = await resolveDownloads();
   const dl = downloadPage(downloads);

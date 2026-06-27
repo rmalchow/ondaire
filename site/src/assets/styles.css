@@ -439,6 +439,10 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
   gap: clamp(28px, 5vw, 64px);
   align-items: center;
 }
+/* On a flipped row the image moves to the right via `order`; reverse the column
+   widths too so the image keeps the WIDE column (1.25fr) instead of the narrow
+   one — otherwise right-hand graphs render smaller than left-hand ones. */
+.proof-item.flip { grid-template-columns: 0.75fr 1.25fr; }
 .proof-item.flip .proof-shot { order: 2; }
 .proof-shot { margin: 0; }
 .proof-shot img {
@@ -753,7 +757,7 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
   .tech-grid { grid-template-columns: 1fr; }
   .screen, .screen.flip .screen-shot { grid-template-columns: 1fr; order: 0; }
   .screen-shot { order: -1 !important; }
-  .proof-item, .proof-item.flip .proof-shot { grid-template-columns: 1fr; order: 0; }
+  .proof-item, .proof-item.flip, .proof-item.flip .proof-shot { grid-template-columns: 1fr; order: 0; }
   .proof-shot { order: -1 !important; }
   .steps { grid-template-columns: 1fr; }
   .step:not(:last-child)::after { display: none; }
@@ -1096,6 +1100,10 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
 }
 /* the measured-coherence sub-header inside the Under-The-Hood section */
 .tech-proof-head { margin-top: 72px; }
+/* Tech-page headers run full width (the default 40rem cap leaves them stranded
+   beside the wide measurement graphs); keep the intro paragraph readable. */
+.tech-sec .sec-head { max-width: none; }
+.tech-sec .sec-head .sec-intro { max-width: 70rem; }
 
 /* installer walkthrough: an expandable, commented get.sh inside the installer card */
 .dl-script { margin-top: 4px; }
@@ -1187,4 +1195,118 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
 .quote-credit a:hover {
   color: var(--accent);
   border-bottom-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* current page highlighted in the nav (persistent underline + brighter text) */
+.nav-links a.is-current { color: var(--ink); }
+.nav-links a.is-current::after { width: 100%; }
+/* hero secondary button carrying the GitHub mark */
+.btn-gh .gh-mark { display: block; }
+
+/* ── home topic blocks ───────────────────────────────────────────────────── */
+.blocks { display: flex; flex-direction: column; gap: clamp(84px, 13vw, 180px); }
+.block {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(32px, 6vw, 84px);
+  align-items: center;
+}
+.block.flip .block-shot,
+.block.flip .block-term { order: 2; }
+.block-shot { margin: 0; }
+.block-shot img {
+  display: block;
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid var(--line-2);
+  box-shadow: 0 40px 90px -40px rgba(0, 0, 0, 0.8);
+}
+.block-shot.phone img { max-width: 300px; margin: 0 auto; }
+.block-copy .kicker { margin-bottom: 16px; }
+.block-copy h2 {
+  font-family: var(--serif);
+  font-weight: 360;
+  font-size: clamp(30px, 4.6vw, 46px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  margin: 0 0 18px;
+}
+.block-copy p {
+  margin: 0 0 28px;
+  color: var(--muted);
+  font-size: clamp(16px, 2vw, 18px);
+  max-width: 34rem;
+}
+
+/* faux-terminal mock used by the install block */
+.block-term {
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: 0 40px 90px -40px rgba(0, 0, 0, 0.8);
+}
+.term-bar {
+  display: flex;
+  gap: 8px;
+  padding: 13px 16px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+.term-bar span { width: 11px; height: 11px; border-radius: 50%; background: var(--line-2); }
+.term-bar span:nth-child(1) { background: #e0664a; }
+.term-bar span:nth-child(2) { background: #e0a64a; }
+.term-bar span:nth-child(3) { background: var(--accent); }
+.term-body {
+  margin: 0;
+  padding: 20px 22px;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.9;
+  color: var(--muted);
+  overflow-x: auto;
+}
+.term-line { display: block; white-space: pre; }
+.term-prompt { color: var(--accent); }
+.term-cmd { color: var(--ink); }
+.term-out { color: var(--muted); }
+
+/* ── sub-page headers (install / ui / tech) ──────────────────────────────── */
+.sec-head h1 {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: clamp(2rem, 1.4rem + 2.6vw, 3.4rem);
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  margin: 14px 0 0;
+}
+.sub-head { max-width: 40rem; margin-top: clamp(56px, 9vw, 104px); margin-bottom: 40px; }
+
+/* ── install methods (install page) ──────────────────────────────────────── */
+.methods { display: flex; flex-direction: column; gap: 16px; }
+.method {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: clamp(22px, 3.5vw, 30px);
+  background: linear-gradient(180deg, var(--panel), var(--bg-2));
+}
+.method-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.method-top h3 {
+  font-family: var(--serif);
+  font-weight: 420;
+  font-size: clamp(21px, 3vw, 26px);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.method-top .tag { flex: none; }
+.method-body { margin: 0 0 18px; color: var(--muted); font-size: 15.5px; max-width: 62ch; }
+.method .dl-cmd, .method .qs-code { margin: 0; }
+.method-foot { margin-top: 16px; }
+
+@media (max-width: 880px) {
+  .block { grid-template-columns: 1fr; }
+  .block .block-shot,
+  .block .block-term,
+  .block.flip .block-shot,
+  .block.flip .block-term { order: -1; }
 }

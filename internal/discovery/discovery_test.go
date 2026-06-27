@@ -281,3 +281,52 @@ func TestRegisterBrowseRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestHostIPPinsAdvertisedAddr verifies that an explicit HostIP makes the
+// advertised A-record exactly that IP — the fix for host-networked containers
+// that would otherwise advertise an unroutable docker-bridge address (§3.1).
+// RegisterProxy advertises whatever IP we pin regardless of which interfaces the
+// host owns, so a TEST-NET-3 address (routable-looking, not loopback/link-local)
+// proves the pin without needing that address on the box.
+func TestHostIPPinsAdvertisedAddr(t *testing.T) {
+	const pinned = "203.0.113.7"
+
+	aID := id.New()
+	bID := id.New()
+
+	a := New(Config{
+		ID: aID, Instance: aID.String(), HostIP: pinned,
+		GossipPort: 17946, HTTPPort: 18080, StreamPort: 19090, SourcePort: 19200,
+	})
+	// Skip the whole test if proxy registration fails (no multicast here).
+	srv, err := zeroconf.RegisterProxy(aID.String(), ServiceName, Domain, 18080, proxyHost(), []string{pinned}, txtRecords(a.cfg), nil)
+	if err != nil {
+		t.Skipf("mDNS proxy register unavailable, skipping multicast test: %v", err)
+	}
+	srv.Shutdown()
+
+	a.Run()
+	defer a.Close()
+
+	b := New(Config{ID: bID, Instance: bID.String(), GossipPort: 27946, HTTPPort: 28080})
+	b.Run()
+	defer b.Close()
+
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case p, ok := <-b.Peers():
+			if !ok {
+				t.Fatal("B's Peers channel closed unexpectedly")
+			}
+			if p.ID == aID {
+				if p.Addr.String() != pinned {
+					t.Errorf("advertised addr = %s, want pinned %s", p.Addr, pinned)
+				}
+				return // success
+			}
+		case <-deadline:
+			t.Skip("did not observe peer A within timeout (multicast likely unavailable)")
+		}
+	}
+}

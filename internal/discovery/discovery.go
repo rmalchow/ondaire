@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -141,6 +142,14 @@ func (p Peer) PlaybackOnly() bool {
 type Config struct {
 	ID       id.ID  // this node's immutable node ID (§1)
 	Instance string // mDNS instance name; use ID.String() for uniqueness
+
+	// HostIP, when set, is the single IP advertised in the mDNS A/AAAA record
+	// (§3.1). It comes from an explicit --host / ENSEMBLE_HOST. Empty => let
+	// zeroconf enumerate every multicast interface, which on a host-networked
+	// container picks up docker-bridge addresses (e.g. 172.18.0.1) that peers
+	// can't route to. Pinning it makes ENSEMBLE_HOST authoritative for discovery,
+	// not just for binding.
+	HostIP string
 
 	Master   bool   // advertise role=master + its ports
 	Playback bool   // (when !Master) advertise role=playback + control + caps
@@ -330,6 +339,17 @@ func srvPort(cfg Config) int {
 	return 1 // last-resort placeholder; TXT carries the real ports
 }
 
+// proxyHost is the host name for the A/AAAA record when registering with an
+// explicit HostIP. zeroconf.RegisterProxy rejects an empty host, so fall back to
+// a fixed label if the OS hostname is unavailable; only the IP it points at is
+// functionally significant (peers read AddrIPv4 from the response directly).
+func proxyHost() string {
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h
+	}
+	return "ensemble"
+}
+
 // registerKeeper registers the mDNS service, retrying on failure until ctx is
 // done. zeroconf's Server self-maintains announcements once registered, so this
 // goroutine mostly sleeps after the first success; it exists so a *failed*
@@ -345,8 +365,19 @@ func (d *Discovery) registerKeeper() {
 		// Advertised SRV port is informational only — real ports are in TXT (D4) —
 		// but zeroconf rejects port 0 ("Missing port"). A master advertises its HTTP
 		// port; a playback-only node (no HTTP) falls back to its control port.
-		// nil ifaces => all multicast-capable interfaces.
-		srv, err := zeroconf.Register(d.cfg.Instance, ServiceName, Domain, srvPort(d.cfg), txt, nil)
+		// nil ifaces => listen on all multicast-capable interfaces either way.
+		//
+		// With an explicit HostIP, register a proxy that advertises exactly that
+		// A/AAAA record instead of letting zeroconf enumerate every interface — on a
+		// host-networked container the latter publishes a docker-bridge address peers
+		// can't reach (§3.1). Without it, fall back to the all-interface registration.
+		var srv *zeroconf.Server
+		var err error
+		if d.cfg.HostIP != "" {
+			srv, err = zeroconf.RegisterProxy(d.cfg.Instance, ServiceName, Domain, srvPort(d.cfg), proxyHost(), []string{d.cfg.HostIP}, txt, nil)
+		} else {
+			srv, err = zeroconf.Register(d.cfg.Instance, ServiceName, Domain, srvPort(d.cfg), txt, nil)
+		}
 		if err == nil {
 			d.mu.Lock()
 			if d.closed {

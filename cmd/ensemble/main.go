@@ -416,6 +416,7 @@ func buildPlayer(ctx context.Context, opt options, cfg *config.Config, base *slo
 	default:
 		disc = discovery.New(discovery.Config{
 			ID:          cfg.NodeID,
+			HostIP:      advertHostIP(opt.Host),
 			Master:      false,
 			Playback:    true,
 			Name:        cfg.NodeName,
@@ -632,7 +633,8 @@ func runCombined(ctx context.Context, opt options, cfg *config.Config, base *slo
 		log.Info("mDNS discovery disabled (--no-mdns); gossip relies on --join seeds")
 	} else {
 		disc = discovery.New(discovery.Config{
-			ID: cfg.NodeID,
+			ID:     cfg.NodeID,
+			HostIP: advertHostIP(opt.Host),
 			// A master advertises its four ports; a combined node additionally advertises
 			// the PLAYER's control port (its local playout is driven over the control plane
 			// like any playback peer). A master-only node advertises Playback:false and
@@ -1002,6 +1004,17 @@ func hostCIDR(host string) string {
 		return host + "/32"
 	}
 	return host + "/128"
+}
+
+// advertHostIP returns the concrete IP to pin in the mDNS A/AAAA record, or ""
+// to fall back to all-interface registration. It accepts only a parseable,
+// non-wildcard address — the same gate hostCIDR uses — so a wildcard/empty
+// --host leaves discovery's default behavior untouched.
+func advertHostIP(host string) string {
+	if hostCIDR(host) == "" {
+		return ""
+	}
+	return host
 }
 
 // probeGossipPort finds a free TCP+UDP pair via netx, CLOSES both, and returns

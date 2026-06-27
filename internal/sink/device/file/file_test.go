@@ -233,9 +233,15 @@ func TestFileInterruptUnblocks(t *testing.T) {
 	if err := b.Write(frame(1)); err != nil {
 		t.Fatal(err)
 	}
-	// Force the next pacing wait far into the future via a now that stays at the
-	// origin, so only Interrupt (closing done) can release the select.
-	origin := b.now()
+	// Pin the clock at the cadence origin (b.start) so the next frame's deadline
+	// (start + 1·framePeriod) is always in the future — wait > 0 regardless of how
+	// slow this (CI) box was during the first append. Capturing b.now() here would
+	// race the real clock instead: if that append took ≥ one framePeriod, wait ≤ 0
+	// and pacing() admits immediately without ever building a timer (the flake). Only
+	// Interrupt (closing done) can then release the select.
+	b.mu.Lock()
+	origin := b.start
+	b.mu.Unlock()
 	b.now = func() time.Time { return origin }
 	// A long real timer that we rely on Interrupt to beat; signal when the pacer
 	// reaches it so we interrupt deterministically (no real sleep handshake).

@@ -592,22 +592,22 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
   },
 
   // The browser web-flasher page (flash.html). ESP Web Tools detects the chip
-  // and flashes the matching merged firmware from `firmware.builds`; the custom
-  // panel then provisions Wi-Fi + I2S/encoder over Web Serial (no toolchain).
-  // The browser web-flasher is a four-step wizard — one panel visible at a time:
-  // (1) select board → (2) install → (3) provision → (4) finished. Each step's
-  // "next" button stays disabled until that step's gate is met (board picked,
-  // flash succeeded, fields filled, config saved).
+  // and flashes the matching image from `firmware.builds`. Two flash modes (a
+  // radio on the install step): "flash everything" writes the merged image and
+  // wipes config, so the node reboots into its Wi-Fi captive portal for setup;
+  // "update firmware only" rewrites just the app partition and keeps stored
+  // Wi-Fi/name/pins. There is no in-browser provisioning — the captive portal
+  // (or the USB JSON console) handles that. Three-step wizard, one panel at a
+  // time: (1) select board → (2) install → (3) finished.
   flash: {
     eyebrow: "Build a node",
     title: "Flash a DIY speaker, right from your browser.",
     intro:
-      "Turn an ESP32 + an I2S DAC into a real ensemble player — it shows up in the cluster, joins any group, and plays in lock-step like every other room. No toolchain, no app: plug it in over USB-C in Chrome or Edge, flash it, then set your Wi-Fi. Receive-only, opus over Wi-Fi.",
+      "Turn an ESP32 + an I2S DAC (or an all-in-one amp board) into a real ensemble player — it shows up in the cluster, joins any group, and plays in lock-step like every other room. No toolchain, no app: plug it in over USB-C in Chrome or Edge and flash. On first boot it hosts a Wi-Fi hotspot for setup. Receive-only, opus over Wi-Fi.",
     // Progress header — one chip per wizard step.
     wizard: [
       { id: "board", label: "Select board" },
       { id: "install", label: "Install" },
-      { id: "provision", label: "Provision" },
       { id: "finished", label: "Finished" },
     ],
     // Step 1 — board picker. Nothing downstream unlocks until a board is chosen.
@@ -619,51 +619,45 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
     bom: {
       title: "What you need",
       items: [
-        "A PSRAM-equipped ESP32 board — an ESP32-S3 (DevKitC-1 or Waveshare S3-Zero) or a classic ESP32-WROVER.",
-        "A PCM5102A I2S DAC (the common purple GY-PCM5102 module).",
+        "A PSRAM-equipped ESP32 board — an ESP32-S3 (DevKitC-1 or Waveshare S3-Zero), a classic ESP32-WROVER, or an all-in-one Sonocotta Amped-ESP32-S3-Plus (DAC + amp on board).",
+        "A PCM5102A I2S DAC (the common purple GY-PCM5102 module) — not needed on the all-in-one Amped board.",
         "A KY-040 / EC11 rotary encoder for local volume (optional).",
         "A USB-C cable and Chrome or Edge on desktop.",
       ],
     },
-    // Step 2 — install. ESP Web Tools detects the chip and flashes the merged
-    // image; the "fresh install" toggle swaps which manifest the installer uses.
+    // Step 2 — install. ESP Web Tools detects the chip and flashes; a radio picks
+    // the mode → which manifest the installer uses (flash-all merged @ 0x0 vs
+    // keep-config app @ 0x20000). No fields here — provisioning is the captive
+    // portal after a full flash.
     install: {
       title: "Install the firmware",
       requirements:
         "Plug the board in over USB-C. First flash on an S2/S3 may need download mode: hold BOOT, tap RESET, release BOOT — then click Flash. Needs Chrome or Edge on desktop (Web Serial).",
-      fresh: {
-        label: "Fresh install",
-        note: "Erases the whole chip and writes a clean image — recommended. Uncheck to keep an existing node’s Wi-Fi and name when re-flashing.",
+      modes: {
+        title: "What to flash",
+        all: {
+          label: "Flash everything (first-time setup)",
+          note: "Writes a clean image and clears any stored settings. On reboot the node hosts a Wi-Fi hotspot named “ensemble-…”: join it from a phone or laptop and a setup page opens where you enter your 2.4 GHz Wi-Fi. Pick this for a new board or a clean slate.",
+        },
+        keep: {
+          label: "Update firmware only (keep my config)",
+          note: "Rewrites just the app and leaves the node’s stored Wi-Fi, name, and pin config untouched. Use this to upgrade a node you’ve already set up — it reboots and rejoins your network on its own.",
+        },
       },
       action: "Flash",
-      next: "Configure",
-      okMsg: "Flashed successfully — continue to configuration.",
+      next: "Finish",
+      okMsg: "Flashed successfully — continue.",
       errMsg:
         "Flashing didn’t finish. Check the USB-C cable, try download mode (hold BOOT, tap RESET, release BOOT), then flash again.",
-      unknownMsg: "When the installer reports it’s done, continue to configuration.",
+      unknownMsg: "When the installer reports it’s done, continue.",
     },
-    // Step 3 — provision. Name + Wi-Fi written straight to the device over serial.
-    // No "load from device": one direction only, to keep the step focused.
-    provision: {
-      title: "Configure your node",
-      body: "Give the node a name and join it to your Wi-Fi. Settings are written straight to the device over USB — no app, no account.",
-      warning:
-        "ESP32 joins 2.4 GHz Wi-Fi only. If your router uses band steering (one shared name for the 2.4 and 5 GHz bands), give the 2.4 GHz band its own SSID if you can — otherwise the node may keep trying the 5 GHz radio and fail to connect.",
-      fields: {
-        name: { label: "Node name", placeholder: "e.g. kitchen" },
-        ssid: { label: "Wi-Fi SSID (2.4 GHz)", placeholder: "your-network" },
-        pass: { label: "Wi-Fi password", placeholder: "network password" },
-      },
-      action: "Configure",
-      next: "Finish",
-      okMsg: "Saved — the node is rebooting and will join your network.",
-      errMsg: "Couldn’t save. Reconnect over USB-C and try again.",
-    },
-    // Step 4 — finished. Congratulations + a link to the board's page (wiring,
-    // pinouts, build notes) in the repo.
+    // Step 3 — finished. Congratulations + how to finish setup (captive portal for
+    // a full flash) + a link to the board's page (wiring, pinouts, build notes).
     finished: {
       title: "You’ve flashed an ensemble node.",
-      body: "It’ll appear in the cluster within a few seconds, ready to join any group and play in lock-step with every other room. Wire up the PCM5102A DAC using the board’s guide, and turn the encoder for local volume.",
+      body: "If you flashed everything, the node is now hosting a Wi-Fi hotspot named “ensemble-…”. Join it from your phone or laptop and a setup page opens — enter your 2.4 GHz Wi-Fi and the node reboots, joins your network, and appears in the cluster within a few seconds, ready to join any group. (Updated firmware only? It rejoins on its own.)",
+      warning:
+        "ESP32 joins 2.4 GHz Wi-Fi only. If your router uses band steering (one shared name for the 2.4 and 5 GHz bands), give the 2.4 GHz band its own SSID if you can — otherwise the node may keep trying the 5 GHz radio and fail to connect.",
       docLink: "Wiring & board guide",
     },
     docHref: `${REPO}/-/blob/main/docs/developer/esp32.md`,
@@ -706,6 +700,17 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         img: "assets/img/esp32-s3-zero.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/esp32-s3-zero.md`,
         file: "assets/firmware/ensemble-fw-esp32s3-zero.bin",
+      },
+      {
+        id: "esp32s3-amped-plus",
+        chipFamily: "ESP32-S3",
+        label: "Sonocotta Amped-ESP32-S3-Plus",
+        note: "All-in-one: ESP32-S3 + PCM5122 DAC + TPA3110 amp on one board (8 MB PSRAM). Drives passive speakers directly — no separate DAC to wire.",
+        // No marketing photo in the repo for this board — the flasher renders a
+        // labelled placeholder tile when img is empty (build.mjs boardCards).
+        img: "",
+        doc: `${REPO}/-/blob/main/esp32/devices/amped-esp32-s3-plus.md`,
+        file: "assets/firmware/ensemble-fw-esp32s3-amped-plus.bin",
       },
     ],
   },

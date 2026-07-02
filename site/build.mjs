@@ -809,23 +809,38 @@ function downloadPage(options) {
 // A missing image renders as "not built" — the page + manifests still build.
 async function resolveFirmware() {
   const out = [];
-  for (const b of C.firmware.builds) {
-    const fname = b.file.split("/").pop();
-    const candidates = [
-      path.join(SRC, b.file),
-      path.join(root, "..", "esp32", `build-${b.id}`, fname),
-    ];
-    let hit = null;
+  const find = async (candidates) => {
     for (const p of candidates) {
       try {
-        hit = { src: p, buf: await fs.readFile(p) };
-        break;
+        return { src: p, buf: await fs.readFile(p) };
       } catch {
         // try the next location
       }
     }
-    if (hit) {
-      out.push({ ...b, present: true, src: hit.src, size: hit.buf.length, hash: createHash("sha256").update(hit.buf).digest("hex") });
+    return null;
+  };
+  for (const b of C.firmware.builds) {
+    const fname = b.file.split("/").pop();
+    // Merged image (flash-all) …
+    const merged = await find([
+      path.join(SRC, b.file),
+      path.join(root, "..", "esp32", `build-${b.id}`, fname),
+    ]);
+    // … and the app-only image (keep-config): staged by CI as ensemble-app-<id>.bin,
+    // or straight out of a local build as ensemble-node.bin.
+    const app = await find([
+      path.join(SRC, "assets", "firmware", `ensemble-app-${b.id}.bin`),
+      path.join(root, "..", "esp32", `build-${b.id}`, "ensemble-node.bin"),
+    ]);
+    if (merged) {
+      out.push({
+        ...b,
+        present: true,
+        src: merged.src,
+        size: merged.buf.length,
+        hash: createHash("sha256").update(merged.buf).digest("hex"),
+        appSrc: app ? app.src : null,
+      });
     } else {
       out.push({ ...b, present: false });
     }
@@ -833,28 +848,33 @@ async function resolveFirmware() {
   return out;
 }
 
-// Per-board ESP Web Tools manifest: a single merged image at offset 0 for the
-// board's chipFamily. `path` is relative to the manifest's own location. Two
-// variants per board so the wizard's "Fresh install" toggle picks the right one:
-//   manifest-<id>.json       fresh: new_install_prompt_erase:false ⇒ ESP Web
-//                            Tools full-erases the chip up front, then writes —
-//                            a clean install, no extra in-dialog question.
-//   manifest-<id>-keep.json  keep: new_install_prompt_erase:true ⇒ the installer
-//                            asks erase-or-keep, so a re-flash can preserve the
-//                            node's stored Wi-Fi/name (pick "Keep").
-// (ESP Web Tools has no silent "keep" — preserving NVS requires that one prompt.)
-// Several boards can share a chipFamily, hence one manifest pair per board.
-function firmwareManifest(b, fresh) {
+// The app (ota_0) partition offset from esp32/partitions.csv — where the app
+// image lands, and the lowest address a "keep config" flash may touch (NVS sits
+// below it at 0x9000). Same for every board (they share partitions.csv).
+const APP_OFFSET = 0x20000;
+
+// Per-board ESP Web Tools manifests — one pair per board, matching the install
+// step's two radio modes. `path` is relative to the manifest's own location, and
+// new_install_prompt_erase is false in both (no in-dialog erase question; ESP Web
+// Tools just writes the listed parts):
+//   manifest-<id>.json       flash-all: the merged image at offset 0. It spans
+//                            (and 0xFF-pads) the whole flash including NVS, so a
+//                            write wipes stored config — the node reboots into its
+//                            Wi-Fi captive portal. A clean, first-time install.
+//   manifest-<id>-keep.json  keep-config: ONLY the app image at APP_OFFSET. NVS
+//                            (0x9000) is below that and never written, so stored
+//                            Wi-Fi/name/pins survive — a firmware-only update.
+// Several boards can share a chipFamily, hence one pair per board.
+function firmwareManifest(b, mode) {
+  const part =
+    mode === "keep"
+      ? { path: `ensemble-app-${b.id}.bin`, offset: APP_OFFSET }
+      : { path: b.file.split("/").pop(), offset: 0 };
   return {
-    name: `${C.firmware.manifestName} — ${b.label}`,
+    name: `${C.firmware.manifestName} — ${b.label} (${mode === "keep" ? "update" : "clean"})`,
     version: VERSION || "dev",
-    new_install_prompt_erase: !fresh,
-    builds: [
-      {
-        chipFamily: b.chipFamily,
-        parts: [{ path: b.file.split("/").pop(), offset: 0 }],
-      },
-    ],
+    new_install_prompt_erase: false,
+    builds: [{ chipFamily: b.chipFamily, parts: [part] }],
   };
 }
 
@@ -879,7 +899,7 @@ function flashPage(builds) {
     .map(
       (b) =>
         `<button type="button" class="fl-board-card" role="radio" aria-checked="false" data-id="${esc(b.id)}">
-            <img src="${esc(b.img)}" alt="${esc(b.label)}" loading="lazy" decoding="async" />
+            ${b.img ? `<img src="${esc(b.img)}" alt="${esc(b.label)}" loading="lazy" decoding="async" />` : `<span class="fl-board-ph" aria-hidden="true">${esc(b.chipFamily || "ESP32")}</span>`}
             <span class="fl-board-name">${esc(b.label)}</span>
           </button>`
     )
@@ -897,6 +917,7 @@ function flashPage(builds) {
     manifest: `assets/firmware/manifest-${b.id}.json`,
     manifestKeep: `assets/firmware/manifest-${b.id}-keep.json`,
     present: !!b.present,
+    keep: !!(b.present && b.appSrc),   // keep-config needs the app-only image staged
     file: b.file.split("/").pop(),
     size: b.present ? fmtBytes(b.size) : "",
     hash: b.present ? b.hash : "",
@@ -908,17 +929,9 @@ function flashPage(builds) {
     flashOk: F.install.okMsg,
     flashErr: F.install.errMsg,
     flashUnknown: F.install.unknownMsg,
-    cfgOk: F.provision.okMsg,
-    cfgErr: F.provision.errMsg,
     notBuilt: "Firmware isn’t staged for this board — built by the CI firmware job, or run esp32/build.sh ",
     noSerial: "Web Serial needs Chrome or Edge on desktop.",
-    connecting: "Connecting over USB…",
-    saving: "Saving configuration…",
-    noPort: "No serial port selected.",
-    consoleHint: "Connect over USB to watch the device boot.",
     flashDone: "Flashing finished — startup logs will appear here soon…",
-    cfgReboot: "Configuration saved — the device is rebooting; startup logs will appear here soon…",
-    noReply: "No reply from the device. Make sure it’s plugged in over USB-C (not just power), then reconnect.",
     noLogs: "No logs yet — the board re-enumerates after flashing. Click “Connect over USB” to attach to it.",
   }).replace(/</g, "\\u003c");
 
@@ -928,7 +941,7 @@ function flashPage(builds) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Flash a player — ${esc(C.meta.title)}</title>
-<meta name="description" content="Flash an ESP32 + I2S DAC ensemble player from your browser — ESP Web Tools + Web Serial provisioning. No toolchain." />
+<meta name="description" content="Flash an ESP32 + I2S DAC ensemble player from your browser with ESP Web Tools — clean install or firmware-only update, then set Wi-Fi via the captive portal. No toolchain." />
 <meta name="theme-color" content="${esc(C.meta.themeColor)}" />
 <link rel="preload" href="assets/fonts/fraunces-wght.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin />
@@ -973,6 +986,8 @@ function flashPage(builds) {
   .fl-board-card:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--line-2))}
   .fl-board-card.is-active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 34px -16px var(--accent)}
   .fl-board-card img{width:100%;aspect-ratio:4/3;object-fit:contain;border-radius:8px;background:var(--bg)}
+  /* Placeholder tile for boards without a marketing photo. */
+  .fl-board-ph{width:100%;aspect-ratio:4/3;border-radius:8px;display:grid;place-items:center;font-family:var(--mono);font-size:13px;letter-spacing:.04em;color:var(--faint);background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 12%,var(--bg)),var(--bg))}
   .fl-board-name{font-size:14px;font-weight:600}
 
   /* selected-board meta line (staged sha / not built) */
@@ -992,25 +1007,23 @@ function flashPage(builds) {
   .fl-bom[open]>summary::before{content:"– "}
   .fl-bom ul{margin:0 0 12px;padding-left:20px;color:var(--muted);font-size:14.5px}
 
-  /* ── install step ─────────────────────────────────────────────────── */
-  .fl-check{display:flex;gap:12px;align-items:flex-start;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:16px 0;font-size:14px;line-height:1.55;cursor:pointer}
-  .fl-check input{margin-top:3px;width:17px;height:17px;accent-color:var(--accent);flex:none}
-  .fl-check strong{color:var(--ink)}
-  .fl-check span{color:var(--muted)}
-
-  /* ── provision step ───────────────────────────────────────────────── */
-  .fl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin:18px 0 6px}
-  .fl-field{display:flex;flex-direction:column;gap:6px;font-size:14px}
-  .fl-field label{color:var(--muted)}
-  .fl-field input{background:var(--bg-2);border:1px solid var(--line-2);border-radius:9px;color:inherit;padding:10px 12px;font:inherit}
-  .fl-field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+  /* ── install step: flash-mode radio ───────────────────────────────── */
+  .fl-modes{border:0;margin:16px 0;padding:0;display:flex;flex-direction:column;gap:10px}
+  .fl-modes legend{padding:0;margin:0 0 2px;font-size:13px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+  .fl-mode{display:flex;gap:12px;align-items:flex-start;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:14px;line-height:1.55;cursor:pointer;transition:border-color .15s}
+  .fl-mode:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+  .fl-mode:has(input:checked){border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .fl-mode input{margin-top:3px;width:17px;height:17px;accent-color:var(--accent);flex:none}
+  .fl-mode strong{color:var(--ink)}
+  .fl-mode span{color:var(--muted)}
+  .fl-mode.is-disabled{opacity:.5;cursor:not-allowed}
 
   /* warning/heads-up box (amber, semantic) */
   .fl-warn-box{display:flex;gap:12px;align-items:flex-start;background:rgba(224,166,74,.08);border:1px solid rgba(224,166,74,.4);border-radius:12px;padding:14px 16px;margin:6px 0 4px;color:#e7d3a8;font-size:13.5px;line-height:1.55}
   .fl-warn-box .fl-tag{flex:none;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--bg);background:#e0a64a;border-radius:999px;padding:3px 9px;margin-top:1px}
   .fl-warn{color:#e0a64a}
 
-  /* serial console / boot-log terminal, revealed on flash + configure success */
+  /* serial console / boot-log terminal, revealed after a flash */
   .fl-console{margin:14px 0 2px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg)}
   .fl-console-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;background:var(--bg-2);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
   .fl-console-connect{font:inherit;text-transform:none;letter-spacing:0;color:var(--accent);background:none;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:7px;padding:4px 10px;cursor:pointer}
@@ -1076,10 +1089,17 @@ function flashPage(builds) {
         <h2>${esc(F.install.title)}</h2>
         <p class="fl-lead">${esc(F.install.requirements)}</p>
         <div class="fl-build" id="fl-build-2"></div>
-        <label class="fl-check">
-          <input type="checkbox" id="fl-fresh" checked />
-          <span><strong>${esc(F.install.fresh.label)}</strong> — ${esc(F.install.fresh.note)}</span>
-        </label>
+        <fieldset class="fl-modes">
+          <legend>${esc(F.install.modes.title)}</legend>
+          <label class="fl-mode">
+            <input type="radio" name="fl-mode" value="all" checked />
+            <span><strong>${esc(F.install.modes.all.label)}</strong> — ${esc(F.install.modes.all.note)}</span>
+          </label>
+          <label class="fl-mode" id="fl-mode-keep-label">
+            <input type="radio" name="fl-mode" value="keep" id="fl-mode-keep" />
+            <span><strong>${esc(F.install.modes.keep.label)}</strong> — ${esc(F.install.modes.keep.note)}</span>
+          </label>
+        </fieldset>
         <div class="fl-status" id="fl-install-status" hidden></div>
         <div class="fl-console" id="fl-console-install" hidden>
           <div class="fl-console-bar"><span>Console</span><button type="button" class="fl-console-connect" id="fl-connect-install" hidden>Connect over USB</button></div>
@@ -1093,45 +1113,22 @@ function flashPage(builds) {
               <span slot="unsupported" class="fl-warn">This browser can’t flash — use Chrome or Edge on desktop.</span>
               <span slot="not-allowed" class="fl-warn">Flashing needs a secure (https) page.</span>
             </esp-web-install-button>
-            <button class="btn btn-ghost fl-next" data-go="provision" id="fl-next-install" disabled>${esc(F.install.next)} <span class="arrow">→</span></button>
+            <button class="btn btn-ghost fl-next" data-go="finished" id="fl-next-install" disabled>${esc(F.install.next)} <span class="arrow">→</span></button>
           </div>
         </div>
       </section>
 
-      <!-- Step 3 — provision -->
-      <section class="fl-step" data-step="provision" hidden>
-        <h2>${esc(F.provision.title)}</h2>
-        <p class="fl-lead">${esc(F.provision.body)}</p>
-        <div class="fl-warn-box" role="note"><span class="fl-tag">Heads up</span><span>${esc(F.provision.warning)}</span></div>
-        <div class="fl-grid">
-          <div class="fl-field"><label for="cf-name">${esc(F.provision.fields.name.label)}</label><input id="cf-name" placeholder="${esc(F.provision.fields.name.placeholder)}" autocomplete="off" /></div>
-          <div class="fl-field"><label for="cf-wifi_ssid">${esc(F.provision.fields.ssid.label)}</label><input id="cf-wifi_ssid" placeholder="${esc(F.provision.fields.ssid.placeholder)}" autocomplete="off" /></div>
-          <div class="fl-field"><label for="cf-wifi_pass">${esc(F.provision.fields.pass.label)}</label><input id="cf-wifi_pass" type="password" placeholder="${esc(F.provision.fields.pass.placeholder)}" autocomplete="off" /></div>
-        </div>
-        <div class="fl-status" id="fl-cfg-status" hidden></div>
-        <div class="fl-console" id="fl-console-provision" hidden>
-          <div class="fl-console-bar"><span>Console</span><button type="button" class="fl-console-connect" id="fl-connect-provision" hidden>Connect over USB</button></div>
-          <pre class="fl-log" id="fl-log-provision" aria-live="polite"></pre>
-        </div>
-        <div class="fl-foot">
-          <button class="btn btn-ghost btn-back fl-back" data-go="install" type="button"><span class="arrow">←</span> Back</button>
-          <div class="fl-foot-r">
-            <button class="btn btn-solid" id="fl-configure" type="button" disabled>${esc(F.provision.action)}</button>
-            <button class="btn btn-ghost fl-next" data-go="finished" id="fl-next-provision" disabled>${esc(F.provision.next)} <span class="arrow">→</span></button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Step 4 — finished -->
+      <!-- Step 3 — finished -->
       <section class="fl-step" data-step="finished" hidden>
         <div class="fl-done">
           <div class="fl-done-badge" aria-hidden="true">✓</div>
           <h2>${esc(F.finished.title)}</h2>
           <p class="fl-lead">${esc(F.finished.body)}</p>
+          <div class="fl-warn-box" role="note"><span class="fl-tag">Heads up</span><span>${esc(F.finished.warning)}</span></div>
           <a id="fl-doc-link" class="btn btn-ghost fl-done-doc" href="${esc(F.docHref)}" rel="noopener">${esc(F.finished.docLink)} <span class="arrow">→</span></a>
         </div>
         <div class="fl-foot">
-          <button class="btn btn-ghost btn-back fl-back" data-go="provision" type="button"><span class="arrow">←</span> Back</button>
+          <button class="btn btn-ghost btn-back fl-back" data-go="install" type="button"><span class="arrow">←</span> Back</button>
           <div class="fl-foot-r">
             <a class="btn btn-solid" href="index.html">Done</a>
           </div>
@@ -1164,7 +1161,7 @@ function flashPage(builds) {
   var BOARDS = {};
   (${boardJson}).forEach(function(b){ BOARDS[b.id] = b; });
   var MSG = ${msgJson};
-  var ORDER = ["board","install","provision","finished"];
+  var ORDER = ["board","install","finished"];
   var selected = null;
 
   // ── wizard navigation ─────────────────────────────────────────────────
@@ -1199,10 +1196,11 @@ function flashPage(builds) {
       return head + "<div class='fl-build-meta'><code>" + b.file + "</code> <span class='fl-ok'>staged</span> <span class='fl-muted'>" + b.size + "</span> <code class='fl-sha'>" + b.hash + "</code></div>";
     return head + "<div class='fl-build-meta'><code>" + b.file + "</code> <span class='fl-no'>not built</span> <span class='fl-muted'>— " + MSG.notBuilt + b.id + ".</span></div>";
   }
-  // Point ESP Web Tools at the fresh-erase or keep-settings manifest per toggle.
+  function flashMode(){ var r = document.querySelector('input[name="fl-mode"]:checked'); return r ? r.value : "all"; }
+  // Point ESP Web Tools at the flash-all (merged) or keep-config (app-only) manifest.
   function applyManifest(){
     if (!selected || !selected.present) return;
-    install.setAttribute("manifest", $("fl-fresh").checked ? selected.manifest : selected.manifestKeep);
+    install.setAttribute("manifest", flashMode() === "keep" ? selected.manifestKeep : selected.manifest);
   }
   function pick(id){
     var b = BOARDS[id];
@@ -1214,6 +1212,14 @@ function flashPage(builds) {
     var doc = $("fl-doc-link");
     if (b.doc){ doc.href = b.doc; doc.hidden = false; } else { doc.hidden = true; }
     install.style.display = b.present ? "" : "none";
+    // Keep-config needs the app-only image staged; if it isn't, disable that mode
+    // and fall back to flash-all so the manifest is always valid.
+    var keepInput = $("fl-mode-keep"), keepLabel = $("fl-mode-keep-label");
+    if (keepInput){
+      keepInput.disabled = !b.keep;
+      if (keepLabel) keepLabel.classList.toggle("is-disabled", !b.keep);
+      if (!b.keep && keepInput.checked){ var all = document.querySelector('input[name="fl-mode"][value="all"]'); if (all) all.checked = true; }
+    }
     applyManifest();
     // Re-arm the install gate whenever the board changes.
     flashStatus(null);
@@ -1221,7 +1227,7 @@ function flashPage(builds) {
     $("fl-next-board").disabled = !b.present;   // can't flash a board with no image
   }
   cards.forEach(function(c){ c.addEventListener("click", function(){ pick(c.getAttribute("data-id")); }); });
-  $("fl-fresh").addEventListener("change", applyManifest);
+  [].forEach.call(document.querySelectorAll('input[name="fl-mode"]'), function(r){ r.addEventListener("change", applyManifest); });
 
   // ── step 2: detect flash success ──────────────────────────────────────
   // ESP Web Tools runs in its own dialog appended to <body>; it exposes no
@@ -1239,7 +1245,7 @@ function flashPage(builds) {
     el.className = "fl-status " + (kind === "error" ? "err" : kind === "ok" ? "ok" : "info");
     el.textContent = kind === "error" ? MSG.flashErr : kind === "ok" ? MSG.flashOk : MSG.flashUnknown;
     if (kind !== "error") {
-      $("fl-next-install").disabled = false;   // unlock "Configure →"
+      $("fl-next-install").disabled = false;   // unlock "Finish →"
       // esptool hard-resets into the app after flashing, so the board is already
       // booting — try to reattach, but always offer an explicit Connect.
       attachConsole("fl-log-install", "fl-connect-install", MSG.flashDone);
@@ -1280,18 +1286,14 @@ function flashPage(builds) {
     });
   }).observe(document.body, { childList: true });
 
-  // ── shared serial console ─────────────────────────────────────────────
-  // Line-JSON protocol (docs/developer/esp32.md §6.2): {"cmd":"get|set|reboot"}
-  // replies {"ok":...}. Everything the firmware prints (boot + ESP_LOG lines)
-  // streams raw into a terminal box so flash + configure both end with a reset
-  // and a live look at the device booting.
-  var port = null, writer = null, buf = "", waiters = [], logEl = null, wantConsole = false, gotData = false;
+  // ── boot-log console (read-only) ──────────────────────────────────────
+  // After flashing we attach to the board's USB-JTAG and stream everything it
+  // prints (bootloader + ESP_LOG lines) into a terminal box, so you can watch it
+  // boot — and, on a full flash, see the captive-portal AP come up. Display only;
+  // provisioning is the captive portal / USB JSON console, not this page.
+  var port = null, logEl = null, wantConsole = false, gotData = false;
   function appendLog(s){ if (!logEl) return; var t = logEl.textContent + s; if (t.length > 12000) t = t.slice(-12000); logEl.textContent = t; logEl.scrollTop = logEl.scrollHeight; }
   function showConsole(id){ logEl = $(id); var box = logEl && logEl.closest(".fl-console"); if (box) box.hidden = false; }
-  // Only an actual command reply ({"ok":...}) resolves a pending send() — plain
-  // log lines (and stray JSON) are shown but never mistaken for a response, which
-  // is what made the old configure return "ok" instantly without really working.
-  function onLine(line){ line = line.trim(); if (!line) return; var o; try { o = JSON.parse(line); } catch(e){ return; } if (!o || !("ok" in o)) return; var w = waiters.shift(); if (w) w(o); }
   async function readLoop(){
     var dec = new TextDecoderStream();
     port.readable.pipeTo(dec.writable).catch(function(){});
@@ -1301,12 +1303,8 @@ function flashPage(builds) {
       if (out.done) break;
       gotData = true;
       appendLog(out.value);
-      buf += out.value;
-      var nl;
-      while ((nl = buf.indexOf("\\n")) >= 0) { onLine(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
     }
-    try { if (writer) writer.releaseLock(); } catch(e){}
-    writer = null; port = null; buf = "";   // closed — e.g. a reboot re-enumerated the USB-JTAG
+    port = null;   // closed — e.g. a reboot re-enumerated the USB-JTAG
   }
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
   // Open p, retrying the transient "already open" — ESP Web Tools can still hold
@@ -1321,24 +1319,11 @@ function flashPage(builds) {
         await sleep(400);
       }
     }
-    port = p; writer = port.writable.getWriter(); buf = ""; readLoop();
+    port = p; readLoop();
   }
   async function dropPort(){
-    try { if (writer) writer.releaseLock(); } catch(e){}
     try { if (port) await port.close(); } catch(e){}
-    writer = null; port = null; buf = "";
-  }
-  function send(obj){
-    if (!writer) return Promise.resolve(null);
-    return writer.write(new TextEncoder().encode(JSON.stringify(obj) + "\\n")).then(function(){
-      return new Promise(function(res){ waiters.push(res); setTimeout(function(){ var i = waiters.indexOf(res); if (i >= 0){ waiters.splice(i,1); res(null); } }, 2500); });
-    }, function(){ return null; });
-  }
-  // The first line after opening the USB-JTAG is sometimes dropped while the
-  // device's console task spins up, so retry a few times before giving up.
-  async function sendRetry(obj, tries){
-    for (var i = 0; i < (tries || 3); i++){ var r = await send(obj); if (r) return r; }
-    return null;
+    port = null;
   }
   // esp_restart() drops the native USB-JTAG and it re-enumerates as a fresh port.
   if (navigator.serial){
@@ -1348,7 +1333,7 @@ function flashPage(builds) {
     // Clear the stale handle when the device drops, so the next connect() opens a
     // fresh port instead of writing into a dead one (the old "no response" trap).
     navigator.serial.addEventListener("disconnect", function(){
-      if (port){ appendLog("\\n[device disconnected]\\n"); writer = null; port = null; buf = ""; }
+      if (port){ appendLog("\\n[device disconnected]\\n"); port = null; }
     });
   }
   async function connect(allowPrompt){
@@ -1375,48 +1360,12 @@ function flashPage(builds) {
   }
   // The Connect button always forces a fresh port: drop any stale handle, then
   // prompt, so the user can attach to the re-enumerated device after a reset.
-  ["fl-connect-install","fl-connect-provision"].forEach(function(id){
-    var b = $(id); if (!b) return;
-    b.addEventListener("click", async function(){
-      wantConsole = true; gotData = false;
-      await dropPort();
-      try { var ok = await connect(true); appendLog(ok ? "[connected]\\n" : "[no port selected]\\n"); }
-      catch(e){ appendLog(e.message + "\\n"); }
-    });
-  });
-
-  // ── step 3: provision ─────────────────────────────────────────────────
-  // Push name + Wi-Fi (only filled fields, so a blank never clobbers a stored
-  // value), then reset so the firmware re-reads config and joins Wi-Fi while the
-  // console shows it boot.
-  function cfgCheck(){ $("fl-configure").disabled = !($("cf-name").value.trim() && $("cf-wifi_ssid").value.trim()); }
-  ["cf-name","cf-wifi_ssid"].forEach(function(id){ $(id).addEventListener("input", cfgCheck); });
-  function cfgStatus(kind, msg){ var el = $("fl-cfg-status"); el.hidden = false; el.className = "fl-status " + kind; el.textContent = msg; }
-  $("fl-configure").addEventListener("click", async function(){
-    try {
-      cfgStatus("info", MSG.connecting);
-      showConsole("fl-log-provision"); wantConsole = true;
-      var ok = await connect(true);
-      if (!ok){ cfgStatus("err", MSG.noPort); return; }
-      var cfg = {};
-      var name = $("cf-name").value.trim(); if (name) cfg.name = name;
-      var ssid = $("cf-wifi_ssid").value.trim(); if (ssid) cfg.wifi_ssid = ssid;
-      var pass = $("cf-wifi_pass").value; if (pass) cfg.wifi_pass = pass;
-      cfgStatus("info", MSG.saving);
-      var r = await sendRetry({ cmd: "set", cfg: cfg }, 3);
-      // No reply usually means the handle we reused went stale (a prior reset
-      // re-enumerated the USB) — drop it, reconnect fresh, and try once more.
-      if (!r){
-        appendLog("[no reply — reconnecting…]\\n");
-        await dropPort();
-        if (await connect(true)) r = await sendRetry({ cmd: "set", cfg: cfg }, 3);
-      }
-      if (!(r && r.ok)){ cfgStatus("err", r && r.err ? MSG.cfgErr + " (" + r.err + ")" : MSG.noReply); return; }
-      cfgStatus("ok", MSG.cfgOk);
-      appendLog("\\n[" + MSG.cfgReboot + "]\\n");
-      send({ cmd: "reboot" });                     // apply Wi-Fi + join the LAN
-      $("fl-next-provision").disabled = false;     // unlock "Finish →"
-    } catch(e){ cfgStatus("err", "Connect/save failed: " + e.message); }
+  var cb = $("fl-connect-install");
+  if (cb) cb.addEventListener("click", async function(){
+    wantConsole = true; gotData = false;
+    await dropPort();
+    try { var ok = await connect(true); appendLog(ok ? "[connected]\\n" : "[no port selected]\\n"); }
+    catch(e){ appendLog(e.message + "\\n"); }
   });
 })();
 </script>
@@ -1459,16 +1408,20 @@ async function main() {
   const fwOut = path.join(OUT, "assets", "firmware");
   await fs.mkdir(fwOut, { recursive: true });
   for (const b of firmware) {
-    // Fresh-install (full erase) + keep-settings (prompt) manifest per board.
+    // Flash-all (merged @ 0) + keep-config (app @ APP_OFFSET) manifest per board.
     await fs.writeFile(
       path.join(fwOut, `manifest-${b.id}.json`),
-      JSON.stringify(firmwareManifest(b, true), null, 2)
+      JSON.stringify(firmwareManifest(b, "all"), null, 2)
     );
     await fs.writeFile(
       path.join(fwOut, `manifest-${b.id}-keep.json`),
-      JSON.stringify(firmwareManifest(b, false), null, 2)
+      JSON.stringify(firmwareManifest(b, "keep"), null, 2)
     );
-    if (b.present) await fs.copyFile(b.src, path.join(fwOut, b.file.split("/").pop()));
+    if (b.present) {
+      await fs.copyFile(b.src, path.join(fwOut, b.file.split("/").pop()));
+      // App-only image for keep-config (absent → the wizard disables that mode).
+      if (b.appSrc) await fs.copyFile(b.appSrc, path.join(fwOut, `ensemble-app-${b.id}.bin`));
+    }
   }
 
   // Serve the installer at /get.sh (the "curl … | sudo bash" one-liner). Source of

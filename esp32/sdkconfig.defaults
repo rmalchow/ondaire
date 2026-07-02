@@ -28,3 +28,8 @@ CONFIG_MDNS_TASK_STACK_SIZE=3072
 
 # --- Main task stack: app_main does NVS + netif + task spawns ---
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+
+# --- HTTP server (captive portal, provision.c): the 512 B default header limit
+#     rejects modern phones/browsers ("431 request header fields too long"), whose
+#     captive-portal probes send a big pile of headers. Give it room. ---
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048

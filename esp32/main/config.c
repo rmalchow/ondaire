@@ -2,8 +2,10 @@
 #include "board.h"
 
 #include <string.h>
+#include <stdio.h>
 #include "esp_log.h"
-#include "esp_random.h"
+#include "esp_mac.h"
+#include "esp_rom_crc.h"
 #include "esp_system.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -50,17 +52,34 @@ ens_config_t *config_load(void) {
         ESP_LOGW(TAG, "nvs_open: %s — using all defaults", esp_err_to_name(err));
         memset(&g, 0, sizeof g);
     } else {
-        // node_id: mint + persist on first boot.
+        // node_id: derive deterministically from the factory MAC (not random) so it
+        // is STABLE across reflashes — a merged flash wipes NVS, and we want the same
+        // id/hostname/AP name every time — and unique per board. Four CRC32s over the
+        // 6-byte MAC with distinct seeds spread it across the 16-byte id (using the MAC
+        // directly would leak the shared Espressif OUI into the leading bytes, so the
+        // short `hex4` suffix wouldn't be unique). Still persisted, so a future
+        // firmware keeps the value even if this derivation changes, and it stays
+        // overridable.
         size_t idlen = sizeof g.node_id;
         if (nvs_get_blob(h, "node_id", g.node_id, &idlen) != ESP_OK || idlen != sizeof g.node_id) {
-            esp_fill_random(g.node_id, sizeof g.node_id);
+            uint8_t mac[6] = { 0 };
+            esp_efuse_mac_get_default(mac);
+            for (int k = 0; k < 4; k++) {
+                uint32_t c = esp_rom_crc32_le(0xa5a5a5a5u + (uint32_t)k, mac, sizeof mac);
+                memcpy(g.node_id + k * 4, &c, 4);
+            }
             nvs_set_blob(h, "node_id", g.node_id, sizeof g.node_id);
             nvs_commit(h);
-            ESP_LOGI(TAG, "minted new node id");
+            ESP_LOGI(TAG, "derived node id from MAC %02x:%02x:%02x:%02x:%02x:%02x",
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         }
+        // Default friendly name shares the AP/mDNS short id, e.g. "ensemble-8cd0",
+        // so it too is stable per board (overwritten by the console / portal).
+        char idhex[33]; config_node_id_hex(idhex);
+        char defname[33]; snprintf(defname, sizeof defname, "ensemble-%.4s", idhex);
         get_str(h, "wifi_ssid", g.wifi_ssid, sizeof g.wifi_ssid, "");
         get_str(h, "wifi_pass", g.wifi_pass, sizeof g.wifi_pass, "");
-        get_str(h, "name", g.name, sizeof g.name, BOARD_NAME);
+        get_str(h, "name", g.name, sizeof g.name, defname);
         g.i2s_bclk = get_u8(h, "i2s_bclk", DEF_I2S_BCLK);
         g.i2s_lrck = get_u8(h, "i2s_lrck", DEF_I2S_LRCK);
         g.i2s_dout = get_u8(h, "i2s_dout", DEF_I2S_DOUT);

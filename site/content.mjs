@@ -706,9 +706,9 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         chipFamily: "ESP32-S3",
         label: "Sonocotta Amped-ESP32-S3-Plus",
         note: "All-in-one: ESP32-S3 + PCM5122 DAC + TPA3110 amp on one board (8 MB PSRAM). Drives passive speakers directly — no separate DAC to wire.",
-        // No marketing photo in the repo for this board — the flasher renders a
-        // labelled placeholder tile when img is empty (build.mjs boardCards).
-        img: "",
+        // Board photo (site copy — the Docker build context is site/ only). Lives
+        // in site/src/assets/img/; ships via copyDir like the other boards' photos.
+        img: "assets/img/amped-esp32-s3-plus.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/amped-esp32-s3-plus.md`,
         file: "assets/firmware/ensemble-fw-esp32s3-amped-plus.bin",
       },

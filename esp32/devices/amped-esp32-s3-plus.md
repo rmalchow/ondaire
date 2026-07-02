@@ -1,5 +1,7 @@
 # Sonocotta Amped-ESP32-S3-Plus (rev C)
 
+![Sonocotta Amped-ESP32-S3-Plus board](amped-esp32-s3-plus.jpg)
+
 An all-in-one audio board: **ESP32-S3 + a PCM5122 DSP DAC + a TPA3110/3128
 class-D amplifier** on a single PCB, so it drives passive speakers directly — no
 external DAC to wire. This is the `esp32s3-amped-plus` board profile

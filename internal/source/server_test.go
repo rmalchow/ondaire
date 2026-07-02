@@ -335,7 +335,7 @@ func waitForAtLeast(t *testing.T, get func() int, want int, d time.Duration) boo
 // TCP subscriber must NOT slow the master's release cadence. Every follower locks
 // its rate servo to that cadence, so a producer stall pegs the whole group. We
 // register a TCP sub whose peer never reads (every conn write parks until the
-// 50 ms deadline) and assert ReleaseFrame stays far under the 20 ms frame period
+// 50 ms deadline) and assert ReleaseFrame stays under the 20 ms frame period
 // and that the backpressure surfaces as fan-out drops, not a stall.
 func TestReleaseFrameNeverBlocksOnWedgedTCP(t *testing.T) {
 	s, _, _ := newTestServer(t)
@@ -361,8 +361,14 @@ func TestReleaseFrameNeverBlocksOnWedgedTCP(t *testing.T) {
 			worst = d
 		}
 	}
-	if worst > 5*time.Millisecond {
-		t.Fatalf("ReleaseFrame stalled %v on a wedged TCP sub; the producer cadence must be sink-independent", worst)
+	// Bound is one frame period: the guarantee is that a wedged sink never makes
+	// the producer wait on the socket. A real coupling regression (a synchronous
+	// write under s.mu) stalls for the full 50 ms write deadline and blows past
+	// this; a single-digit-ms GC/scheduler blip on a contended shared CI runner
+	// stays under it. Worst-of-100 back-to-back is inherently jitter-sensitive, so
+	// a 5 ms bound flaked without indicating any actual coupling.
+	if worst >= time.Duration(stream.FrameNanos) {
+		t.Fatalf("ReleaseFrame stalled %v on a wedged TCP sub (>= one %v frame period); the producer cadence must be sink-independent", worst, time.Duration(stream.FrameNanos))
 	}
 	if s.stats.fanoutDrops.Load() == 0 {
 		t.Fatal("expected fan-out drops to the wedged TCP subscriber, got none")

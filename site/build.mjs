@@ -1014,8 +1014,10 @@ function flashPage(builds) {
   .fl-mode:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
   .fl-mode:has(input:checked){border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
   .fl-mode input{margin-top:3px;width:17px;height:17px;accent-color:var(--accent);flex:none}
-  .fl-mode strong{color:var(--ink)}
-  .fl-mode span{color:var(--muted)}
+  /* label as a headline, explanation stacked below it */
+  .fl-mode-text{display:flex;flex-direction:column;gap:4px}
+  .fl-mode-text strong{color:var(--ink);font-size:15px}
+  .fl-mode-note{color:var(--muted)}
   .fl-mode.is-disabled{opacity:.5;cursor:not-allowed}
 
   /* warning/heads-up box (amber, semantic) */
@@ -1093,11 +1095,11 @@ function flashPage(builds) {
           <legend>${esc(F.install.modes.title)}</legend>
           <label class="fl-mode">
             <input type="radio" name="fl-mode" value="all" checked />
-            <span><strong>${esc(F.install.modes.all.label)}</strong> — ${esc(F.install.modes.all.note)}</span>
+            <span class="fl-mode-text"><strong>${esc(F.install.modes.all.label)}</strong><span class="fl-mode-note">${esc(F.install.modes.all.note)}</span></span>
           </label>
           <label class="fl-mode" id="fl-mode-keep-label">
             <input type="radio" name="fl-mode" value="keep" id="fl-mode-keep" />
-            <span><strong>${esc(F.install.modes.keep.label)}</strong> — ${esc(F.install.modes.keep.note)}</span>
+            <span class="fl-mode-text"><strong>${esc(F.install.modes.keep.label)}</strong><span class="fl-mode-note">${esc(F.install.modes.keep.note)}</span></span>
           </label>
         </fieldset>
         <div class="fl-status" id="fl-install-status" hidden></div>

@@ -164,6 +164,29 @@ static const char PAGE_TAIL[] =
     "e.onclick=function(){var s=p.type==='password';p.type=s?'text':'password';on.hidden=s;off.hidden=!s};"
     "</script>";
 
+// Shown after /save; the board reboots ~0.6 s later, so the browser keeps rendering
+// this (with the level-bars EQ animation) through the reconnect. Same palette as the
+// portal — self-contained, no external assets.
+static const char SAVED_PAGE[] =
+    "<!doctype html><meta name=viewport content=\"width=device-width,initial-scale=1\">"
+    "<title>ensemble</title><style>"
+    "body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;"
+    "gap:1.1em;text-align:center;padding:1em;background:#11151a;color:#e6edf3;"
+    "font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}"
+    ".wm{font-family:Georgia,\"Times New Roman\",serif;font-size:28px;letter-spacing:-.01em}"
+    ".bars{display:flex;align-items:flex-end;gap:5px;height:42px}"
+    ".bars i{width:6px;height:100%;border-radius:3px;background:#35e3b3;box-shadow:0 0 10px #35e3b3;"
+    "transform-origin:bottom;animation:eq 1s ease-in-out infinite}"
+    ".bars i:nth-child(1){animation-delay:-.9s}.bars i:nth-child(2){animation-delay:-.7s}"
+    ".bars i:nth-child(3){animation-delay:-.5s}.bars i:nth-child(4){animation-delay:-.3s}"
+    ".bars i:nth-child(5){animation-delay:-.1s}"
+    "@keyframes eq{0%,100%{transform:scaleY(.22)}50%{transform:scaleY(1)}}"
+    "h3{margin:0;font-weight:600}p{margin:0;color:#8b97a7;font-size:.9em;max-width:18em}"
+    "</style>"
+    "<div class=wm>ensemble</div>"
+    "<div class=bars><i></i><i></i><i></i><i></i><i></i></div>"
+    "<h3>Saved</h3><p>connecting to your network\xe2\x80\xa6 the speaker is rebooting.</p>";
+
 static esp_err_t h_root(httpd_req_t *req) {
     ens_config_t *g = config_get();
     httpd_resp_set_type(req, "text/html");
@@ -241,8 +264,10 @@ static esp_err_t h_save(httpd_req_t *req) {
     const char *reason = NULL;
     if (g->wifi_ssid[0] == '\0') {
         httpd_resp_set_type(req, "text/html");
-        httpd_resp_sendstr(req, "<meta name=viewport content=\"width=device-width\">"
-                                "<p>Wi-Fi network is required. <a href=/>back</a>");
+        httpd_resp_sendstr(req, "<!doctype html><meta name=viewport content=\"width=device-width,initial-scale=1\">"
+                                "<body style=\"background:#11151a;color:#e6edf3;font-family:system-ui,sans-serif;"
+                                "text-align:center;padding:3em 1em\">Wi-Fi network is required."
+                                "<br><br><a style=\"color:#35e3b3\" href=/>back</a>");
         return ESP_OK;
     }
     if (!config_validate(g, &reason) || !config_save()) {
@@ -251,8 +276,7 @@ static esp_err_t h_save(httpd_req_t *req) {
     }
     ESP_LOGI(TAG, "saved creds for \"%s\" — rebooting", g->wifi_ssid);
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_sendstr(req, "<meta name=viewport content=\"width=device-width\">"
-                            "<h3>Saved. Rebooting\xe2\x80\xa6</h3>");
+    httpd_resp_sendstr(req, SAVED_PAGE);
     vTaskDelay(pdMS_TO_TICKS(600));
     esp_restart();
     return ESP_OK;

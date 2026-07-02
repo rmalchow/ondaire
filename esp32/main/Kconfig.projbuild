@@ -16,6 +16,20 @@ menu "ensemble playback node"
             bool "Waveshare ESP32-S3-Zero (23.5x18mm, USB-C, WS2812 on GPIO21)"
         config ENSEMBLE_BOARD_ESP32S3_AMPED_PLUS
             bool "Sonocotta Amped-ESP32-S3-Plus (PCM5122 DAC + TPA3110 amp, N16R8)"
+        config ENSEMBLE_BOARD_ESP32S3_HIFI
+            bool "Sonocotta HiFi-ESP32-S3 (PCM5100A DAC, line-out)"
+        config ENSEMBLE_BOARD_ESP32S3_AMPED
+            bool "Sonocotta Amped-ESP32-S3 (PCM5100A DAC + TPA3110 amp)"
+        config ENSEMBLE_BOARD_ESP32S3_LOUD
+            bool "Sonocotta Loud-ESP32-S3 (dual MAX98357A DAC+amp)"
+        config ENSEMBLE_BOARD_ESP32S3_HIFI_PLUS
+            bool "Sonocotta HiFi-ESP32-Plus (PCM5122 DSP DAC, line-out)"
+        config ENSEMBLE_BOARD_ESP32S3_LOUDER
+            bool "Sonocotta Louder-ESP32-S3 / Mini (TAS5805M DSP amp)"
+        config ENSEMBLE_BOARD_ESP32S3_LOUDER_PLUS
+            bool "Sonocotta Louder-ESP32-Plus / Pro (TAS5825M DSP amp)"
+        config ENSEMBLE_BOARD_ESP32S3_LOUD_PLUS
+            bool "Sonocotta Loud-ESP32-Plus (MA12070P DSP amp)"
         config ENSEMBLE_BOARD_GENERIC
             bool "Generic (compile-time pins, no board profile)"
     endchoice

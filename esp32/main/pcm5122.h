@@ -10,6 +10,8 @@
 // Bring up I2C on the given pins and write the minimal PCM5122 init sequence
 // (PLL reference = BCK, un-standby, un-mute, 0 dB digital volume) to the DAC's
 // I2C address (DEF_DAC_I2C_ADDR for the compiled board). Requires the I2S clocks
-// to already be running so the DAC's PLL can lock. Returns false if the device
-// does not ACK or a register write fails; logs the reason.
-bool pcm5122_init(int sda, int scl);
+// to already be running so the DAC's PLL can lock. en_pin is the DAC hard-enable
+// (driven HIGH before the I2C writes, e.g. HiFi-ESP32-Plus GPIO4), or -1 if the
+// board has none (e.g. Amped-ESP32-S3-Plus, rev C "no DAC_EN"). Returns false if
+// the device does not ACK or a register write fails; logs the reason.
+bool pcm5122_init(int sda, int scl, int en_pin);

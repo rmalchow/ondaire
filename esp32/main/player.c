@@ -5,6 +5,8 @@
 #include "volume.h"
 #include "servo.h"
 #include "pcm5122.h"
+#include "tas58xx.h"
+#include "ma12070p.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -134,12 +136,17 @@ bool player_init(const ens_config_t *cfg) {
     if (!i2s_out_init(cfg->i2s_bclk, cfg->i2s_lrck, cfg->i2s_dout, cfg->i2s_mclk)) return false;
     servo_init(false);
 
-    // I2C-controlled DAC (PCM5122, dac=1): configure it over I2C now that the I2S
-    // clocks are running, BEFORE un-muting the amp. Unlike the PCM5102A this DAC is
-    // silent until told to reference BCK for its PLL (MCLK-less board), so this is
-    // what actually produces analog output. Failure just logs — the node still runs.
-    if (cfg->dac == 1 && cfg->i2c_sda >= 0 && cfg->i2c_scl >= 0) {
-        pcm5122_init(cfg->i2c_sda, cfg->i2c_scl);
+    // I2C-controlled DACs/amps: configure them over I2C now that the I2S clocks are
+    // running, BEFORE un-muting a separate amp. These parts are MCLK-less and stay
+    // silent until told to reference BCK / brought out of reset, so this is what
+    // actually produces analog output. dac=0 (PCM5102A/PCM5100A/MAX98357) needs no
+    // init. cfg->dac_en is the DAC/amp hard-enable pin (each driver drives it with
+    // the part's own power-up timing). Failure just logs — the node still runs.
+    switch (cfg->dac) {
+    case 1: pcm5122_init(cfg->i2c_sda, cfg->i2c_scl, cfg->dac_en); break;  // PCM5122
+    case 2: tas58xx_init(cfg->i2c_sda, cfg->i2c_scl, cfg->dac_en); break;  // TAS5805M/5825M
+    case 3: ma12070p_init(cfg->i2c_sda, cfg->i2c_scl, cfg->dac_en); break; // MA12070P
+    default: break;                                                        // dac=0: none
     }
 
     // Boards with an onboard class-D amp (e.g. Amped-ESP32-S3-Plus, TPA3110 on

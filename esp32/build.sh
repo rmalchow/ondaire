@@ -28,7 +28,14 @@ case "$BOARD" in
   esp32s3-supermini)             TARGET="esp32s3" ;;
   esp32s3-zero)                  TARGET="esp32s3" ;;
   esp32s3-amped-plus)            TARGET="esp32s3" ;;
-  *) echo "unknown board '$BOARD' (esp32s3|esp32s3-supermini|esp32s3-zero|esp32s3-amped-plus|esp32|esp32c3|esp32c6)"; exit 2 ;;
+  esp32s3-hifi)                  TARGET="esp32s3" ;;
+  esp32s3-amped)                 TARGET="esp32s3" ;;
+  esp32s3-loud)                  TARGET="esp32s3" ;;
+  esp32s3-hifi-plus)             TARGET="esp32s3" ;;
+  esp32s3-louder)                TARGET="esp32s3" ;;
+  esp32s3-louder-plus)           TARGET="esp32s3" ;;
+  esp32s3-loud-plus)             TARGET="esp32s3" ;;
+  *) echo "unknown board '$BOARD' (esp32s3|esp32s3-supermini|esp32s3-zero|esp32s3-amped-plus|esp32s3-hifi|esp32s3-amped|esp32s3-loud|esp32s3-hifi-plus|esp32s3-louder|esp32s3-louder-plus|esp32s3-loud-plus|esp32|esp32c3|esp32c6)"; exit 2 ;;
 esac
 
 BUILD_DIR="build-$BOARD"

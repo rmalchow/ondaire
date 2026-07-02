@@ -9,6 +9,8 @@ idf_component_register(
         "opus_dec.c"
         "i2s_out.c"
         "pcm5122.c"
+        "tas58xx.c"
+        "ma12070p.c"
         "servo.c"
         "control.c"
         "status.c"

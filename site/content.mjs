@@ -619,11 +619,17 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
     bom: {
       title: "What you need",
       items: [
-        "A PSRAM-equipped ESP32 board — an ESP32-S3 (DevKitC-1 or Waveshare S3-Zero), a classic ESP32-WROVER, or an all-in-one Sonocotta Amped-ESP32-S3-Plus (DAC + amp on board).",
-        "A PCM5102A I2S DAC (the common purple GY-PCM5102 module) — not needed on the all-in-one Amped board.",
+        "A PSRAM-equipped ESP32 board — an ESP32-S3 (DevKitC-1 or Waveshare S3-Zero) or a classic ESP32-WROVER.",
+        "A PCM5102A I2S DAC (the common purple GY-PCM5102 module).",
         "A KY-040 / EC11 rotary encoder for local volume (optional).",
         "A USB-C cable and Chrome or Edge on desktop.",
       ],
+      // The all-in-one alternative to the whole DIY list above — rendered as a
+      // single bullet under an "or" divider, same font as the list; only the
+      // linked "Sonocotta ↗" is bold.
+      alt: {
+        html: 'An all-in-one <a href="https://sonocotta.com" target="_blank" rel="noopener" class="fl-bom-alt-link"><strong>Sonocotta</strong> <span class="fl-ext" aria-hidden="true">↗</span></a> board — DAC and amp already on board, so there’s no separate DAC to wire.',
+      },
     },
     // Step 2 — install. ESP Web Tools detects the chip and flashes; a radio picks
     // the mode → which manifest the installer uses (flash-all merged @ 0x0 vs
@@ -672,12 +678,21 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
   // built merged image (esp32/build-<id>/ensemble-fw-<id>.bin) lines up.
   firmware: {
     manifestName: "ensemble player",
+    // Each build maps to a CI firmware image (ensemble-fw-<id>.bin + the app-only
+    // ensemble-app-<id>.bin) and its own ESP Web Tools manifest pair. `tested: true`
+    // means the image has been flashed + verified on real hardware; untested boards
+    // are built pin-map-correct from the vendor's schematics/ESPHome configs but not
+    // yet bench-checked — the flasher badges them so people know (all pins are
+    // re-provisionable over USB if a default is off). The Sonocotta family shares one
+    // "audio dock" S3 carrier; the Mini/Pro use the same firmware as the Louder/
+    // Louder-Plus (same DAC + pin map), so they flash those images.
     builds: [
       {
         id: "esp32s3-supermini",
         chipFamily: "ESP32-S3",
         label: "ESP32-S3 Super Mini (PSRAM version)",
         note: "Dual-core ESP32-S3 + 2 MB PSRAM, native USB-C. Pair with a PCM5102A I2S DAC.",
+        tested: true,
         // Board photo (front + back) — canonical copy lives next to the board's
         // sheet in esp32/devices/; build.mjs copies it into the site like `wiring`.
         // Marketing board photo (front + back). Lives in site/src/assets/img/ — the
@@ -694,6 +709,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         chipFamily: "ESP32-S3",
         label: "Waveshare ESP32-S3-Zero",
         note: "Dual-core ESP32-S3 + 2 MB PSRAM, native USB-C, 23.5 × 18 mm. Pair with a PCM5102A I2S DAC.",
+        tested: true,
         // Marketing board photo. Lives in site/src/assets/img/ — the Docker build
         // context is site/ only, so it ships via copyDir (the same photo also sits
         // in esp32/devices/ for the GitLab device sheet).
@@ -702,15 +718,86 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         file: "assets/firmware/ensemble-fw-esp32s3-zero.bin",
       },
       {
+        id: "esp32s3-hifi",
+        chipFamily: "ESP32-S3",
+        label: "Sonocotta HiFi-ESP32-S3",
+        note: "ESP32-S3 audio dock with a PCM5100A I2S DAC — line-out only (no amp). 8 MB PSRAM.",
+        tested: false,
+        img: "assets/img/hifi-esp32.jpg",
+        doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#hifi-esp32-s3`,
+        file: "assets/firmware/ensemble-fw-esp32s3-hifi.bin",
+      },
+      {
+        id: "esp32s3-hifi-plus",
+        chipFamily: "ESP32-S3",
+        label: "Sonocotta HiFi-ESP32-Plus",
+        note: "ESP32-S3 audio dock with a PCM5122 DSP DAC — line-out only (no amp). 8 MB PSRAM.",
+        tested: false,
+        img: "assets/img/hifi-esp32-plus.jpg",
+        doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#hifi-esp32-plus`,
+        file: "assets/firmware/ensemble-fw-esp32s3-hifi-plus.bin",
+      },
+      {
+        id: "esp32s3-amped",
+        chipFamily: "ESP32-S3",
+        label: "Sonocotta Amped-ESP32-S3",
+        note: "All-in-one: ESP32-S3 + PCM5100A DAC + TPA3110 amp (2×25 W). Drives passive speakers directly. 8 MB PSRAM.",
+        tested: false,
+        img: "assets/img/amped-esp32.jpg",
+        doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#amped-esp32-s3`,
+        file: "assets/firmware/ensemble-fw-esp32s3-amped.bin",
+      },
+      {
         id: "esp32s3-amped-plus",
         chipFamily: "ESP32-S3",
         label: "Sonocotta Amped-ESP32-S3-Plus",
         note: "All-in-one: ESP32-S3 + PCM5122 DAC + TPA3110 amp on one board (8 MB PSRAM). Drives passive speakers directly — no separate DAC to wire.",
+        tested: true,
         // Board photo (site copy — the Docker build context is site/ only). Lives
         // in site/src/assets/img/; ships via copyDir like the other boards' photos.
         img: "assets/img/amped-esp32-s3-plus.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/amped-esp32-s3-plus.md`,
         file: "assets/firmware/ensemble-fw-esp32s3-amped-plus.bin",
+      },
+      {
+        id: "esp32s3-loud",
+        chipFamily: "ESP32-S3",
+        label: "Sonocotta Loud-ESP32-S3",
+        note: "All-in-one: ESP32-S3 + dual MAX98357A I2S DAC+amp (2×5 W). Drives passive speakers directly. 8 MB PSRAM.",
+        tested: false,
+        img: "assets/img/loud-esp32.jpg",
+        doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#loud-esp32-s3`,
+        file: "assets/firmware/ensemble-fw-esp32s3-loud.bin",
+      },
+      {
+        id: "esp32s3-loud-plus",
+        chipFamily: "ESP32-S3",
+        label: "Sonocotta Loud-ESP32-Plus",
+        note: "All-in-one: ESP32-S3 + Infineon MA12070P DSP amp (2×60 W). Drives passive speakers directly. 8 MB PSRAM.",
+        tested: false,
+        img: "assets/img/loud-esp32-plus.jpg",
+        doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#loud-esp32-plus`,
+        file: "assets/firmware/ensemble-fw-esp32s3-loud-plus.bin",
+      },
+      {
+        id: "esp32s3-louder",
+        chipFamily: "ESP32-S3",
+        label: "Sonocotta Louder-ESP32-S3 / Mini",
+        note: "All-in-one: ESP32-S3 + TAS5805M DSP amp (2×32 W into 8Ω). Same image fits the Louder-ESP32-Mini. 8 MB PSRAM.",
+        tested: false,
+        img: "assets/img/louder-esp32.jpg",
+        doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#louder-esp32-s3-mini`,
+        file: "assets/firmware/ensemble-fw-esp32s3-louder.bin",
+      },
+      {
+        id: "esp32s3-louder-plus",
+        chipFamily: "ESP32-S3",
+        label: "Sonocotta Louder-ESP32-Plus / Pro",
+        note: "All-in-one: ESP32-S3 + TAS5825M DSP amp (2×30 W). Same image fits the Louder-ESP32-Pro. 8 MB PSRAM.",
+        tested: false,
+        img: "assets/img/louder-esp32-plus.jpg",
+        doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#louder-esp32-plus-pro`,
+        file: "assets/firmware/ensemble-fw-esp32s3-louder-plus.bin",
       },
     ],
   },

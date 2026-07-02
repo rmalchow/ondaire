@@ -145,6 +145,13 @@ build-release:
       - { BOARD: esp32s3-supermini, TARGET: esp32s3, CHIP: ESP32S3 }
       - { BOARD: esp32s3-zero, TARGET: esp32s3, CHIP: ESP32S3ZERO }
       - { BOARD: esp32s3-amped-plus, TARGET: esp32s3, CHIP: ESP32S3AMPEDPLUS }
+      - { BOARD: esp32s3-hifi, TARGET: esp32s3, CHIP: ESP32S3HIFI }
+      - { BOARD: esp32s3-amped, TARGET: esp32s3, CHIP: ESP32S3AMPED }
+      - { BOARD: esp32s3-loud, TARGET: esp32s3, CHIP: ESP32S3LOUD }
+      - { BOARD: esp32s3-hifi-plus, TARGET: esp32s3, CHIP: ESP32S3HIFIPLUS }
+      - { BOARD: esp32s3-louder, TARGET: esp32s3, CHIP: ESP32S3LOUDER }
+      - { BOARD: esp32s3-louder-plus, TARGET: esp32s3, CHIP: ESP32S3LOUDERPLUS }
+      - { BOARD: esp32s3-loud-plus, TARGET: esp32s3, CHIP: ESP32S3LOUDPLUS }
   # Use the IDF + tools PRE-INSTALLED in the espressif/idf image. (This previously
   # overrode IDF_TOOLS_PATH to a project-local .espressif and cached it — but on a
   # cache miss that dir is empty, so export.sh cannot find the Python venv and the

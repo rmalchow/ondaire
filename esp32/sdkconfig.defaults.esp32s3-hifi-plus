@@ -1,0 +1,22 @@
+# Sonocotta HiFi-ESP32-Plus (S3) — PCM5122 DSP DAC, line-out.
+# ESP32-S3-WROOM-1 audio-dock carrier. Same native USB-Serial-JTAG console as the
+# other S3 boards.
+CONFIG_IDF_TARGET="esp32s3"
+
+# 8 MB flash + 8 MB OCTAL PSRAM (confirmed from Sonocotta's ESPHome: flash_size 8MB,
+# psram mode octal). Baked into the image — not re-provisionable over USB.
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
+# Console + stdio over the built-in USB-Serial-JTAG CDC port.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Board selection (boards/board.h + default pin map).
+CONFIG_ENSEMBLE_BOARD_ESP32S3_HIFI_PLUS=y
+
+# PSRAM: octal, auto-size, 80 MHz (players are PSRAM-only — docs/developer/esp32.md §3.1).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y

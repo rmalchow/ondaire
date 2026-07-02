@@ -20,10 +20,11 @@ typedef struct {
     // Rotary encoder pins.
     uint8_t  enc_a, enc_b, enc_sw;
     int8_t   led;              // status LED, -1 if none
-    int8_t   amp_en;           // onboard class-D amp un-mute pin (HIGH=on), -1 if none
-    int8_t   i2c_sda, i2c_scl; // control-I2C pins for a PCM5122 DAC, -1 if none
+    int8_t   amp_en;           // separate class-D amp un-mute pin (HIGH=on, idle-gated), -1 if none
+    int8_t   dac_en;           // I2C DAC/amp hard-enable the driver owns (held on), -1 if none
+    int8_t   i2c_sda, i2c_scl; // control-I2C pins for an I2C DAC/amp, -1 if none
 
-    uint8_t  dac;              // 0 = PCM5102A (sw gain), 1 = PCM5122 (I2C)
+    uint8_t  dac;              // 0=PCM510x/MAX98357 (sw gain) 1=PCM5122 2=TAS58xx 3=MA12070P
     uint8_t  codec_pref;       // advertised codec pref: 0 = opus, 1 = pcm
     uint16_t buffer_ms;        // playout lead default (master overrides via ATTACH)
     uint16_t control_port;     // CONTROL_PORT advertised over mDNS

@@ -99,7 +99,8 @@ they are not products.
 |-------|------|-------|---------------|:------------:|---------------|:---------:|
 | ESP32-S3-DevKitC-1-N16R8 | ESP32-S3 | 8 MB | UART **+** native JTAG | no | 35–37 (octal PSRAM) | [ ] |
 | Waveshare ESP32-S3-Zero | ESP32-S3 | 2 MB | native USB-Serial-JTAG | no | — | [ ] |
-| Sonocotta Amped-ESP32-S3-Plus (rev C) | ESP32-S3 | 8 MB (octal) | native USB-Serial-JTAG | no | 26–37 (flash + octal PSRAM) | [ ] |
+| Sonocotta Amped-ESP32-S3-Plus (rev C) | ESP32-S3 | 8 MB (octal) | native USB-Serial-JTAG | no | 26–37 (flash + octal PSRAM) | [x] tested |
+| Sonocotta audio-dock family — HiFi / HiFi-Plus / Amped / Loud / Loud-Plus / Louder / Louder-Plus | ESP32-S3 | 8 MB (octal) | native USB-Serial-JTAG | no | 26–37 (flash + octal PSRAM) | [ ] **untested** |
 | ESP32-DevKitC (WROVER) | ESP32 (classic) | 8 MB | CP2102 UART → `ttyUSB` | **yes** | 16, 17 (PSRAM) | [ ] |
 | Generic / bring-your-own-pins (PSRAM) | S3 / WROVER | required | varies | varies | — | [ ] |
 
@@ -110,6 +111,13 @@ profiles `esp32s3-supermini` / `esp32s3-zero`), and a **Sonocotta
 Amped-ESP32-S3-Plus** rev C (8 MB flash + 8 MB octal PSRAM, integrated PCM5122 DAC +
 TPA3110 amp — profile `esp32s3-amped-plus`, drives speakers directly; see
 [`esp32/devices/amped-esp32-s3-plus.md`](../../esp32/devices/amped-esp32-s3-plus.md)).
+The rest of the Sonocotta audio-dock family (HiFi / HiFi-Plus / Amped / Loud /
+Loud-Plus / Louder / Louder-Plus, profiles `esp32s3-{hifi,hifi-plus,amped,loud,
+loud-plus,louder,louder-plus}`) ships as **untested** board profiles — pin-map
+correct from the vendor schematics/ESPHome, compiled + flashable, but not yet
+bench-verified; the web flasher badges them and their DAC drivers (`tas58xx.c`,
+`ma12070p.c`) are new. See
+[`esp32/devices/sonocotta-audio-dock.md`](../../esp32/devices/sonocotta-audio-dock.md).
 Out of scope: non-PSRAM ESP32s (above); **Nordic** parts
 (BLE/Thread radios, no Wi-Fi); and the **RP2040 / Pico W** family (a different SDK,
 and the plain Pico W is RAM-tight at 264 KB — the **Pico 2 W**, 520 KB, would be the
@@ -326,8 +334,10 @@ board boot into AP/provisioning mode.
 | `codec` | u8 | `0`=opus (default), `1`=pcm |
 | `buffer_ms` | u16 | playout buffer (default 150) |
 | `i2s_bclk`/`i2s_lrck`/`i2s_dout`/`i2s_mclk` | u8 | I2S pins |
-| `i2c_en`/`i2c_sda`/`i2c_scl` | u8 | optional I2C |
-| `dac` | u8 | `0`=PCM5102A (sw gain), `1`=PCM5122 (I2C volume) |
+| `i2c_sda`/`i2c_scl` | i8 | control-I2C pins for an I2C DAC/amp (-1 if none) |
+| `dac` | u8 | `0`=PCM510x/MAX98357 (sw gain), `1`=PCM5122, `2`=TAS5805M/5825M, `3`=MA12070P (all I2C) |
+| `amp_en` | i8 | separate class-D amp un-mute pin (HIGH=on, idle-gated), -1 if none |
+| `dac_en` | i8 | I2C DAC/amp hard-enable the driver owns (held on), -1 if none |
 | `enc_a`/`enc_b`/`enc_sw` | u8 | rotary encoder pins |
 | `vol` | u8 | last volume 0–100 (restored on boot) |
 | `name` | str | friendly label (logs / OLED) |

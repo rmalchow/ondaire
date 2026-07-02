@@ -880,7 +880,9 @@ function firmwareManifest(b, mode) {
 
 function flashPage(builds) {
   const F = C.flash;
-  const bom = F.bom.items.map((i) => `<li>${esc(i)}</li>`).join("");
+  // A BOM item is either a plain string (escaped) or {html} for pre-marked-up
+  // content like an external link.
+  const bom = F.bom.items.map((i) => `<li>${typeof i === "string" ? esc(i) : i.html}</li>`).join("");
 
   // The progress header — one numbered chip per wizard step. The first is current
   // on load; pick()/show() in the page script move the is-current/is-done classes.
@@ -894,15 +896,25 @@ function flashPage(builds) {
     .join("");
 
   // One photo card per board in a horizontal scroll row; nothing board-specific
-  // shows until one is picked.
+  // shows until one is picked. Cards are role=radio <div>s (not <button>s) so each
+  // can nest its own zoom button — the picker JS wires click + Enter/Space to select.
+  // Boards with a photo also get a lightbox slide; data-lb is that slide's index.
+  // data-label feeds the search filter. Untested boards carry a corner badge.
+  const lbBoards = builds.filter((b) => b.img);
+  const boardLbImgs = lbBoards.map((b) => ({ src: b.img, alt: b.label, cap: b.label }));
   const boardCards = builds
-    .map(
-      (b) =>
-        `<button type="button" class="fl-board-card" role="radio" aria-checked="false" data-id="${esc(b.id)}">
-            ${b.img ? `<img src="${esc(b.img)}" alt="${esc(b.label)}" loading="lazy" decoding="async" />` : `<span class="fl-board-ph" aria-hidden="true">${esc(b.chipFamily || "ESP32")}</span>`}
+    .map((b) => {
+      const li = lbBoards.indexOf(b);
+      const media = b.img
+        ? `<img src="${esc(b.img)}" alt="${esc(b.label)}" loading="lazy" decoding="async" />
+             <button type="button" class="fl-board-zoom" data-lb="${li}" aria-label="Zoom the ${esc(b.label)} photo">⤢</button>`
+        : `<span class="fl-board-ph" aria-hidden="true">${esc(b.chipFamily || "ESP32")}</span>`;
+      return `<div class="fl-board-card" role="radio" aria-checked="false" tabindex="0" data-id="${esc(b.id)}" data-label="${esc(b.label.toLowerCase())}" data-tested="${b.tested ? "1" : "0"}">
+            ${b.tested ? "" : `<span class="fl-board-badge" title="Built from the vendor pin-map but not yet verified on real hardware">Untested</span>`}
+            <span class="fl-board-imgwrap">${media}</span>
             <span class="fl-board-name">${esc(b.label)}</span>
-          </button>`
-    )
+          </div>`;
+    })
     .join("");
 
   // Board metadata for the picker JS: image, both manifests (fresh / keep), the
@@ -912,6 +924,7 @@ function flashPage(builds) {
     id: b.id,
     label: b.label,
     note: b.note,
+    tested: !!b.tested,
     img: b.img,
     doc: b.doc || "",
     manifest: `assets/firmware/manifest-${b.id}.json`,
@@ -981,18 +994,43 @@ function flashPage(builds) {
   .btn-back{padding-left:8px}
 
   /* ── board picker ─────────────────────────────────────────────────── */
+  /* Search box + "show untested" toggle above the board row. */
+  .fl-search-wrap{margin:0 0 14px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .fl-search{flex:1 1 240px;max-width:340px;padding:9px 12px;border:1px solid var(--line-2);border-radius:9px;background:var(--bg-2);color:inherit;font:inherit;font-size:14px}
+  .fl-search:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .fl-show-untested{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:14px;cursor:pointer;user-select:none}
+  .fl-show-untested input{cursor:pointer;accent-color:var(--accent)}
+  .fl-board-none{color:var(--muted);font-size:14px;margin:4px 2px 0}
   .fl-board-row{display:flex;gap:14px;overflow-x:auto;padding:6px 2px 14px;margin:0 -2px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
-  .fl-board-card{flex:0 0 220px;scroll-snap-align:start;display:flex;flex-direction:column;gap:10px;align-items:center;text-align:center;background:var(--bg-2);border:1px solid var(--line-2);border-radius:12px;padding:14px;color:inherit;font:inherit;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+  .fl-board-card{position:relative;flex:0 0 220px;scroll-snap-align:start;display:flex;flex-direction:column;gap:10px;align-items:center;text-align:center;background:var(--bg-2);border:1px solid var(--line-2);border-radius:12px;padding:14px;color:inherit;font:inherit;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+  .fl-board-card[hidden]{display:none}
   .fl-board-card:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--line-2))}
+  .fl-board-card:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
   .fl-board-card.is-active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 34px -16px var(--accent)}
+  .fl-board-imgwrap{position:relative;width:100%;display:block}
   .fl-board-card img{width:100%;aspect-ratio:4/3;object-fit:contain;border-radius:8px;background:var(--bg)}
+  /* Zoom affordance over the photo; visible on card hover/focus (always on touch). */
+  .fl-board-zoom{position:absolute;right:6px;bottom:6px;width:30px;height:30px;display:grid;place-items:center;border:1px solid var(--line-2);border-radius:8px;background:color-mix(in srgb,var(--bg) 82%,transparent);color:inherit;font-size:15px;line-height:1;cursor:zoom-in;opacity:0;transition:opacity .15s,border-color .15s}
+  .fl-board-card:hover .fl-board-zoom,.fl-board-card:focus-within .fl-board-zoom{opacity:1}
+  .fl-board-zoom:hover{border-color:var(--accent)}
+  @media (hover:none){.fl-board-zoom{opacity:1}}
+  /* "Untested" corner badge on boards not yet verified on hardware. */
+  .fl-board-badge{position:absolute;top:8px;left:8px;z-index:1;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.02em;color:#7a3d10;background:#f6c67a;border:1px solid #e0a047}
   /* Placeholder tile for boards without a marketing photo. */
   .fl-board-ph{width:100%;aspect-ratio:4/3;border-radius:8px;display:grid;place-items:center;font-family:var(--mono);font-size:13px;letter-spacing:.04em;color:var(--faint);background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 12%,var(--bg)),var(--bg))}
   .fl-board-name{font-size:14px;font-weight:600}
 
+  /* Untested-board warning banner (shown under the meta when such a board is picked). */
+  .fl-untested{margin:14px 0 2px;padding:12px 14px;border-radius:10px;font-size:13px;line-height:1.5;color:var(--fg);background:color-mix(in srgb,#f6c67a 16%,var(--bg));border:1px solid color-mix(in srgb,#e0a047 60%,var(--line-2))}
+  .fl-untested[hidden]{display:none}
+  .fl-untested strong{font-weight:600}
+
   /* selected-board meta line (staged sha / not built) */
   .fl-build{margin:4px 0 2px;padding:14px 0;border-top:1px solid var(--line)}
   .fl-build strong{font-weight:600}
+  /* Headline (board name) bold, description stacked below it. */
+  .fl-build-name{display:block;font-weight:600;font-size:15px}
+  .fl-build-note{display:block;color:var(--muted);margin-top:2px}
   .fl-build-meta{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
   .fl-build-meta code{font-family:var(--mono);font-size:12px}
   .fl-sha{font-size:11px;word-break:break-all;max-width:100%}
@@ -1006,6 +1044,12 @@ function flashPage(builds) {
   .fl-bom>summary::before{content:"+ ";color:var(--accent);font-family:var(--mono)}
   .fl-bom[open]>summary::before{content:"– "}
   .fl-bom ul{margin:0 0 12px;padding-left:20px;color:var(--muted);font-size:14.5px}
+  /* "or" divider between the DIY parts list and the all-in-one alternative. */
+  .fl-bom-or{display:flex;align-items:center;gap:12px;margin:2px 0 10px;color:var(--faint);font-size:12px;text-transform:uppercase;letter-spacing:.14em}
+  .fl-bom-or::before,.fl-bom-or::after{content:"";flex:1;height:1px;background:var(--line)}
+  /* The Sonocotta alternative is a normal list bullet; only the link reads bold. */
+  .fl-bom-alt-link{color:var(--accent);white-space:nowrap}
+  .fl-ext{font-size:.85em}
 
   /* ── install step: flash-mode radio ───────────────────────────────── */
   .fl-modes{border:0;margin:16px 0;padding:0;display:flex;flex-direction:column;gap:10px}
@@ -1070,13 +1114,27 @@ function flashPage(builds) {
       <section class="fl-step" data-step="board">
         <h2>${esc(F.board.title)}</h2>
         <p class="fl-lead">${esc(F.board.body)}</p>
+        <div class="fl-search-wrap">
+          <input type="search" id="fl-search" class="fl-search" placeholder="Search boards…" aria-label="Search boards by name" autocomplete="off" spellcheck="false" />
+          <label class="fl-show-untested"><input type="checkbox" id="fl-show-untested" /> Show untested boards</label>
+        </div>
         <div class="fl-board-row" role="radiogroup" aria-label="${esc(F.board.title)}">
           ${boardCards}
         </div>
+        <p class="fl-board-none" id="fl-board-none" hidden>No boards match your search.</p>
         <div class="fl-build" id="fl-build" hidden></div>
+        <div class="fl-untested" id="fl-untested" role="note" hidden>
+          <strong>Untested board.</strong> This firmware is built from the vendor's published pin map but hasn't been verified on real hardware yet. If audio or Wi-Fi misbehaves, every pin and the DAC type are re-provisionable over USB after flashing.
+        </div>
         <details class="fl-bom">
           <summary>${esc(F.bom.title)}</summary>
           <ul>${bom}</ul>
+          ${
+            F.bom.alt
+              ? `<div class="fl-bom-or"><span>or</span></div>
+          <ul><li>${F.bom.alt.html}</li></ul>`
+              : ""
+          }
         </details>
         <div class="fl-foot">
           <span></span>
@@ -1151,6 +1209,8 @@ function flashPage(builds) {
   </section>
 </main>
 
+${boardLbImgs.length ? lightbox(boardLbImgs) : ""}
+
 <footer class="foot">
   <div class="foot-brand">${esc(C.brand.name)}${eq(4)}</div>
   <p class="foot-note">${esc(C.footer.note)}</p>
@@ -1193,7 +1253,8 @@ function flashPage(builds) {
   var install = $("fl-install");
   var cards = [].slice.call(document.querySelectorAll(".fl-board-card"));
   function buildMeta(b){
-    var head = "<strong>" + b.label + "</strong> <span class='fl-muted'>" + b.note + "</span>";
+    // Headline (board name) in bold, its description stacked below it.
+    var head = "<strong class='fl-build-name'>" + b.label + "</strong><span class='fl-build-note'>" + b.note + "</span>";
     if (b.present)
       return head + "<div class='fl-build-meta'><code>" + b.file + "</code> <span class='fl-ok'>staged</span> <span class='fl-muted'>" + b.size + "</span> <code class='fl-sha'>" + b.hash + "</code></div>";
     return head + "<div class='fl-build-meta'><code>" + b.file + "</code> <span class='fl-no'>not built</span> <span class='fl-muted'>— " + MSG.notBuilt + b.id + ".</span></div>";
@@ -1213,6 +1274,7 @@ function flashPage(builds) {
     $("fl-build-2").innerHTML = buildMeta(b);
     var doc = $("fl-doc-link");
     if (b.doc){ doc.href = b.doc; doc.hidden = false; } else { doc.hidden = true; }
+    var un = $("fl-untested"); if (un) un.hidden = !!b.tested;   // warn on unverified boards
     install.style.display = b.present ? "" : "none";
     // Keep-config needs the app-only image staged; if it isn't, disable that mode
     // and fall back to flash-all so the manifest is always valid.
@@ -1228,7 +1290,47 @@ function flashPage(builds) {
     $("fl-next-install").disabled = true;
     $("fl-next-board").disabled = !b.present;   // can't flash a board with no image
   }
-  cards.forEach(function(c){ c.addEventListener("click", function(){ pick(c.getAttribute("data-id")); }); });
+  cards.forEach(function(c){
+    c.addEventListener("click", function(){ pick(c.getAttribute("data-id")); });
+    c.addEventListener("keydown", function(e){
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(c.getAttribute("data-id")); }
+    });
+  });
+  // Zoom buttons open the photo lightbox (LIGHTBOX_SCRIPT wires the data-lb attr);
+  // stop the click bubbling to the card so zooming doesn't also select the board.
+  [].forEach.call(document.querySelectorAll(".fl-board-zoom"), function(z){
+    z.addEventListener("click", function(e){ e.stopPropagation(); });
+  });
+  // Board filter: by search text AND the "show untested" toggle. Untested boards
+  // are hidden by default (opt-in via the checkbox); a hint shows when nothing
+  // matches. If the currently-selected board gets filtered out, reset the picker.
+  var search = $("fl-search"), noneMsg = $("fl-board-none"), showUntested = $("fl-show-untested");
+  function applyFilter(){
+    var q = search ? search.value.trim().toLowerCase() : "";
+    var showUn = showUntested ? showUntested.checked : true;
+    var shown = 0;
+    cards.forEach(function(c){
+      var matchQ = !q || c.getAttribute("data-label").indexOf(q) !== -1;
+      var vis = matchQ && (c.getAttribute("data-tested") === "1" || showUn);
+      c.hidden = !vis;
+      if (vis) shown++;
+    });
+    if (noneMsg) noneMsg.hidden = shown !== 0;
+    if (selected){
+      var sc = document.querySelector('.fl-board-card[data-id="' + selected.id + '"]');
+      if (sc && sc.hidden){
+        selected = null;
+        sc.classList.remove("is-active"); sc.setAttribute("aria-checked", "false");
+        var m1 = $("fl-build"); if (m1) m1.hidden = true;
+        var un = $("fl-untested"); if (un) un.hidden = true;
+        if (install) install.style.display = "none";
+        var nb = $("fl-next-board"); if (nb) nb.disabled = true;
+      }
+    }
+  }
+  if (search) search.addEventListener("input", applyFilter);
+  if (showUntested) showUntested.addEventListener("change", applyFilter);
+  applyFilter();   // default: hide untested until the box is checked
   [].forEach.call(document.querySelectorAll('input[name="fl-mode"]'), function(r){ r.addEventListener("change", applyManifest); });
 
   // ── step 2: detect flash success ──────────────────────────────────────
@@ -1370,6 +1472,7 @@ function flashPage(builds) {
     catch(e){ appendLog(e.message + "\\n"); }
   });
 })();
+${LIGHTBOX_SCRIPT}
 </script>
 </body>
 </html>

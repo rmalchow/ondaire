@@ -2,6 +2,7 @@
 #include "board.h"
 
 #include "driver/i2c_master.h"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -39,10 +40,18 @@ static const regval_t INIT_SEQ[] = {
     { REG_STANDBY,   0x00 },   // leave standby -> PLL locks to BCK, DAC plays
 };
 
-bool pcm5122_init(int sda, int scl) {
+bool pcm5122_init(int sda, int scl, int en_pin) {
     if (sda < 0 || scl < 0) {
         ESP_LOGW(TAG, "no I2C pins configured (sda=%d scl=%d) — skipping DAC init", sda, scl);
         return false;
+    }
+
+    // DAC hard-enable (if the board has one): drive HIGH and let it settle before I2C.
+    if (en_pin >= 0) {
+        gpio_config_t io = { .pin_bit_mask = 1ULL << en_pin, .mode = GPIO_MODE_OUTPUT };
+        gpio_config(&io);
+        gpio_set_level((gpio_num_t)en_pin, 1);
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 
     i2c_master_bus_config_t bus_cfg = {

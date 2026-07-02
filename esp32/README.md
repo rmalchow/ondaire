@@ -19,7 +19,9 @@ See [`devices/`](devices/) for pinout sheets and wiring references.
 - **Board:** a **PSRAM-equipped ESP32** — ESP32-S3-WROOM-1 (DevKitC-1) or a classic
   ESP32-WROVER. Non-PSRAM parts are out of scope (see `docs/developer/esp32.md`); other PSRAM
   chips are a board profile away — see *Adding a board* below.
-- **DAC:** PCM5102A over I2S (the purple GY-PCM5102 module; software volume).
+- **DAC:** PCM5102A over I2S (the purple GY-PCM5102 module; software volume) on the
+  DIY boards; the Sonocotta all-in-one boards carry their own DAC/amp (PCM5100A,
+  PCM5122, TAS5805M/5825M, MA12070P, or dual MAX98357A — see `dac=` below).
 - **Encoder:** KY-040 / EC11 for local volume + mute (optional).
 
 Default pins (`boards/board_<chip>.h`, all re-provisionable over USB):
@@ -29,6 +31,29 @@ Default pins (`boards/board_<chip>.h`, all re-provisionable over USB):
 | I2S BCK / LCK / DIN | 5 / 6 / 7 |
 | I2S MCLK | none (tie DAC SCK→GND) |
 | Encoder CLK / DT / SW | 15 / 16 / 17 |
+
+### Supported boards
+
+Each is a `boards/board_<id>.h` + `sdkconfig.defaults.esp32s3-<id>` + a CI matrix
+entry + a flasher card. **Tested** = verified on real hardware; **untested** = built
+pin-map-correct from the vendor's schematics/ESPHome configs but not bench-checked
+(the flasher badges these and pins stay re-provisionable). The Sonocotta boards
+share one [audio-dock family sheet](devices/sonocotta-audio-dock.md); the `dac=`
+column is the config DAC type (0 = PCM510x/MAX98357 no-I2C, 1 = PCM5122, 2 =
+TAS5805M/5825M, 3 = MA12070P).
+
+| Board profile | Hardware | DAC/amp | `dac` | Status |
+|---------------|----------|---------|------:|--------|
+| `esp32s3-supermini` | ESP32-S3 Super Mini + PCM5102A | external | 0 | tested |
+| `esp32s3-zero` | Waveshare ESP32-S3-Zero + PCM5102A | external | 0 | tested |
+| `esp32s3-amped-plus` | Sonocotta Amped-ESP32-S3-Plus | PCM5122 + TPA3110 | 1 | tested |
+| `esp32s3-hifi` | Sonocotta HiFi-ESP32-S3 | PCM5100A (line-out) | 0 | untested |
+| `esp32s3-hifi-plus` | Sonocotta HiFi-ESP32-Plus | PCM5122 (line-out) | 1 | untested |
+| `esp32s3-amped` | Sonocotta Amped-ESP32-S3 | PCM5100A + TPA3110 | 0 | untested |
+| `esp32s3-loud` | Sonocotta Loud-ESP32-S3 | 2× MAX98357A | 0 | untested |
+| `esp32s3-loud-plus` | Sonocotta Loud-ESP32-Plus | MA12070P | 3 | untested |
+| `esp32s3-louder` | Sonocotta Louder-ESP32-S3 / Mini | TAS5805M | 2 | untested |
+| `esp32s3-louder-plus` | Sonocotta Louder-ESP32-Plus / Pro | TAS5825M | 2 | untested |
 
 ## Build
 
@@ -87,12 +112,17 @@ USB). Scriptable without the web page:
 
 ## Adding a board
 
-1. Add `boards/board_<chip>.h` with the default pins + `BOARD_HAS_APLL`.
+1. Add `boards/board_<chip>.h` with the default pins + `BOARD_HAS_APLL` (see the
+   required/optional `DEF_*` list at the top of `boards/board.h`). For an I2C
+   DAC/amp set `DEF_DAC` (1 PCM5122, 2 TAS58xx, 3 MA12070P), `DEF_I2C_SDA/SCL`,
+   `DEF_DAC_I2C_ADDR`, and — if the part has a hard-enable — `DEF_DAC_EN` (plus
+   `DEF_MA_MUTE` for the MA12070P). A new I2C part needs a small driver next to
+   `pcm5122.c` / `tas58xx.c` / `ma12070p.c` and a case in `player.c`'s DAC switch.
 2. Add a `CONFIG_ENSEMBLE_BOARD_<CHIP>` choice in `main/Kconfig.projbuild` and a
    `board.h` include.
-3. Add `sdkconfig.defaults.<chip>` (target, flash size, console).
-4. Add the board to the CI `firmware` matrix and the flasher `firmware.builds`
-   in `../site/content.mjs`.
+3. Add `sdkconfig.defaults.<chip>` (target, flash size, PSRAM mode, console).
+4. Add the board to `build.sh`, the CI `firmware` matrix, and the flasher
+   `firmware.builds` in `../site/content.mjs` (set `tested:` honestly).
 
 ## Layout
 

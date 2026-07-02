@@ -4,16 +4,18 @@ Pinout references for the hardware used in this project. Each device has a
 markdown sheet with a full pin table, notes, and cited sources; most include a
 downloaded reference image.
 
-The browser flasher currently targets the **ESP32-S3 Super Mini** only, so its
-sheet and the parts it pairs with live here at the top level. Other boards that
-once worked but aren't on the current path are kept under [`later/`](later/) for
-reference.
+The browser flasher targets the generic **ESP32-S3** dev boards plus the whole
+**Sonocotta audio-dock** family. The dev-board sheets and the parts they pair with
+live here at the top level; the Sonocotta all-in-one boards share one
+[family sheet](sonocotta-audio-dock.md). Boards that once worked but aren't on the
+current path are kept under [`later/`](later/) for reference.
 
 | Device | Reference | Pinout image |
 |--------|-----------|--------------|
 | ESP32-S3 Super Mini (22.5×18 mm, USB-C, WS2812 on GPIO48) | [esp32-s3-super-mini.md](esp32-s3-super-mini.md) | _(in-sheet pin tables)_ |
 | Waveshare ESP32-S3-Zero (23.5×18 mm, USB-C, WS2812 on GPIO21) | [esp32-s3-zero.md](esp32-s3-zero.md) | [esp32-s3-zero-pinout.webp](esp32-s3-zero-pinout.webp) |
 | Sonocotta Amped-ESP32-S3-Plus rev C (integrated PCM5122 DAC + TPA3110 amp, N16R8) | [amped-esp32-s3-plus.md](amped-esp32-s3-plus.md) | _(in-sheet pin table)_ |
+| Sonocotta audio-dock family — HiFi / HiFi-Plus / Amped / Loud / Loud-Plus / Louder / Louder-Plus (S3, integrated DAC/amp) — **untested** | [sonocotta-audio-dock.md](sonocotta-audio-dock.md) | _(in-sheet pin tables)_ |
 | PCM5102A I2S DAC — GY-PCM5102 (purple board) | [pcm5102a-dac.md](pcm5102a-dac.md) | [pcm5102a-dac.png](pcm5102a-dac.png) |
 | KY-040 / HW-040 rotary encoder | [ky-040-rotary-encoder.md](ky-040-rotary-encoder.md) | [ky-040-rotary-encoder.jpg](ky-040-rotary-encoder.jpg) |
 

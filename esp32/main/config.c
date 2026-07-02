@@ -89,6 +89,7 @@ ens_config_t *config_load(void) {
         g.enc_sw = get_u8(h, "enc_sw", DEF_ENC_SW);
         g.led = get_i8(h, "led", DEF_LED);
         g.amp_en = get_i8(h, "amp_en", DEF_AMP_EN);
+        g.dac_en = get_i8(h, "dac_en", DEF_DAC_EN);
         g.i2c_sda = get_i8(h, "i2c_sda", DEF_I2C_SDA);
         g.i2c_scl = get_i8(h, "i2c_scl", DEF_I2C_SCL);
         g.dac = get_u8(h, "dac", DEF_DAC);
@@ -118,11 +119,12 @@ bool config_validate(const ens_config_t *c, const char **reason) {
     }
     if (c->i2s_mclk >= 0 && !pin_ok(c->i2s_mclk)) { *reason = "i2s_mclk out of range"; return false; }
     if (c->amp_en >= 0 && !pin_ok(c->amp_en)) { *reason = "amp_en out of range"; return false; }
+    if (c->dac_en >= 0 && !pin_ok(c->dac_en)) { *reason = "dac_en out of range"; return false; }
     if (c->i2c_sda >= 0 && !pin_ok(c->i2c_sda)) { *reason = "i2c_sda out of range"; return false; }
     if (c->i2c_scl >= 0 && !pin_ok(c->i2c_scl)) { *reason = "i2c_scl out of range"; return false; }
     if (c->control_port == 0) { *reason = "control_port must be > 0"; return false; }
     if (c->buffer_ms < 20 || c->buffer_ms > 2000) { *reason = "buffer_ms out of range (20..2000)"; return false; }
-    if (c->dac > 1) { *reason = "dac must be 0 or 1"; return false; }
+    if (c->dac > 3) { *reason = "dac must be 0..3 (0=PCM510x/MAX98357 1=PCM5122 2=TAS58xx 3=MA12070P)"; return false; }
     if (c->codec_pref > 1) { *reason = "codec must be 0 (opus) or 1 (pcm)"; return false; }
     if (c->disc_mode == 1 && (c->master_ip[0] == '\0' || c->source_port == 0 || c->stream_port == 0)) {
         *reason = "disc_mode=1 needs master_ip + source_port + stream_port";
@@ -152,6 +154,7 @@ bool config_save(void) {
     nvs_set_u8(h, "enc_sw", g.enc_sw);
     nvs_set_i8(h, "led", g.led);
     nvs_set_i8(h, "amp_en", g.amp_en);
+    nvs_set_i8(h, "dac_en", g.dac_en);
     nvs_set_i8(h, "i2c_sda", g.i2c_sda);
     nvs_set_i8(h, "i2c_scl", g.i2c_scl);
     nvs_set_u8(h, "dac", g.dac);

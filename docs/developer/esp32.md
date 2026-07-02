@@ -26,10 +26,12 @@ provisioning design.
 > "thin HTTP API on the MCU" sketch and the legacy `/api/cluster` self-poll are
 > **not** used; the existing Go master in `internal/playback/` already drives it, no
 > server change).
-> (2) There is **no on-device HTTP** — Wi-Fi creds *and* all pin/DAC settings are
-> provisioned over USB via the JSON console (§6.5), so the SoftAP/captive portal is
-> dropped, and Improv-Serial is replaced by the same JSON panel. The rate servo
-> (§3.3) ships as drift telemetry only (advertises `queue=0`); the skip/silence
+> (2) First-run Wi-Fi setup is a **Tasmota-style captive portal** (§6.5): an
+> unprovisioned board — or one whose stored creds fail to get an IP — brings up an
+> open AP and a web form to set Wi-Fi + speaker name. The **USB JSON console** stays
+> the wired alternative for creds *and* all pin/DAC settings, and remains the only
+> way to change pins. Improv-Serial is still replaced by that JSON panel. The rate
+> servo (§3.3) ships as drift telemetry only (advertises `queue=0`); the skip/silence
 > floor bounds drift within `bufferMs`.
 
 > Companion board: the [`kicad/` amp board](../../kicad) is an ESP32-S3 +
@@ -408,9 +410,33 @@ bad config is rejected, never half-applied.
 →  {"cmd":"reboot"}
 ```
 
-> The device-hosted **SoftAP / captive-portal** fallback from earlier drafts is
-> **dropped** — there is no on-device HTTP. A deployed, headless node is
-> re-provisioned over USB (or reset to defaults), never over the air.
+The USB console is the **wired** path (and the only way to set pins / DAC). A
+deployed headless node can always be re-provisioned over USB or reset to defaults.
+
+### 6.5a First-run captive portal (Tasmota-style)
+
+For over-the-air first-run setup, the node also runs a **device-hosted captive
+portal** (`main/provision.c`). It comes up in two cases:
+
+- **Unprovisioned** — no `wifi_ssid` in NVS; or
+- **Can't connect** — creds exist but no IP within
+  `CONFIG_ENSEMBLE_STA_CONNECT_TIMEOUT_MS` (default 30 s), e.g. the stored AP is gone.
+
+It opens an **open AP** named `ensemble-<first-4-hex-of-node-id>` (matching the mDNS
+hostname), runs in **AP+STA** so the page can scan, and serves:
+
+- `GET /` — a small offline form: Wi-Fi network (a datalist populated from `/scan`,
+  or type it), password, speaker name (prefilled);
+- `GET /scan` — JSON of nearby APs (`esp_wifi_scan`);
+- `POST /save` — validates + writes creds/name to NVS (same
+  `config_validate`→`config_save` path as the console) and reboots into STA;
+- a catch-all **302 → `http://192.168.4.1/`** plus a wildcard **DNS responder** so
+  the OS "sign-in" sheet pops up automatically.
+
+The portal lives `CONFIG_ENSEMBLE_PORTAL_TIMEOUT_MS` (default **10 min**), then tears
+itself down and the node goes **inert** — no reboot, no retry — until it is
+power-cycled. The USB console stays live the whole time as the wired fallback. This
+realigns with §5 ("an unprovisioned board boots into AP/provisioning mode").
 
 ### 6.6 Flashing flow (user's view)
 1. Plug the board in via USB-C; open the flasher in Chrome/Edge.

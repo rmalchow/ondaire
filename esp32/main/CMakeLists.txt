@@ -16,6 +16,7 @@ idf_component_register(
         "volume.c"
         "netif.c"
         "console.c"
+        "provision.c"
     INCLUDE_DIRS "." "../boards"
     REQUIRES
         nvs_flash
@@ -23,6 +24,7 @@ idf_component_register(
         esp_netif
         esp_event
         esp_timer
+        esp_http_server
         driver
         esp_driver_i2s
         esp_driver_pcnt

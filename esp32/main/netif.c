@@ -10,17 +10,21 @@
 
 static const char *TAG = "wifi";
 static EventGroupHandle_t s_eg;
+static bool s_no_reconnect;   // set once we give up on STA and hand off to the portal
 #define BIT_GOT_IP BIT0
+
+void netif_wifi_suppress_reconnect(void) { s_no_reconnect = true; }
 
 static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        if (!s_no_reconnect) esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(s_eg, BIT_GOT_IP);
         // reason codes (esp_wifi_types.h): 15=4WAY_HANDSHAKE_TIMEOUT (bad PSK),
         // 2=AUTH_EXPIRE, 201=NO_AP_FOUND, 205=CONNECTION_FAIL, 5=ASSOC_TOOMANY.
         wifi_event_sta_disconnected_t *d = (wifi_event_sta_disconnected_t *)data;
+        if (s_no_reconnect) return;   // portal owns the radio now
         ESP_LOGW(TAG, "disconnected (reason=%d); retrying", d ? d->reason : -1);
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {

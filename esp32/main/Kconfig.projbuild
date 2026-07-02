@@ -25,4 +25,20 @@ menu "ensemble playback node"
             UDP port advertised over mDNS where the master sends ATTACH / DETACH /
             SETVOL etc. (PLAYER §4). Overridable in NVS.
 
+    config ENSEMBLE_STA_CONNECT_TIMEOUT_MS
+        int "Wi-Fi connect timeout before falling into the captive portal (ms)"
+        default 30000
+        help
+            On boot with stored credentials, how long to wait for an IP before
+            giving up and opening the Wi-Fi captive portal (provision.c). Covers a
+            transient outage of the stored AP.
+
+    config ENSEMBLE_PORTAL_TIMEOUT_MS
+        int "Captive-portal lifetime before going inert (ms)"
+        default 600000
+        help
+            How long the open AP + captive portal stays up before it tears itself
+            down and the node goes inert (no reboot, no retry) until power-cycled.
+            The USB console stays available the whole time. Default 10 minutes.
+
 endmenu

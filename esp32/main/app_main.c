@@ -1,8 +1,10 @@
-// app_main.c — ensemble playback node entry point. Brings up config + the audio
-// pipeline + local control (encoder, USB console) immediately so an unprovisioned
-// board is configurable over USB; once Wi-Fi has an IP it starts the data plane
-// (net_audio), the v2 control plane (control), and the mDNS advert, then idles
-// until a master ATTACHes it (or self-attaches in fixed-master mode).
+// app_main.c — ensemble playback node entry point. Brings up config + local control
+// (encoder, USB console) so a board is always configurable over USB. If Wi-Fi is
+// provisioned it connects (bounded wait); on success it starts the audio pipeline +
+// the data plane (net_audio) + the v2 control plane (control) + the mDNS advert, then
+// idles until a master ATTACHes it (or self-attaches in fixed-master mode). If the
+// board is unprovisioned, OR its stored creds fail to get an IP, it falls into the
+// Wi-Fi captive portal (provision.c) instead — Tasmota-style first-run setup.
 #include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
@@ -20,6 +22,7 @@
 #include "net_audio.h"
 #include "control.h"
 #include "mdns_adv.h"
+#include "provision.h"
 #include "wire.h"
 
 static const char *TAG = "main";
@@ -81,12 +84,25 @@ void app_main(void) {
 
     if (!player_init(cfg)) { ESP_LOGE(TAG, "player init failed"); }
     encoder_init(cfg->enc_a, cfg->enc_b, cfg->enc_sw);
-    console_init();   // always available for USB provisioning
+    console_init();   // always available for USB (re)provisioning + test tone
 
-    if (have_wifi) {
+    // Provisioned and connected → normal audio path. Bounded wait so a board whose
+    // stored AP is gone doesn't block here forever; on timeout we fall into the portal.
+    if (have_wifi && netif_wait_ip(CONFIG_ENSEMBLE_STA_CONNECT_TIMEOUT_MS)) {
         xTaskCreate(services_task, "services", 3072, NULL, 5, NULL);
+        return;
+    }
+
+    // Unprovisioned, or stored creds failed to get an IP → Tasmota-style captive
+    // portal (open AP + web setup). It self-destructs after the portal window and
+    // the node goes inert; the USB console stays live as the wired fallback.
+    if (have_wifi) {
+        ESP_LOGW(TAG, "no IP after %d ms — opening Wi-Fi captive portal",
+                 CONFIG_ENSEMBLE_STA_CONNECT_TIMEOUT_MS);
+        provision_start(true);    // STA already inited; add the AP alongside it
     } else {
-        ESP_LOGW(TAG, "no Wi-Fi configured — provision over USB "
-                      "(send {\"cmd\":\"set\",\"cfg\":{\"wifi_ssid\":\"...\",\"wifi_pass\":\"...\"}} then reboot)");
+        ESP_LOGW(TAG, "no Wi-Fi configured — opening captive portal "
+                      "(or provision over USB, then reboot)");
+        provision_start(false);   // bring Wi-Fi up from scratch in AP+STA
     }
 }

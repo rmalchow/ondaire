@@ -62,6 +62,9 @@ static void do_get(void) {
     cJSON_AddNumberToObject(c, "enc_b", g->enc_b);
     cJSON_AddNumberToObject(c, "enc_sw", g->enc_sw);
     cJSON_AddNumberToObject(c, "led", g->led);
+    cJSON_AddNumberToObject(c, "amp_en", g->amp_en);
+    cJSON_AddNumberToObject(c, "i2c_sda", g->i2c_sda);
+    cJSON_AddNumberToObject(c, "i2c_scl", g->i2c_scl);
     cJSON_AddNumberToObject(c, "dac", g->dac);
     cJSON_AddNumberToObject(c, "codec", g->codec_pref);
     cJSON_AddNumberToObject(c, "buffer_ms", g->buffer_ms);
@@ -92,6 +95,9 @@ static void do_set(cJSON *cmd) {
     set_u8(c, "enc_b", &g->enc_b);
     set_u8(c, "enc_sw", &g->enc_sw);
     set_i8(c, "led", &g->led);
+    set_i8(c, "amp_en", &g->amp_en);
+    set_i8(c, "i2c_sda", &g->i2c_sda);
+    set_i8(c, "i2c_scl", &g->i2c_scl);
     set_u8(c, "dac", &g->dac);
     set_u8(c, "codec", &g->codec_pref);
     set_u16(c, "buffer_ms", &g->buffer_ms);

@@ -14,6 +14,8 @@ menu "ensemble playback node"
             bool "ESP32-S3 Super Mini (22.5x18mm, USB-C, WS2812 on GPIO48)"
         config ENSEMBLE_BOARD_ESP32S3_ZERO
             bool "Waveshare ESP32-S3-Zero (23.5x18mm, USB-C, WS2812 on GPIO21)"
+        config ENSEMBLE_BOARD_ESP32S3_AMPED_PLUS
+            bool "Sonocotta Amped-ESP32-S3-Plus (PCM5122 DAC + TPA3110 amp, N16R8)"
         config ENSEMBLE_BOARD_GENERIC
             bool "Generic (compile-time pins, no board profile)"
     endchoice

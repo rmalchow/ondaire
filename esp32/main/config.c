@@ -88,6 +88,9 @@ ens_config_t *config_load(void) {
         g.enc_b = get_u8(h, "enc_b", DEF_ENC_B);
         g.enc_sw = get_u8(h, "enc_sw", DEF_ENC_SW);
         g.led = get_i8(h, "led", DEF_LED);
+        g.amp_en = get_i8(h, "amp_en", DEF_AMP_EN);
+        g.i2c_sda = get_i8(h, "i2c_sda", DEF_I2C_SDA);
+        g.i2c_scl = get_i8(h, "i2c_scl", DEF_I2C_SCL);
         g.dac = get_u8(h, "dac", DEF_DAC);
         g.codec_pref = get_u8(h, "codec", 0);
         g.buffer_ms = get_u16(h, "buffer_ms", 150);
@@ -114,6 +117,9 @@ bool config_validate(const ens_config_t *c, const char **reason) {
             if (pins[i] == pins[j]) { *reason = "duplicate gpio assignment"; return false; }
     }
     if (c->i2s_mclk >= 0 && !pin_ok(c->i2s_mclk)) { *reason = "i2s_mclk out of range"; return false; }
+    if (c->amp_en >= 0 && !pin_ok(c->amp_en)) { *reason = "amp_en out of range"; return false; }
+    if (c->i2c_sda >= 0 && !pin_ok(c->i2c_sda)) { *reason = "i2c_sda out of range"; return false; }
+    if (c->i2c_scl >= 0 && !pin_ok(c->i2c_scl)) { *reason = "i2c_scl out of range"; return false; }
     if (c->control_port == 0) { *reason = "control_port must be > 0"; return false; }
     if (c->buffer_ms < 20 || c->buffer_ms > 2000) { *reason = "buffer_ms out of range (20..2000)"; return false; }
     if (c->dac > 1) { *reason = "dac must be 0 or 1"; return false; }
@@ -145,6 +151,9 @@ bool config_save(void) {
     nvs_set_u8(h, "enc_b", g.enc_b);
     nvs_set_u8(h, "enc_sw", g.enc_sw);
     nvs_set_i8(h, "led", g.led);
+    nvs_set_i8(h, "amp_en", g.amp_en);
+    nvs_set_i8(h, "i2c_sda", g.i2c_sda);
+    nvs_set_i8(h, "i2c_scl", g.i2c_scl);
     nvs_set_u8(h, "dac", g.dac);
     nvs_set_u8(h, "codec", g.codec_pref);
     nvs_set_u16(h, "buffer_ms", g.buffer_ms);

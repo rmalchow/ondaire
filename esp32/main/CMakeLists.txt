@@ -8,6 +8,7 @@ idf_component_register(
         "player.c"
         "opus_dec.c"
         "i2s_out.c"
+        "pcm5122.c"
         "servo.c"
         "control.c"
         "status.c"
@@ -27,6 +28,7 @@ idf_component_register(
         esp_http_server
         driver
         esp_driver_i2s
+        esp_driver_i2c
         esp_driver_pcnt
         esp_driver_gpio
         esp_driver_usb_serial_jtag

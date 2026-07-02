@@ -13,6 +13,7 @@ reference.
 |--------|-----------|--------------|
 | ESP32-S3 Super Mini (22.5×18 mm, USB-C, WS2812 on GPIO48) | [esp32-s3-super-mini.md](esp32-s3-super-mini.md) | _(in-sheet pin tables)_ |
 | Waveshare ESP32-S3-Zero (23.5×18 mm, USB-C, WS2812 on GPIO21) | [esp32-s3-zero.md](esp32-s3-zero.md) | [esp32-s3-zero-pinout.webp](esp32-s3-zero-pinout.webp) |
+| Sonocotta Amped-ESP32-S3-Plus rev C (integrated PCM5122 DAC + TPA3110 amp, N16R8) | [amped-esp32-s3-plus.md](amped-esp32-s3-plus.md) | _(in-sheet pin table)_ |
 | PCM5102A I2S DAC — GY-PCM5102 (purple board) | [pcm5102a-dac.md](pcm5102a-dac.md) | [pcm5102a-dac.png](pcm5102a-dac.png) |
 | KY-040 / HW-040 rotary encoder | [ky-040-rotary-encoder.md](ky-040-rotary-encoder.md) | [ky-040-rotary-encoder.jpg](ky-040-rotary-encoder.jpg) |
 

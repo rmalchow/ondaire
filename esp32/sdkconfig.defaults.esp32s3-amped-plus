@@ -1,0 +1,28 @@
+# Sonocotta Amped-ESP32-S3-Plus (rev C) — ESP32-S3-WROOM-1 + 8 MB OCTAL PSRAM,
+# PCM5122 DAC + TPA3110 amp on one board. Same S3 native USB-Serial-JTAG console
+# as the other S3 boards (no external UART bridge) — what the web flasher's Improv
+# + JSON config talk over.
+CONFIG_IDF_TARGET="esp32s3"
+# 8 MB flash: the rev-C schematic marks the module "N16R8" (16 MB) but the shipping
+# board reports 8 MB (`detected size 8192k`) and Sonocotta's own ESPHome uses 8 MB.
+# 16 MB here boot-loops with "Detected size smaller than the binary image header".
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# Octal PSRAM shares the SPI bus with the flash, so keep the flash in DIO mode
+# (matches Sonocotta's own ESPHome build).
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
+# Console + stdio over the built-in USB-Serial-JTAG CDC port.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Board selection (boards/board.h + default pin map).
+CONFIG_ENSEMBLE_BOARD_ESP32S3_AMPED_PLUS=y
+
+# PSRAM: 8 MB embedded OCTAL (N16R8) — players are PSRAM-only (docs/developer/
+# esp32.md §3.1). OCT mode, auto-size, 80 MHz. This board always has PSRAM, so no
+# IGNORE_NOTFOUND fallback (unlike the bare Super Mini / Zero bench builds).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y

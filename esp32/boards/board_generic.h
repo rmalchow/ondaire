@@ -15,5 +15,10 @@
 
 #define DEF_LED         (-1)
 #define DEF_DAC         0
+#define DEF_AMP_EN      (-1) // provision over USB if your board has an amp-enable pin
+
+#define DEF_I2C_SDA     (-1) // provision if you have an I2C-controlled DAC (PCM5122)
+#define DEF_I2C_SCL     (-1)
+#define DEF_DAC_I2C_ADDR 0x00
 
 #define BOARD_HAS_APLL  0

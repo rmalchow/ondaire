@@ -14,5 +14,10 @@
 
 #define DEF_LED         48   // onboard RGB on most S3 devkits
 #define DEF_DAC         0    // PCM5102A, software gain
+#define DEF_AMP_EN      (-1) // no software amp-enable pin (PCM5102A boards)
+
+#define DEF_I2C_SDA     (-1) // no I2C-controlled DAC (PCM5102A is pin-configured)
+#define DEF_I2C_SCL     (-1)
+#define DEF_DAC_I2C_ADDR 0x00
 
 #define BOARD_HAS_APLL  0    // the S3's I2S peripheral has no APLL (uses PLL_F160M)

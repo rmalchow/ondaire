@@ -20,6 +20,8 @@ typedef struct {
     // Rotary encoder pins.
     uint8_t  enc_a, enc_b, enc_sw;
     int8_t   led;              // status LED, -1 if none
+    int8_t   amp_en;           // onboard class-D amp un-mute pin (HIGH=on), -1 if none
+    int8_t   i2c_sda, i2c_scl; // control-I2C pins for a PCM5122 DAC, -1 if none
 
     uint8_t  dac;              // 0 = PCM5102A (sw gain), 1 = PCM5122 (I2C)
     uint8_t  codec_pref;       // advertised codec pref: 0 = opus, 1 = pcm

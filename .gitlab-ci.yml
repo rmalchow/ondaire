@@ -144,6 +144,7 @@ build-release:
     matrix:
       - { BOARD: esp32s3-supermini, TARGET: esp32s3, CHIP: ESP32S3 }
       - { BOARD: esp32s3-zero, TARGET: esp32s3, CHIP: ESP32S3ZERO }
+      - { BOARD: esp32s3-amped-plus, TARGET: esp32s3, CHIP: ESP32S3AMPEDPLUS }
   # Use the IDF + tools PRE-INSTALLED in the espressif/idf image. (This previously
   # overrode IDF_TOOLS_PATH to a project-local .espressif and cached it — but on a
   # cache miss that dir is empty, so export.sh cannot find the Python venv and the
@@ -158,7 +159,10 @@ build-release:
     - idf.py $IDFARGS build
     - idf.py $IDFARGS merge-bin -o "ensemble-fw-$BOARD.bin"   # → build-$BOARD/
     - mkdir -p ../fw
+    # Merged image (flash-all, offset 0) + the app-only image (keep-config, the
+    # ota_0 app at 0x20000) the flasher writes for a config-preserving update.
     - cp "build-$BOARD/ensemble-fw-$BOARD.bin" "../fw/ensemble-fw-$BOARD.bin"
+    - cp "build-$BOARD/ensemble-node.bin" "../fw/ensemble-app-$BOARD.bin"
     - cd ..
     # Per-board job id for the release asset links (dotenv; by-ref artifacts
     # endpoint resolves names only, never a SHA — same reason as the Go build).
@@ -299,6 +303,7 @@ docker-site:
     - |
       mkdir -p site/src/assets/firmware
       cp fw/ensemble-fw-*.bin site/src/assets/firmware/ 2>/dev/null || true
+      cp fw/ensemble-app-*.bin site/src/assets/firmware/ 2>/dev/null || true
     - docker buildx build --builder site-builder
       --platform "$PLATFORMS"
       --build-arg VER="$VER"

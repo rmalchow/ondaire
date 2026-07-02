@@ -99,13 +99,18 @@ they are not products.
 |-------|------|-------|---------------|:------------:|---------------|:---------:|
 | ESP32-S3-DevKitC-1-N16R8 | ESP32-S3 | 8 MB | UART **+** native JTAG | no | 35–37 (octal PSRAM) | [ ] |
 | Waveshare ESP32-S3-Zero | ESP32-S3 | 2 MB | native USB-Serial-JTAG | no | — | [ ] |
+| Sonocotta Amped-ESP32-S3-Plus (rev C) | ESP32-S3 | 8 MB (octal) | native USB-Serial-JTAG | no | 26–37 (flash + octal PSRAM) | [ ] |
 | ESP32-DevKitC (WROVER) | ESP32 (classic) | 8 MB | CP2102 UART → `ttyUSB` | **yes** | 16, 17 (PSRAM) | [ ] |
 | Generic / bring-your-own-pins (PSRAM) | S3 / WROVER | required | varies | varies | — | [ ] |
 
 Boards in hand: an **ESP32-WROVER** DevKitC (8 MB PSRAM, classic dual-core **with**
 APLL — the first PSRAM target on the bench), an **ESP32-S3 Super Mini** and a
 **Waveshare ESP32-S3-Zero** (both S3FH4R2, 2 MB PSRAM — the small-form picks, board
-profiles `esp32s3-supermini` / `esp32s3-zero`). Out of scope: non-PSRAM ESP32s (above); **Nordic** parts
+profiles `esp32s3-supermini` / `esp32s3-zero`), and a **Sonocotta
+Amped-ESP32-S3-Plus** rev C (8 MB flash + 8 MB octal PSRAM, integrated PCM5122 DAC +
+TPA3110 amp — profile `esp32s3-amped-plus`, drives speakers directly; see
+[`esp32/devices/amped-esp32-s3-plus.md`](../../esp32/devices/amped-esp32-s3-plus.md)).
+Out of scope: non-PSRAM ESP32s (above); **Nordic** parts
 (BLE/Thread radios, no Wi-Fi); and the **RP2040 / Pico W** family (a different SDK,
 and the plain Pico W is RAM-tight at 264 KB — the **Pico 2 W**, 520 KB, would be the
 only sane non-Espressif port).

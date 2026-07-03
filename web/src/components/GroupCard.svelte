@@ -12,12 +12,24 @@
   let members = $derived(
     (group.members || []).map((id) => nodeById(snapshot, id)).filter(Boolean),
   );
-  // Headline = "[master]: [player1] + [player2]" (or "[master]: no players").
-  // Names are NODE names (renamed on the Nodes page, not here). The master labels
-  // the room; the players are its other members.
+  // Headline = "[master]: [player1] + [player2]". Names are NODE names (renamed on
+  // the Nodes page, not here). The master labels the room; the players listed after
+  // the colon are its OTHER members.
   let masterName = $derived(nameOf(snapshot, group.master));
   let playerNames = $derived(
     members.filter((m) => m.id !== group.master).map((m) => nameOf(snapshot, m.id)),
+  );
+  // The master's own player is a member iff it follows its own room (the "solo"
+  // state, D49+). A room with only its master playing is NOT "no players" — its
+  // own speaker is the player — so it shows just the room name. "no players" is
+  // reserved for a genuinely empty room (an idle zone: master's player is elsewhere).
+  let masterIsPlayer = $derived((group.members || []).includes(group.master));
+  let headlineTitle = $derived(
+    playerNames.length
+      ? `${masterName}: ${playerNames.join(" + ")}`
+      : masterIsPlayer
+        ? masterName
+        : `${masterName}: no players`,
   );
   let settings = $derived(group.settings || {});
   let codec = $derived(settings.codec ?? "opus");
@@ -174,11 +186,13 @@
   <!-- now-block: headline above, then the playback bar (which carries its own
        cover-art slot on the left). -->
   <div class="now-block">
-    <h3 class="headline" title="{masterName}: {playerNames.join(' + ') || 'no players'}">
-      <span class="master">{masterName}</span><span class="colon">:</span>
+    <h3 class="headline" title={headlineTitle}>
+      <span class="master">{masterName}</span>
       {#if playerNames.length}
+        <span class="colon">:</span>
         <span class="players">{playerNames.join(" + ")}</span>
-      {:else}
+      {:else if !masterIsPlayer}
+        <span class="colon">:</span>
         <em class="noplayers">no players</em>
       {/if}
     </h3>

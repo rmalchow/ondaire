@@ -187,8 +187,17 @@ export function playStream(nodeId, presetId) {
 }
 
 // --- media + playback ---
-export function getMedia(nodeId) {
-  return toasted(req("GET", base(nodeId) + "/media"));
+// getMedia lists a node's library, or — with opts.q — searches it (§6): the
+// daemon matches name/path and, when a media index is active, tag metadata.
+// Returns the same bare MediaFile[] either way.
+export function getMedia(nodeId, { q = "", limit = 0 } = {}) {
+  let path = base(nodeId) + "/media";
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (limit) params.set("limit", String(limit));
+  const qs = params.toString();
+  if (qs) path += "?" + qs;
+  return toasted(req("GET", path));
 }
 export function play(nodeId, uri) {
   return toasted(req("POST", base(nodeId) + "/play", { uri }));

@@ -106,12 +106,22 @@ func (s *Server) handlePlaybackStatuses(c echo.Context) error {
 	return c.JSON(http.StatusOK, s.cfg.PlaybackStatuses())
 }
 
-// handleMedia lists this node's local playable files (§6).
+// handleMedia lists this node's local playable files (§6). With ?q=<terms> it
+// returns a ranked, paginated search (?limit=, ?offset=) over the same fields;
+// without it, the full flat list. The response is always a bare JSON array.
 func (s *Server) handleMedia(c echo.Context) error {
 	if s.cfg.Media == nil {
 		return c.JSON(http.StatusOK, []MediaFile{})
 	}
-	files, err := s.cfg.Media.List()
+	var (
+		files []MediaFile
+		err   error
+	)
+	if q := strings.TrimSpace(c.QueryParam("q")); q != "" {
+		files, err = s.cfg.Media.Search(q, queryInt(c, "limit", 200), queryInt(c, "offset", 0))
+	} else {
+		files, err = s.cfg.Media.List()
+	}
 	if err != nil {
 		s.log.Warn("media list failed", "err", err)
 		return failCode(c, http.StatusInternalServerError, "internal_error", "")
@@ -120,6 +130,20 @@ func (s *Server) handleMedia(c echo.Context) error {
 		files = []MediaFile{}
 	}
 	return c.JSON(http.StatusOK, files)
+}
+
+// queryInt parses a non-negative int query param, returning def when absent or
+// malformed. Bounds (max limit) are enforced by the Media implementation.
+func queryInt(c echo.Context, name string, def int) int {
+	v := strings.TrimSpace(c.QueryParam(name))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return def
+	}
+	return n
 }
 
 // handleCover serves a file's now-playing cover art (GET /cover?uri=file:…): a

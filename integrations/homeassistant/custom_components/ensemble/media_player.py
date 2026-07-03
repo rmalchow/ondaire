@@ -21,10 +21,22 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import EnsembleConfigEntry
 from .api import EnsembleApiError
-from .browse_media import async_browse_media, resolve_play_uri
+from .browse_media import async_browse_media, resolve_play_uri, search_results
 from .const import DOMAIN, SIGNAL_ADD_ENTITIES
 from .coordinator import EnsembleCoordinator
 from .models import GroupView, NodeView
+
+# SEARCH_MEDIA + SearchMedia/SearchMediaQuery landed in recent HA cores. Import
+# defensively so the integration still loads on older versions; when absent the
+# feature bit is 0 (a no-op in _SUPPORT) and async_search_media is never called.
+try:
+    from homeassistant.components.media_player import SearchMedia, SearchMediaQuery
+
+    _SEARCH_FEATURE = MediaPlayerEntityFeature.SEARCH_MEDIA
+except (ImportError, AttributeError):  # pragma: no cover - version shim
+    SearchMedia = None  # type: ignore[assignment,misc]
+    SearchMediaQuery = None  # type: ignore[assignment,misc]
+    _SEARCH_FEATURE = MediaPlayerEntityFeature(0)
 
 _SUPPORT = (
     MediaPlayerEntityFeature.PLAY
@@ -38,6 +50,7 @@ _SUPPORT = (
     | MediaPlayerEntityFeature.BROWSE_MEDIA
     | MediaPlayerEntityFeature.PLAY_MEDIA
     | MediaPlayerEntityFeature.MEDIA_ENQUEUE
+    | _SEARCH_FEATURE
 )
 
 _STATE_MAP = {
@@ -313,6 +326,20 @@ class EnsembleMediaPlayer(CoordinatorEntity[EnsembleCoordinator], MediaPlayerEnt
         return await async_browse_media(
             self.coordinator, self._target, media_content_id
         )
+
+    async def async_search_media(self, query: SearchMediaQuery) -> SearchMedia:
+        """Search this room's library (§6), returning playable BrowseMedia hits.
+
+        Only invoked by cores that advertise SEARCH_MEDIA (the feature bit is 0
+        otherwise), so SearchMedia/SearchMediaQuery are guaranteed importable here.
+        """
+        try:
+            files = await self.coordinator.client.search_media(
+                self._target, query.search_query, limit=100
+            )
+        except EnsembleApiError as err:
+            raise HomeAssistantError(str(err)) from err
+        return SearchMedia(result=search_results(files))
 
     async def async_play_media(
         self,

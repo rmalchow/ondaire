@@ -107,6 +107,17 @@ class EnsembleClient:
         data = await self._request("GET", f"{self.base(node)}/media")
         return data or []
 
+    async def search_media(
+        self, node: str | None, query: str, limit: int = 100
+    ) -> list[dict]:
+        """Search the node's library (§6): ?q= matches name/path and, when a
+        media index is active, tag metadata. Returns the same MediaFile dicts."""
+        q = quote(query, safe="")
+        data = await self._request(
+            "GET", f"{self.base(node)}/media?q={q}&limit={limit}"
+        )
+        return data or []
+
     # --- transport (group master only) --------------------------------------
     async def play(self, node: str, uri: str) -> None:
         await self._request("POST", f"{self.base(node)}/play", {"uri": uri})

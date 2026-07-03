@@ -151,6 +151,26 @@ func TestMediaList(t *testing.T) {
 	}
 }
 
+func TestMediaSearch(t *testing.T) {
+	self := id.New()
+	cfg, _, _ := baseConfig(self)
+	fm := &fakeMedia{files: []MediaFile{{Path: "hit.flac", Name: "hit.flac"}}}
+	cfg.Media = fm
+	_, ts := testServer(t, cfg)
+
+	resp := doJSON(t, ts, http.MethodGet, "/api/media?q=miles&limit=5&offset=2", nil)
+	var got []MediaFile
+	json.NewDecoder(resp.Body).Decode(&got)
+	resp.Body.Close()
+	if len(got) != 1 || got[0].Path != "hit.flac" {
+		t.Errorf("search result = %+v", got)
+	}
+	// ?q= must route to Search with parsed limit/offset (not List).
+	if fm.lastQuery != "miles" || fm.lastLimit != 5 || fm.lastOffset != 2 {
+		t.Errorf("Search args = %q/%d/%d, want miles/5/2", fm.lastQuery, fm.lastLimit, fm.lastOffset)
+	}
+}
+
 func TestRenameNode(t *testing.T) {
 	self := id.New()
 	cfg, fc, _ := baseConfig(self)

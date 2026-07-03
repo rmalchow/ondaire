@@ -103,6 +103,11 @@ type Group interface {
 // fsLister (media.go) satisfies it.
 type Media interface {
 	List() ([]MediaFile, error)
+	// Search returns files matching a free-text query, most-relevant first,
+	// paginated by limit/offset. The plain fsLister does a substring match on
+	// name/path; a media index (§6) matches tag metadata too. An empty query
+	// returns no results.
+	Search(q string, limit, offset int) ([]MediaFile, error)
 	// Cover returns the cover-art bytes + content type for a file: URI under the
 	// media root: a sibling cover image (preferred) else the file's embedded
 	// picture. ok=false when the URI isn't a local media file or has no art.

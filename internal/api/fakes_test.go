@@ -404,9 +404,20 @@ type fakeMedia struct {
 	cover     []byte
 	coverType string
 	coverOK   bool
+
+	lastQuery  string // captured by Search for handler assertions
+	lastLimit  int
+	lastOffset int
 }
 
 func (m *fakeMedia) List() ([]MediaFile, error) { return m.files, m.err }
+
+// Search records the last query and returns files (already the "matches") so
+// handler tests can assert the ?q= branch wiring without a real index.
+func (m *fakeMedia) Search(q string, limit, offset int) ([]MediaFile, error) {
+	m.lastQuery, m.lastLimit, m.lastOffset = q, limit, offset
+	return m.files, m.err
+}
 
 func (m *fakeMedia) Cover(string) ([]byte, string, bool) {
 	return m.cover, m.coverType, m.coverOK

@@ -17,6 +17,12 @@
   let loading = $state(false);
   let dir = $state(""); // current directory within the media tree ("" == root)
 
+  // Library search (§6): when the box has text we ask the daemon (which matches
+  // tag metadata too, via the media index) instead of browsing the folder tree.
+  let query = $state("");
+  let results = $state([]);
+  let searching = $state(false);
+
   let tab = $state("files"); // "files" | "streams"
   // cluster-wide saved stream presets (from the snapshot; secrets never included)
   let presets = $derived(snapshot?.streamPresets ?? []);
@@ -64,6 +70,8 @@
     lastNode = id;
     dir = "";
     files = [];
+    query = "";
+    results = [];
     if (!id) return;
     loading = true;
     getMedia(id)
@@ -77,6 +85,31 @@
       .finally(() => {
         if (nodeId === id) loading = false;
       });
+  });
+
+  // Debounced server-side search. Empty box → tree browsing (results cleared).
+  $effect(() => {
+    const id = nodeId;
+    const q = query.trim();
+    if (!id || !q) {
+      results = [];
+      searching = false;
+      return;
+    }
+    searching = true;
+    const t = setTimeout(() => {
+      getMedia(id, { q, limit: 100 })
+        .then((list) => {
+          if (nodeId === id && query.trim() === q) results = Array.isArray(list) ? list : [];
+        })
+        .catch(() => {
+          if (nodeId === id && query.trim() === q) results = [];
+        })
+        .finally(() => {
+          if (nodeId === id && query.trim() === q) searching = false;
+        });
+    }, 200);
+    return () => clearTimeout(t);
   });
 
   function playHere(uri) {
@@ -134,6 +167,53 @@
 
   {#if tab === "files"}
   <div class="media-block">
+    <div class="media-search">
+      <svg class="search-ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+        <circle cx="7" cy="7" r="4.5" /><line x1="10.6" y1="10.6" x2="14.5" y2="14.5" />
+      </svg>
+      <input
+        class="search-input"
+        type="text"
+        placeholder="Search this library…"
+        bind:value={query}
+        aria-label="search the media library"
+      />
+      <button
+        class="search-clear"
+        class:active={query.trim() !== ""}
+        disabled={query.trim() === ""}
+        onclick={() => (query = "")}
+        title="clear search"
+        aria-label="clear search"
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <line x1="2.5" y1="2.5" x2="9.5" y2="9.5" /><line x1="9.5" y1="2.5" x2="2.5" y2="9.5" />
+        </svg>
+      </button>
+    </div>
+
+    {#if query.trim()}
+      {#if results.length === 0}
+        <div class="empty">{searching ? "" : "No matches."}</div>
+      {:else}
+        <div class="file-list">
+          {#each results as f (f.path)}
+            <div class="media-file">
+              <span class="fname" title={f.path}>{f.title || f.name}</span>
+              {#if f.artist}<span class="muted small">{f.artist}</span>{/if}
+              {#if f.album}<span class="muted small">· {f.album}</span>{/if}
+              <span class="spacer"></span>
+              <button class="btn btn-add" onclick={() => queueFile(f)} title="add to queue" aria-label="add to queue">
+                <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" aria-hidden="true"><line x1="5" y1="1" x2="5" y2="9" /><line x1="1" y1="5" x2="9" y2="5" /></svg>
+              </button>
+              <button class="btn btn-play" onclick={() => playFile(f)} title="play here" aria-label="play here">
+                <svg width="10" height="11" viewBox="0 0 10 11" fill="currentColor" aria-hidden="true"><polygon points="1,0.5 9.5,5.5 1,10.5" /></svg>
+              </button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    {:else}
     <div class="crumbs row wrap">
       {#each trail as c, i (c.dir)}
         {#if i > 0}<span class="crumb-sep">/</span>{/if}
@@ -198,6 +278,7 @@
           </div>
         {/each}
       </div>
+    {/if}
     {/if}
   </div>
   {:else}
@@ -327,6 +408,73 @@
   .media-label {
     color: var(--muted);
     font-size: 12px;
+  }
+
+  /* search field: styled to match the app's inputs (panel-2 fill, border, focus
+     glow), with a leading magnifier and a trailing clear button. The wrapper is
+     the "field"; the <input> itself is borderless/transparent inside it. */
+  .media-search {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0 8px;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  }
+  .media-search:focus-within {
+    border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+    box-shadow: 0 0 0 3px var(--glow-soft);
+  }
+  .search-ico {
+    flex: 0 0 auto;
+    color: var(--muted);
+  }
+  .search-input {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    color: var(--fg);
+    font: inherit;
+    padding: 6px 0;
+  }
+  /* the wrapper owns the focus glow; suppress the global input focus glow so
+     there isn't a second, smaller ring inside the field. */
+  .search-input:focus {
+    box-shadow: none;
+  }
+  /* the clear button sits inside the field; inactive (no text) it's faded and
+     unclickable, and it fades in / becomes interactive once there's a query. */
+  .search-clear {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, color 0.18s ease, background 0.18s ease;
+  }
+  .search-clear.active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .search-clear:hover {
+    color: var(--fg);
+    background: color-mix(in srgb, var(--fg) 12%, transparent);
   }
 
   /* The file list scrolls internally so a large library never makes the card

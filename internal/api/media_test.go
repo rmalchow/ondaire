@@ -64,3 +64,33 @@ func TestMediaListerMissingDir(t *testing.T) {
 		t.Errorf("missing dir should yield empty list, got %v", files)
 	}
 }
+
+func TestMediaListerSearch(t *testing.T) {
+	dir := t.TempDir()
+	for _, rel := range []string{"jazz/miles.flac", "rock/queen.mp3", "jazz/coltrane.mp3"} {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l := NewMediaLister(dir)
+
+	// Substring on name or path, case-insensitive.
+	if res, _ := l.Search("MILES", 10, 0); len(res) != 1 || res[0].Name != "miles.flac" {
+		t.Errorf(`Search("MILES") = %+v, want just miles.flac`, res)
+	}
+	if res, _ := l.Search("jazz", 10, 0); len(res) != 2 { // matches the folder in path
+		t.Errorf(`Search("jazz") matched %d, want 2`, len(res))
+	}
+	// Empty query → nothing (matches the index contract).
+	if res, _ := l.Search("", 10, 0); len(res) != 0 {
+		t.Errorf(`Search("") = %+v, want none`, res)
+	}
+	// limit + offset.
+	if res, _ := l.Search("jazz", 1, 1); len(res) != 1 {
+		t.Errorf("Search jazz limit=1 offset=1 returned %d, want 1", len(res))
+	}
+}

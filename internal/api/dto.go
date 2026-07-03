@@ -66,12 +66,20 @@ type NodePatchReq struct {
 
 // --- GET /api/media (§6) ---------------------------------------------------
 
-// MediaFile is one playable file, path relative to MEDIA_DIR.
+// MediaFile is one playable file, path relative to MEDIA_DIR. The tag-derived
+// fields (artist/album/title/duration/hasArt) are populated only when a media
+// index is active (§6); they are omitempty so the plain filesystem lister and
+// older daemons stay wire-compatible, and every consumer reads keys defensively.
 type MediaFile struct {
-	Path      string `json:"path"`
-	Name      string `json:"name"`
-	SizeBytes int64  `json:"sizeBytes"`
-	ModTime   int64  `json:"modTime"` // unix seconds
+	Path        string `json:"path"`
+	Name        string `json:"name"`
+	SizeBytes   int64  `json:"sizeBytes"`
+	ModTime     int64  `json:"modTime"` // unix seconds
+	Artist      string `json:"artist,omitempty"`
+	Album       string `json:"album,omitempty"`
+	Title       string `json:"title,omitempty"`
+	DurationSec int    `json:"durationSec,omitempty"`
+	HasArt      bool   `json:"hasArt,omitempty"`
 }
 
 // --- POST /api/follow ------------------------------------------------------

@@ -41,6 +41,31 @@ async def async_browse_media(
     raise BrowseError(f"unknown media id: {media_content_id}")
 
 
+def search_results(files: list[dict]) -> list[BrowseMedia]:
+    """Map search-hit MediaFile dicts to playable BrowseMedia items. Title prefers
+    the tag title, falling back to the filename; artist is prepended when known."""
+    out: list[BrowseMedia] = []
+    for f in files:
+        path = f.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        title = f.get("title") or f.get("name") or path
+        artist = f.get("artist")
+        if artist:
+            title = f"{artist} — {title}"
+        out.append(
+            BrowseMedia(
+                media_class=MediaClass.MUSIC,
+                media_content_id=f"file:{path}",
+                media_content_type=MediaType.MUSIC,
+                title=title,
+                can_play=True,
+                can_expand=False,
+            )
+        )
+    return out
+
+
 def resolve_play_uri(media_content_id: str) -> str:
     """Normalize a browsed/served id to an ensemble media-source URI.
 

@@ -38,6 +38,7 @@ import (
 	"ensemble/internal/dl"
 	"ensemble/internal/group"
 	"ensemble/internal/id"
+	"ensemble/internal/mediaindex"
 	"ensemble/internal/netx"
 	"ensemble/internal/playback"
 	"ensemble/internal/sink"
@@ -780,10 +781,30 @@ func runCombined(ctx context.Context, opt options, cfg *config.Config, base *slo
 	if err != nil {
 		distFS = nil
 	}
+
+	// Media library (§6): a searchable SQLite index at DataDir/media.db when
+	// enabled, else the stateless filesystem walker. Index open failures are
+	// non-fatal — we degrade to the walker so the library is always listable.
+	var mediaLister api.Media = api.NewMediaLister(cfg.MediaDir)
+	if cfg.MediaIndex {
+		if idx, ierr := mediaindex.Open(mediaindex.Options{
+			MediaDir: cfg.MediaDir,
+			DBPath:   filepath.Join(cfg.DataDir, "media.db"),
+			Interval: cfg.MediaIndexInterval,
+			Log:      base,
+		}); ierr != nil {
+			base.Warn("media index unavailable; using filesystem walk", "err", ierr)
+		} else {
+			idx.Start(ctx)
+			stack.push("media-index", func(context.Context) error { return idx.Close() })
+			mediaLister = idx
+		}
+	}
+
 	apiCfg := api.Config{
 		Cluster: cl,
 		Group:   &groupAdapter{e: engine, cl: cl},
-		Media:   api.NewMediaLister(cfg.MediaDir),
+		Media:   mediaLister,
 		NodeCfg: cfg,
 		Spotify: spotifyCtl,
 		Stats:   masterStatusStats(ph, engine),

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"ensemble/internal/contracts"
 	"ensemble/internal/id"
@@ -25,7 +26,11 @@ const (
 	DefaultControlPort = 9300 // playback CONTROL_PORT (master→playback commands, D58)
 	DefaultGossipPort  = 7946
 	DefaultDataDir     = "data" // relative to CWD if not overridden
-	DefaultOutput      = ""     // "" = auto-detect backend (sink decides; "auto")
+
+	// DefaultMediaIndexInterval is the rescan cadence for the searchable media
+	// index (§6). /media rarely changes, so a few minutes is plenty.
+	DefaultMediaIndexInterval = 5 * time.Minute
+	DefaultOutput             = "" // "" = auto-detect backend (sink decides; "auto")
 )
 
 // Env var names (spec §2, §8.5). Flags override env; env overrides defaults.
@@ -41,6 +46,9 @@ const (
 	EnvOutput      = "ENSEMBLE_OUTPUT"  // named sink backend: "", "auto", "exec", "null", "file:<path>", "alsa"
 	EnvJoin        = "ENSEMBLE_JOIN"    // dev seed list: comma-separated host:gossipPort (§2, D20)
 	EnvNoMDNS      = "ENSEMBLE_NO_MDNS" // "1"/"true": disable mDNS register+browse (tests; gossip via --join)
+
+	EnvMediaIndex         = "ENSEMBLE_MEDIA_INDEX"          // "0"/"false": disable the searchable SQLite index (§6)
+	EnvMediaIndexInterval = "ENSEMBLE_MEDIA_INDEX_INTERVAL" // rescan cadence, e.g. "5m"
 )
 
 // Config is the fully-resolved startup configuration. All fields are final:
@@ -68,6 +76,12 @@ type Config struct {
 	// Resolved, absolute directories (§2).
 	DataDir  string // e.g. /abs/data; contains node.json
 	MediaDir string // e.g. /abs/data/media; default DataDir/media
+
+	// MediaIndex enables the searchable SQLite media index at DataDir/media.db
+	// (§6); default true. When off, /api/media walks the filesystem per request.
+	// MediaIndexInterval is the background rescan cadence.
+	MediaIndex         bool
+	MediaIndexInterval time.Duration
 
 	// Roles enabled on this node (D49). Default: both. Runtime config, not
 	// replicated; the advertised role goes into mDNS TXT (D50/D51).
@@ -140,6 +154,9 @@ func Load(opts Options) (*Config, error) {
 		fName    = fs.String("name", "", "initial node name (first start only)")
 		fJoin    = fs.String("join", "", "dev gossip seed list: host:gossipPort,...")
 		fNoMDNS  = fs.Bool("no-mdns", false, "disable mDNS discovery (tests; use --join)")
+
+		fMediaIndex    = fs.String("media-index", "", "build a searchable SQLite media index: true|false (default true)")
+		fMediaIndexInt = fs.String("media-index-interval", "", "media index rescan interval, e.g. 5m")
 	)
 	if err := fs.Parse(opts.Args); err != nil {
 		return nil, fmt.Errorf("config: parse flags: %w", err)
@@ -178,6 +195,11 @@ func Load(opts Options) (*Config, error) {
 	}
 	if cfg.MediaDir, err = filepath.Abs(mediaDir); err != nil {
 		return nil, fmt.Errorf("config: resolve media dir: %w", err)
+	}
+
+	cfg.MediaIndex = resolveBool(*fMediaIndex, getenv(EnvMediaIndex), true)
+	if cfg.MediaIndexInterval, err = resolveDuration(*fMediaIndexInt, getenv(EnvMediaIndexInterval), DefaultMediaIndexInterval, EnvMediaIndexInterval); err != nil {
+		return nil, err
 	}
 
 	cfg.Output = resolveString("", getenv(EnvOutput), DefaultOutput)
@@ -361,6 +383,40 @@ func resolveString(flagVal, envVal, def string) string {
 		return envVal
 	}
 	return def
+}
+
+// resolveBool applies flag > env > default precedence for a boolean knob. An
+// empty flag and env fall through to def; any explicit value is truthy-parsed
+// (so "false"/"0"/"no"/"off" — indeed anything non-truthy — disables it).
+func resolveBool(flagVal, envVal string, def bool) bool {
+	v := flagVal
+	if v == "" {
+		v = envVal
+	}
+	if v == "" {
+		return def
+	}
+	return isTruthy(v)
+}
+
+// resolveDuration applies flag > env > default precedence for a duration knob,
+// mirroring resolvePort: a malformed or non-positive explicit value is fatal.
+func resolveDuration(flagVal, envVal string, def time.Duration, name string) (time.Duration, error) {
+	v := flagVal
+	if v == "" {
+		v = envVal
+	}
+	if v == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s: invalid duration %q: %w", name, v, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("config: %s: duration must be positive, got %s", name, d)
+	}
+	return d, nil
 }
 
 // parseJoin splits a comma-separated seed list, trims whitespace, and drops

@@ -71,6 +71,37 @@ func (l *fsLister) List() ([]MediaFile, error) {
 	return out, nil
 }
 
+// Search filters List() by a case-insensitive substring of name or path. The
+// plain lister has no tag metadata; a media index (§6) provides richer matching.
+// An empty query returns nothing (matches the index's contract).
+func (l *fsLister) Search(q string, limit, offset int) ([]MediaFile, error) {
+	term := strings.ToLower(strings.TrimSpace(q))
+	if term == "" {
+		return []MediaFile{}, nil
+	}
+	all, err := l.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MediaFile, 0, limit)
+	skipped := 0
+	for _, f := range all {
+		if !strings.Contains(strings.ToLower(f.Name), term) &&
+			!strings.Contains(strings.ToLower(f.Path), term) {
+			continue
+		}
+		if skipped < offset {
+			skipped++
+			continue
+		}
+		out = append(out, f)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 // Cover resolves uri under the media root and returns its cover image (sibling
 // cover.jpg/png/… preferred, else the embedded picture). Path resolution + the
 // traversal guard live in the audio package (single source of truth for file:

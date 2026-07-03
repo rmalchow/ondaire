@@ -323,6 +323,26 @@ docker-site:
   tags:
     - shared
 
+# 3e) Home Assistant custom integration — zip custom_components/ensemble for
+# HACS / manual install. Tags only; never-expiring artifact (grab it from the
+# release / job page and unzip into <config>). No build step: it's pure Python.
+homeassistant:
+  stage: build
+  image: alpine:latest
+  needs: []
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+  script:
+    - apk add --no-cache zip
+    - cd integrations/homeassistant
+    - zip -r "$CI_PROJECT_DIR/ensemble-hacs.zip" custom_components/ensemble hacs.json README.md
+  artifacts:
+    name: "ensemble-hacs-${CI_COMMIT_TAG}"
+    paths: [ensemble-hacs.zip]
+    expire_in: never
+  tags:
+    - shared
+
 # The Android companion app lives in its own repo (share/ensemble-android) and
 # builds/releases its APK there.
 

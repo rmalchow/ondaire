@@ -1,0 +1,27 @@
+{
+  "config": {
+    "flow_title": "ensemble ({host})",
+    "step": {
+      "user": {
+        "title": "Connect to ensemble",
+        "description": "Enter the host and port of any ensemble room (master) node.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Add ensemble",
+        "description": "Add the ensemble cluster discovered at {host}?"
+      }
+    },
+    "abort": {
+      "already_configured": "This ensemble cluster is already configured.",
+      "cannot_connect": "Failed to connect to the ensemble node.",
+      "not_a_master": "This ensemble node is a player only and has no API to connect to."
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the ensemble node."
+    }
+  }
+}

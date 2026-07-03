@@ -177,7 +177,9 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: -0.01em;
   display: inline-flex;
   align-items: center;
+  gap: 9px;
 }
+.brand-mark { display: block; width: 26px; height: 26px; }
 .brand-dot {
   width: 7px;
   height: 7px;

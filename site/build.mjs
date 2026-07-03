@@ -45,13 +45,20 @@ const renderNav = (active = "") =>
     .join("");
 
 // ── shared page chrome ──────────────────────────────────────────────────
+// Favicon + PWA icon set (the whole assets/ dir is copied into ./dist).
+const FAVICONS = `
+<link rel="icon" href="assets/favicon.ico" sizes="any" />
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+<link rel="manifest" href="assets/site.webmanifest" />`;
+
 // <head> contents shared by every page (og:image defaults to the overview shot).
 const head = (title, description, og = "assets/img/overview.png") => `
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}" />
-<meta name="theme-color" content="${esc(C.meta.themeColor)}" />
+<meta name="theme-color" content="${esc(C.meta.themeColor)}" />${FAVICONS}
 <meta property="og:title" content="${esc(title)}" />
 <meta property="og:description" content="${esc(description)}" />
 <meta property="og:type" content="website" />
@@ -66,7 +73,7 @@ const HOME_CTA = `<a class="btn btn-ghost nav-cta" href="index.html">← Home</a
 
 const navHeader = (brandHref, cta, active = "") => `
 <header class="nav">
-  <a class="brand" href="${esc(brandHref)}">${esc(C.brand.name)}<span class="brand-dot"></span></a>
+  <a class="brand" href="${esc(brandHref)}"><img class="brand-mark" src="assets/favicon.svg" width="26" height="26" alt="" />${esc(C.brand.name)}<span class="brand-dot"></span></a>
   <nav class="nav-links">${renderNav(active)}</nav>
   ${cta}
 </header>`;
@@ -745,7 +752,7 @@ function downloadPage(options) {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Download — ${esc(C.meta.title)}</title>
 <meta name="description" content="Download ensemble — pure-Go binaries for 64-bit Raspberry Pi (arm64) and x86-64 Linux, plus the Docker image. SHA-256 for every build." />
-<meta name="theme-color" content="${esc(C.meta.themeColor)}" />
+<meta name="theme-color" content="${esc(C.meta.themeColor)}" />${FAVICONS}
 <link rel="preload" href="assets/fonts/fraunces-wght.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="assets/styles.css" />
@@ -955,7 +962,7 @@ function flashPage(builds) {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Flash a player — ${esc(C.meta.title)}</title>
 <meta name="description" content="Flash an ESP32 + I2S DAC ensemble player from your browser with ESP Web Tools — clean install or firmware-only update, then set Wi-Fi via the captive portal. No toolchain." />
-<meta name="theme-color" content="${esc(C.meta.themeColor)}" />
+<meta name="theme-color" content="${esc(C.meta.themeColor)}" />${FAVICONS}
 <link rel="preload" href="assets/fonts/fraunces-wght.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="assets/styles.css" />

@@ -29,13 +29,13 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 // Config wires a Bridge.
 type Config struct {
 	BinPath    string       // resolved go-librespot path (CWD-first → $PATH; found by the caller)
-	DeviceName string       // advertised Connect name, e.g. "ensemble one"
+	DeviceName string       // advertised Connect name, e.g. "ondaire one"
 	StateDir   string       // dir for go-librespot's config_dir + the audio FIFO (the data dir)
 	APIPort    int          // localhost event-API port (server.port); 0 → default
 	Log        *slog.Logger // nil → slog.Default()
@@ -159,7 +159,7 @@ func (b *Bridge) SetDeviceName(name string) error {
 
 // playerCommand POSTs a bodyless go-librespot player command ("pause", "stop")
 // to its API. go-librespot is a full Spotify Connect device, so these propagate
-// over Connect to the controlling phone — ensemble uses this to push its own
+// over Connect to the controlling phone — ondaire uses this to push its own
 // stop/source-switch back so the phone reflects it instead of auto-advancing.
 func (b *Bridge) playerCommand(action string) error {
 	url := fmt.Sprintf("http://127.0.0.1:%d/player/%s", b.cfg.APIPort, action)

@@ -1,19 +1,19 @@
-# Ensemble — Design System Brief
+# Ondaire — Design System Brief
 
-> Distilled from the Ensemble Svelte codebase (`web/` control app + `site/` marketing site).
-> This is the design contract for the `ensemble-design` Open Design project. It captures the
+> Distilled from the Ondaire Svelte codebase (`web/` control app + `site/` marketing site).
+> This is the design contract for the `ondaire-design` Open Design project. It captures the
 > existing visual language so generated artifacts match the product, not a generic theme.
 
 ## Product
 
-**Ensemble** is a self-hosted, multi-room / whole-home audio controller (Sonos-like): you
+**Ondaire** is a self-hosted, multi-room / whole-home audio controller (Sonos-like): you
 group rooms, see live nodes/devices, browse media, control playback and per-member volume,
 and wire up Spotify endpoints. Two surfaces share one identity:
 
 - **Control app** (`web/`, Svelte) — dense, operational, dark. The thing you actually drive.
 - **Marketing site** (`site/`) — editorial, serif-led, also dark.
 
-Brand mark: the **"ensemble" wordmark set in Fraunces**, followed by a single **accent dot with a mint glow**.
+Brand mark: the **"ondaire" wordmark set in Fraunces**, followed by a single **accent dot with a mint glow**.
 
 ---
 

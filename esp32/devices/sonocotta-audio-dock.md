@@ -4,7 +4,7 @@ Sonocotta's [ESP32 audio boards](https://sonocotta.com) share one ESP32-S3 "audi
 dock" carrier (ESP32-S3-WROOM-1, 8 MB flash + 8 MB octal PSRAM, native USB-C, a
 WS2812 RGB LED, an IR receiver, and optional SPI-OLED + W5500 headers). What
 changes between models is the **DAC / amplifier** populated on it. Every model is
-a receive-only ensemble player once flashed; all pins and the DAC type are
+a receive-only ondaire player once flashed; all pins and the DAC type are
 re-provisionable over USB after flashing, so a wrong default is recoverable.
 
 The [`Amped-ESP32-S3-Plus`](amped-esp32-s3-plus.md) has its own sheet (it was the

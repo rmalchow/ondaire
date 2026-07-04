@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // stubPeer is a minimal peer that records follow/unfollow calls.

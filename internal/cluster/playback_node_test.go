@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ensemble/internal/discovery"
-	"ensemble/internal/id"
+	"ondaire/internal/discovery"
+	"ondaire/internal/id"
 )
 
 func pbPeer(pid id.ID, control int, codecs ...string) discovery.Peer {

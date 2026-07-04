@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // ENGINE integration tests for the DAC-pull, phase-locked Playout (sink.go).

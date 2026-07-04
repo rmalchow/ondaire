@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"sync"
 
-	"ensemble/internal/audio"
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/audio"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // Engine is the slice of the group engine the manager drives (D57). Implemented
@@ -33,7 +33,7 @@ type Cluster interface {
 }
 
 // Manager owns every go-librespot bridge on this node (D57): the implicit default
-// endpoint ("ensemble <node>") plus one bridge per configured preset ("ensemble
+// endpoint ("ondaire <node>") plus one bridge per configured preset ("ondaire
 // <node>: <name>"). All bridges run concurrently (every Connect device is
 // discoverable), but only ONE endpoint plays at a time — the active one drives the
 // node's group membership and the engine's single session, preempting any other.
@@ -192,7 +192,7 @@ func (m *Manager) stopLocked(eid string) {
 }
 
 // Rename updates the node name → restarts every bridge so each Connect device
-// re-advertises its new "ensemble <node>[: <preset>]" name over zeroconf (a live
+// re-advertises its new "ondaire <node>[: <preset>]" name over zeroconf (a live
 // set_device_name doesn't refresh the advert; the config dir keeps auth, so no
 // re-login). Node renames are rare, so the brief re-advertise blip is acceptable.
 func (m *Manager) Rename(nodeName string) {
@@ -229,14 +229,14 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-// Deactivate pushes ensemble's own stop / source-switch back to the controlling
+// Deactivate pushes ondaire's own stop / source-switch back to the controlling
 // phone: it pauses (disconnect=false, used when another source is selected) or
 // stops+disconnects (disconnect=true, used on an explicit Stop) the currently
 // active endpoint's go-librespot. No-op when no Spotify endpoint is active.
 //
-// Without this, go-librespot keeps its Connect session alive after ensemble
+// Without this, go-librespot keeps its Connect session alive after ondaire
 // leaves it: the phone keeps auto-advancing tracks, each re-emitting a "playing"
-// event that bounces ensemble straight back to Spotify. Clearing hasActive BEFORE
+// event that bounces ondaire straight back to Spotify. Clearing hasActive BEFORE
 // sending is what breaks the loop — the resulting paused/stopped event reaches
 // onStop with hasActive already false, so it issues no second engine.Stop (which
 // could kill the source the user just switched to), and no further "playing"
@@ -360,7 +360,7 @@ func (m *Manager) setGroupMembers(players []id.ID) {
 // deviceName builds the advertised Connect device name. Caller holds mu (reads
 // m.nodeName) for the non-Rename callers; Rename reads it under its own lock.
 func (m *Manager) deviceName(eid, name string) string {
-	base := "ensemble " + m.nodeName
+	base := "ondaire " + m.nodeName
 	if eid == "" {
 		return base
 	}

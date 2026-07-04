@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
+	"ondaire/internal/stream"
 )
 
 // keepaliveTTL is how long a subscriber may go unseen before expiry (§8.7).

@@ -104,7 +104,7 @@ func schemeOf(uri string) string {
 var captureBinaries = []string{"pw-record", "arecord"}
 
 // spotifyBinaries, in probe order (D57). `go-librespot` is preferred and is often
-// dropped alongside the ensemble binary, so it is looked up in the WORKING
+// dropped alongside the ondaire binary, so it is looked up in the WORKING
 // DIRECTORY first, then $PATH; `librespot` (Rust) is the fallback. Both run zeroconf
 // Connect (the phone authenticates + controls) and emit raw PCM over a pipe.
 var spotifyBinaries = []string{"go-librespot", "librespot"}
@@ -134,7 +134,7 @@ func findCaptureBinary() string {
 }
 
 // findSpotifyBinary returns the first librespot-family binary, checking the working
-// directory first (a binary shipped next to ensemble) then $PATH, or "".
+// directory first (a binary shipped next to ondaire) then $PATH, or "".
 func findSpotifyBinary() string {
 	for _, b := range spotifyBinaries {
 		if p := localExecutable(b); p != "" {

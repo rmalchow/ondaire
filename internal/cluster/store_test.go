@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // findGroup returns the derived group mastered by `master`, or nil.

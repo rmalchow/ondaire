@@ -1,6 +1,6 @@
 # Developer docs
 
-Specs and plans for building on ensemble: implementing players and firmware, the
+Specs and plans for building on ondaire: implementing players and firmware, the
 hardware nodes, measurement tooling, and in-flight engineering work. For the system
 design itself, see [architecture](../architecture/).
 

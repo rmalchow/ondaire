@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 type fakeEngine struct {
@@ -65,7 +65,7 @@ func newTestMgr(eng *fakeEngine, cl *fakeCl) *Manager {
 	return m
 }
 
-const t1Dir = "/tmp/ensemble-spotify-test" // unused at the orchestration layer (no real bridges)
+const t1Dir = "/tmp/ondaire-spotify-test" // unused at the orchestration layer (no real bridges)
 
 // A preset's OnPlay regroups to its players (join wanted, unjoin others) and
 // plays its endpoint URI; the default endpoint plays without regrouping.
@@ -206,10 +206,10 @@ func TestOnMetadataActiveOnly(t *testing.T) {
 
 func TestDeviceName(t *testing.T) {
 	m := &Manager{nodeName: "lr"}
-	if got := m.deviceName("", ""); got != "ensemble lr" {
+	if got := m.deviceName("", ""); got != "ondaire lr" {
 		t.Fatalf("default device = %q", got)
 	}
-	if got := m.deviceName("kitchen", "Kitchen"); got != "ensemble lr: Kitchen" {
+	if got := m.deviceName("kitchen", "Kitchen"); got != "ondaire lr: Kitchen" {
 		t.Fatalf("preset device = %q", got)
 	}
 }

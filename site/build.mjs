@@ -1,4 +1,4 @@
-// Zero-dependency static-site generator for the ensemble marketing site.
+// Zero-dependency static-site generator for the ondaire marketing site.
 //
 //   node build.mjs            → renders ./dist (a fully self-contained static site)
 //
@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 const root = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(root, "src");
 const OUT = path.join(root, "dist");
-const VERSION = process.env.ENSEMBLE_VERSION || "";
+const VERSION = process.env.ONDAIRE_VERSION || "";
 
 const esc = (s = "") =>
   String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -71,9 +71,15 @@ const head = (title, description, og = "assets/img/overview.png") => `
 const GET_IT_CTA = `<a class="btn btn-solid nav-cta" href="${esc(C.hero.primary.href)}" rel="noopener">${esc(C.hero.primary.label)}</a>`;
 const HOME_CTA = `<a class="btn btn-ghost nav-cta" href="index.html">← Home</a>`;
 
+// The combined mark + "ndaire" wordmark lockup, inlined so it renders crisp at
+// a fixed 44px header height without a separate <img> request. Colors are
+// fixed (mint badge / ink glyph / light wordmark) — the marketing site has no
+// theme switcher, unlike the web UI header this geometry is shared with.
+const BRAND_LOCKUP = `<svg class="brand-lockup" style="height:44px;width:auto;display:block" viewBox="-16.7 -74.0 281.7 108.0" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg"> <rect x="-6.7" y="-40.0" width="51.6" height="49.8" rx="11.0" fill="#35e3b3" /> <path d="M19.1999453125 -31.03995703125Q24.153515625 -31.03995703125 27.894296875000002 -29.014359375Q31.635078125 -26.988761718750002 33.727869140625 -23.395167968750002Q35.82066015625 -19.80157421875 35.82066015625 -15.05278515625Q35.82066015625 -10.53438671875 33.667072265625 -6.953591796875Q31.513484375 -3.372796875 27.71190625 -1.2896015625000001Q23.910328125 0.79359375 18.87995703125 0.79359375Q13.9455859375 0.79359375 10.211205078125001 -1.2512031250000002Q6.47682421875 -3.2960000000000003 4.368033203125 -6.895994140625Q2.2592421875 -10.49598828125 2.2592421875 -15.193578125Q2.2592421875 -19.782375000000002 4.4224296875 -23.347169921875Q6.5856171875000005 -26.91196484375 10.387195312500001 -28.9759609375Q14.1887734375 -31.03995703125 19.1999453125 -31.03995703125ZM21.47194140625 -2.5471328125Q23.66080078125 -2.89913671875 24.99204296875 -4.56315234375Q26.32328515625 -6.22716796875 26.675310546875004 -9.167982421875Q27.027335937500002 -12.108796875 26.25934375 -16.268796875Q25.52975 -20.35200390625 24.11852734375 -23.024013671875Q22.7073046875 -25.6960234375 20.796861328124997 -26.88962890625Q18.88641796875 -28.083234375 16.62716015625 -27.69923046875Q14.43830078125 -27.3472265625 13.10705859375 -25.6832109375Q11.77581640625 -24.0191953125 11.433390625000001 -21.08798046875Q11.090964843750001 -18.156765625000002 11.8397578125 -13.97756640625Q12.58215234375 -9.91355859375 13.986974609375 -7.23194921875Q15.391796875 -4.55033984375 17.308640625000002 -3.366333984375Q19.225484375 -2.182328125 21.47194140625 -2.5471328125Z" fill="#03130d" /> <g transform="translate(11.1)"> <path d="m 52.588605,-28.851195 v 23.7312848 q 0,0.9791836 0.281606,1.4399805 0.281605,0.4607969 0.851211,0.6655938 l 1.164832,0.3391992 q 1.017598,0.396789 1.017598,1.2607734 Q 55.903852,0 54.13109,0 H 41.747203 q -0.889578,0 -1.308769,-0.35519141 -0.419192,-0.3551914 -0.419192,-0.98237499 0,-0.4543906 0.287998,-0.8063828 0.287998,-0.3519922 0.876791,-0.537586 l 1.273633,-0.3328007 q 0.582406,-0.1983985 0.864012,-0.6559942 0.281605,-0.4575957 0.281605,-1.4367793 V -23.481699 q 0,-0.799988 -0.252799,-1.151985 -0.252798,-0.351996 -0.809599,-0.447992 l -1.67686,-0.134394 q -0.595195,-0.134395 -0.854392,-0.419188 -0.259197,-0.284793 -0.259197,-0.745582 0,-0.505586 0.319994,-0.844779 0.319994,-0.339194 1.171177,-0.627186 l 5.951922,-2.195164 q 1.203176,-0.428789 1.958362,-0.633584 0.755185,-0.204795 1.388767,-0.204795 1.011176,0 1.529563,0.563186 0.518386,0.563185 0.518386,1.471967 z m -0.99839,7.142359 -1.452774,-1.516769 1.273618,-1.100813 q 4.006371,-3.622367 6.883152,-5.174353 2.876781,-1.551987 5.449574,-1.551987 3.948789,0 6.143981,2.636789 2.195191,2.636789 2.649593,7.020782 l 1.804821,16.1856714 q 0.115199,1.0303867 0.364806,1.5199843 0.249608,0.4895977 0.812815,0.6879961 l 1.158426,0.32 q 0.588793,0.1855938 0.876791,0.537586 0.287998,0.3519922 0.287998,0.8063828 0,0.62718359 -0.406391,0.98237499 Q 77.030234,0 76.115055,0 H 63.60957 q -1.772761,0 -1.772761,-1.4143633 0,-0.8639844 1.017597,-1.2607734 l 1.203235,-0.3391992 q 0.620808,-0.2047969 0.953613,-0.6911954 0.332805,-0.4863984 0.217605,-1.5039843 L 63.577633,-20.051223 q -0.320008,-2.816047 -1.436828,-4.20807 -1.116821,-1.392023 -3.254453,-1.392023 -1.350422,0 -2.85125,0.707216 -1.500829,0.707217 -3.145676,2.083256 z" fill="#e9eef4" /> <path d="m 103.33446,-5.3567852 -0.30079,-0.147207 V -40.140906 q 0,-0.831989 -0.2368,-1.177584 -0.2368,-0.345596 -0.7936,-0.441592 l -1.69606,-0.147195 q -0.56319,-0.134395 -0.822388,-0.412787 -0.259197,-0.278393 -0.259197,-0.751983 0,-0.505586 0.303994,-0.838379 0.303994,-0.332793 1.174381,-0.633586 l 5.96472,-2.182363 q 1.20317,-0.44159 1.93596,-0.646385 0.73278,-0.204795 1.41117,-0.204795 1.01117,0 1.52316,0.563186 0.51199,0.563185 0.51199,1.484767 v 40.4096918 q 0,0.9791836 0.2816,1.4495801 0.28161,0.4703965 0.86401,0.6559942 l 1.19043,0.32 q 0.6336,0.1855937 0.912,0.5375859 0.27839,0.3519922 0.27839,0.8191836 0,0.62718359 -0.41919,0.98237499 Q 114.73905,0 113.82387,0 h -6.6111 q -1.67677,0 -2.77754,-1.0687715 -1.10077,-1.0687715 -1.10077,-2.7775488 z M 80.000043,-14.316797 q 0,-5.113594 2.038395,-8.863984 2.038394,-3.750391 5.516781,-5.811184 3.478386,-2.060793 7.804765,-2.060793 3.833598,0 6.764806,1.79201 2.9312,1.79201 4.84479,5.196814 l -2.20792,1.830371 q -1.55521,-2.604832 -3.52325,-3.900857 -1.968043,-1.296025 -4.246488,-1.296025 -2.182442,0 -3.913678,1.292812 -1.731236,1.292813 -2.720058,3.97443 -0.988823,2.681617 -0.988823,6.86723 0,3.910418 0.969619,6.4640394 0.96962,2.5536211 2.640053,3.8112363 1.670434,1.2576153 3.814477,1.2576153 2.342433,0 4.358468,-1.3888125 2.01604,-1.3888125 3.72486,-4.2624258 l 1.41435,1.8367812 q -2.52159,3.9231719 -5.83358,6.1471524 -3.311997,2.22398045 -7.292774,2.22398045 -3.795199,0 -6.777598,-1.93919925 -2.982398,-1.9391992 -4.684797,-5.3375976 -1.702398,-3.3983985 -1.702398,-7.8335939 z" fill="#e9eef4" /> <path d="m 138.82884,-4.0831836 v -0.6591953 l -0.61437,-0.1280078 V -23.955086 q 0,-2.252863 -1.14243,-3.488094 -1.14243,-1.23523 -3.22249,-1.23523 -1.89446,0 -2.91529,0.803224 -1.02082,0.803225 -1.02082,1.980854 v 2.83516 q 0,1.900754 -1.27357,2.943928 -1.27357,1.043174 -3.6095,1.043174 -1.99674,0 -3.01432,-0.934383 -1.01758,-0.934383 -1.01758,-2.579149 0,-2.022394 1.66079,-3.951984 1.66078,-1.92959 4.89275,-3.203182 3.23196,-1.273591 7.96789,-1.273591 5.86875,0 8.74232,2.383994 2.87358,2.383994 2.87358,6.44158 v 16.6272811 q 0,0.9216172 0.368,1.3568203 0.368,0.4352031 1.04641,0.4352031 0.71041,0 1.05281,-0.3328027 0.3424,-0.3328027 0.6048,-0.6592051 0.18559,-0.2111992 0.36479,-0.3647988 0.1792,-0.1535996 0.4608,-0.1535996 0.41599,0 0.58879,0.2815937 0.17279,0.2815938 0.17279,0.7743868 0,1.0879804 -0.75198,2.239957 -0.75199,1.15197654 -2.24635,1.96475975 -1.49437,0.8127832 -3.69592,0.8127832 -2.87356,0 -4.57273,-1.30558789 -1.69917,-1.30558786 -1.69917,-3.57118946 z m -19.19358,-2.6304101 q 0,-3.9679763 3.57438,-6.4351723 3.57438,-2.467195 9.97433,-2.467195 2.09281,0 3.76643,0.352006 1.67362,0.352006 2.90244,0.934412 l -0.71678,2.054359 q -1.10723,-0.499207 -2.23046,-0.793615 -1.12323,-0.294408 -2.45447,-0.294408 -2.64327,0 -4.1377,1.369619 -1.49444,1.369619 -1.49444,3.776045 0,2.4256211 1.27363,3.6960332 1.27362,1.2704121 3.28325,1.2704121 1.72165,0 3.3121,-0.7904218 1.59044,-0.7904219 2.68489,-2.1856719 l 0.70399,1.8303594 q -1.77921,2.4768125 -4.73602,3.83361911 -2.9568,1.35680664 -6.2976,1.35680664 -4.16638,0 -6.78718,-2.07359175 -2.62079,-2.0735918 -2.62079,-5.4335957 z" fill="#e9eef4" /> <path d="m 167.24461,-28.851195 v 23.7312848 q 0,0.9791836 0.2816,1.4495801 0.28161,0.4703965 0.86401,0.6559942 l 1.19043,0.32 q 0.6336,0.1855937 0.92799,0.5375859 0.2944,0.3519922 0.2944,0.8191836 0,0.62718359 -0.43519,0.98237499 Q 169.93266,0 169.01748,0 H 156.4032 q -0.88957,0 -1.30877,-0.35519141 -0.41919,-0.3551914 -0.41919,-0.98237499 0,-0.4543906 0.288,-0.8063828 0.288,-0.3519922 0.88959,-0.537586 l 1.27363,-0.3328007 q 0.56961,-0.1983985 0.85122,-0.6559942 0.2816,-0.4575957 0.2816,-1.4367793 V -23.481699 q 0,-0.799988 -0.2528,-1.151985 -0.2528,-0.351996 -0.8096,-0.447992 l -1.66406,-0.134394 q -0.59519,-0.134395 -0.86079,-0.419188 -0.2656,-0.284793 -0.2656,-0.745582 0,-0.505586 0.3264,-0.844779 0.32639,-0.339194 1.16478,-0.627186 l 5.96472,-2.195164 q 1.24797,-0.447988 1.99356,-0.643183 0.74558,-0.195196 1.27677,-0.195196 1.05597,0 1.58396,0.563186 0.52799,0.563185 0.52799,1.471967 z m -5.20307,-6.918481 q -2.56634,0 -4.1151,-1.334379 -1.54877,-1.334379 -1.54877,-3.465535 0,-2.156758 1.55517,-3.459137 1.55516,-1.302378 4.1087,-1.302378 2.59834,0 4.14391,1.308779 1.54557,1.308779 1.54557,3.452736 0,2.131156 -1.54557,3.465535 -1.54557,1.334379 -4.14391,1.334379 z" fill="#e9eef4" /> <path d="m 185.75341,-16.947168 q 0,-4.646387 1.3248,-7.788785 1.32481,-3.142399 3.44961,-4.729602 2.1248,-1.587203 4.58879,-1.587203 3.07198,0 4.73598,1.743983 1.66399,1.743982 1.66399,4.96313 0,2.854321 -1.18717,4.275086 -1.18717,1.420766 -3.08152,1.420766 -1.91355,0 -2.91193,-1.027178 -0.99838,-1.027177 -0.99838,-2.851138 v -1.17759 q -0.0192,-0.96641 -0.47041,-1.478414 -0.45121,-0.512004 -1.46242,-0.512004 -1.12643,0 -2.16647,0.934422 -1.04003,0.934422 -1.69285,2.819259 -0.65282,1.884838 -0.65282,4.835288 z m 0.62082,-11.904027 0.51838,7.28323 v 16.4480548 q 0,0.8831875 0.3584,1.321586 0.3584,0.4383984 1.31199,0.5983945 l 2.75842,0.4287969 q 0.73599,0.1279961 1.10718,0.4639883 0.3712,0.3359922 0.3712,0.9503789 0,0.64638279 -0.44799,1.00157419 Q 191.90382,0 190.99504,0 H 176.0832 q -0.92157,0 -1.34077,-0.35519141 -0.41919,-0.3551914 -0.41919,-0.98237499 0,-0.4543906 0.288,-0.8063828 0.288,-0.3519922 0.87679,-0.537586 l 1.27363,-0.3328007 q 0.58241,-0.1855977 0.86402,-0.6495938 0.2816,-0.4639961 0.2816,-1.4559805 V -23.404902 q 0,-0.799989 -0.2528,-1.161584 -0.2528,-0.361596 -0.8096,-0.457592 l -1.67686,-0.115195 q -0.59519,-0.134395 -0.85439,-0.428788 -0.2592,-0.294392 -0.2592,-0.735982 0,-0.537586 0.336,-0.863978 0.33599,-0.326393 1.15518,-0.639987 l 5.81752,-2.124765 q 1.58716,-0.582383 2.31035,-0.767979 0.72318,-0.185596 1.15198,-0.185596 0.71679,0 1.06558,0.460789 0.34879,0.460789 0.48319,1.574364 z" fill="#e9eef4" /> <path d="m 233.67026,-18.911973 q 0,1.689571 -0.96638,2.617553 -0.96639,0.927982 -2.83517,0.927982 h -19.93606 v -2.45755 h 13.08828 q 1.62559,0 1.62559,-1.46559 0,-4.224008 -1.55203,-6.412834 -1.55204,-2.188826 -4.1057,-2.188826 -2.00326,0 -3.5393,1.203222 -1.53604,1.203223 -2.40326,3.475256 -0.86722,2.272033 -0.86722,5.452865 0,6.201622 2.90562,9.289645 2.90562,3.0880234 7.71843,3.0880234 2.82244,0 4.95687,-1.1200371 2.13442,-1.1200371 3.3312,-3.1872715 0.55037,-0.6527888 0.88637,-0.8671858 0.33599,-0.214396 0.70718,-0.214396 0.512,0 0.73599,0.45759 0.224,0.4575895 0.2112,1.0847731 -0.14081,2.7135898 -1.9232,5.0111777 -1.78239,2.2975879 -4.82237,3.65437893 -3.03998,1.35679102 -7.00154,1.35679102 -4.60798,0 -8.18876,-1.90399805 -3.58079,-1.903998 -5.62237,-5.3375957 -2.04159,-3.4335977 -2.04159,-8.047996 0,-4.838379 1.93919,-8.566371 1.9392,-3.727992 5.55517,-5.859192 3.61598,-2.131199 8.63995,-2.131199 4.28156,0 7.29274,1.548797 3.01118,1.548797 4.61118,4.291193 1.59999,2.742397 1.59999,6.300795 z" fill="#e9eef4" /> </g> </svg>`;
+
 const navHeader = (brandHref, cta, active = "") => `
 <header class="nav">
-  <a class="brand" href="${esc(brandHref)}"><img class="brand-mark" src="assets/favicon.svg" width="26" height="26" alt="" />${esc(C.brand.name)}<span class="brand-dot"></span></a>
+  <a class="brand brand--lockup" href="${esc(brandHref)}">${BRAND_LOCKUP}</a>
   <nav class="nav-links">${renderNav(active)}</nav>
   ${cta}
 </header>`;
@@ -236,7 +242,7 @@ const themeSlides = C.themes.items
   .map(
     (t, i) => `
       <figure class="tc-slide" data-i="${i}">
-        <div class="tc-frame"><img src="${esc(t.img)}" alt="ensemble in the ${esc(t.name)} theme" loading="lazy" decoding="async" /></div>
+        <div class="tc-frame"><img src="${esc(t.img)}" alt="ondaire in the ${esc(t.name)} theme" loading="lazy" decoding="async" /></div>
         <figcaption class="tc-cap"><span class="tc-name">${esc(t.name)}</span><span class="tc-blurb">${esc(t.blurb)}</span></figcaption>
       </figure>`
   )
@@ -413,7 +419,7 @@ function installPage() {
     .join("");
   return `<!doctype html>
 <html lang="en">
-<head>${head(`Install — ${C.meta.title}`, "Install ensemble: just run the binary, a guided one-liner, Docker, a systemd boot service, or a DIY ESP32 player flashed from your browser.")}
+<head>${head(`Install — ${C.meta.title}`, "Install ondaire: just run the binary, a guided one-liner, Docker, a systemd boot service, or a DIY ESP32 player flashed from your browser.")}
 </head>
 <body>
 <div class="grain" aria-hidden="true"></div>
@@ -458,7 +464,7 @@ function uiPage() {
   const group = (key) => C.screens.items.filter((s) => s.page === key).map(screenCard).join("");
   return `<!doctype html>
 <html lang="en">
-<head>${head(`The UI — ${C.meta.title}`, "A tour of the ensemble web app: grouping rooms, the media library and shared queue, multi-room Spotify, live per-node stats, and one-click themes.")}
+<head>${head(`The UI — ${C.meta.title}`, "A tour of the ondaire web app: grouping rooms, the media library and shared queue, multi-room Spotify, live per-node stats, and one-click themes.")}
 </head>
 <body>
 <div class="grain" aria-hidden="true"></div>
@@ -535,7 +541,7 @@ function techPage() {
       .join("");
   return `<!doctype html>
 <html lang="en">
-<head>${head(`How it works — ${C.meta.title}`, "How ensemble keeps rooms in sync: beating network jitter, packet loss, system-clock and DAC drift — with microphone and live-telemetry measurements that prove it.")}
+<head>${head(`How it works — ${C.meta.title}`, "How ondaire keeps rooms in sync: beating network jitter, packet loss, system-clock and DAC drift — with microphone and live-telemetry measurements that prove it.")}
 </head>
 <body>
 <div class="grain" aria-hidden="true"></div>
@@ -751,7 +757,7 @@ function downloadPage(options) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Download — ${esc(C.meta.title)}</title>
-<meta name="description" content="Download ensemble — pure-Go binaries for 64-bit Raspberry Pi (arm64) and x86-64 Linux, plus the Docker image. SHA-256 for every build." />
+<meta name="description" content="Download ondaire — pure-Go binaries for 64-bit Raspberry Pi (arm64) and x86-64 Linux, plus the Docker image. SHA-256 for every build." />
 <meta name="theme-color" content="${esc(C.meta.themeColor)}" />${FAVICONS}
 <link rel="preload" href="assets/fonts/fraunces-wght.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin />
@@ -760,11 +766,7 @@ function downloadPage(options) {
 <body>
 <div class="grain" aria-hidden="true"></div>
 
-<header class="nav">
-  <a class="brand" href="index.html">${esc(C.brand.name)}<span class="brand-dot"></span></a>
-  <nav class="nav-links">${renderNav("index.html")}</nav>
-  <a class="btn btn-ghost nav-cta" href="index.html">← Home</a>
-</header>
+${navHeader("index.html", HOME_CTA)}
 
 <main id="top">
   <section class="dl">
@@ -811,7 +813,7 @@ function downloadPage(options) {
 // size (like resolveDownloads), and records the resolved `src` path so main()
 // can copy the image into ./dist. The image is looked up first where the build
 // staged it (src/assets/firmware/, as CI's docker-site job does), then falling
-// back to a local esp32 build (esp32/build-<id>/ensemble-fw-<id>.bin) so a bare
+// back to a local esp32 build (esp32/build-<id>/ondaire-fw-<id>.bin) so a bare
 // `node build.mjs` after `esp32/build.sh <id>` produces a working flasher too.
 // A missing image renders as "not built" — the page + manifests still build.
 async function resolveFirmware() {
@@ -833,11 +835,11 @@ async function resolveFirmware() {
       path.join(SRC, b.file),
       path.join(root, "..", "esp32", `build-${b.id}`, fname),
     ]);
-    // … and the app-only image (keep-config): staged by CI as ensemble-app-<id>.bin,
-    // or straight out of a local build as ensemble-node.bin.
+    // … and the app-only image (keep-config): staged by CI as ondaire-app-<id>.bin,
+    // or straight out of a local build as ondaire-node.bin.
     const app = await find([
-      path.join(SRC, "assets", "firmware", `ensemble-app-${b.id}.bin`),
-      path.join(root, "..", "esp32", `build-${b.id}`, "ensemble-node.bin"),
+      path.join(SRC, "assets", "firmware", `ondaire-app-${b.id}.bin`),
+      path.join(root, "..", "esp32", `build-${b.id}`, "ondaire-node.bin"),
     ]);
     if (merged) {
       out.push({
@@ -875,7 +877,7 @@ const APP_OFFSET = 0x20000;
 function firmwareManifest(b, mode) {
   const part =
     mode === "keep"
-      ? { path: `ensemble-app-${b.id}.bin`, offset: APP_OFFSET }
+      ? { path: `ondaire-app-${b.id}.bin`, offset: APP_OFFSET }
       : { path: b.file.split("/").pop(), offset: 0 };
   return {
     name: `${C.firmware.manifestName} — ${b.label} (${mode === "keep" ? "update" : "clean"})`,
@@ -961,7 +963,7 @@ function flashPage(builds) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Flash a player — ${esc(C.meta.title)}</title>
-<meta name="description" content="Flash an ESP32 + I2S DAC ensemble player from your browser with ESP Web Tools — clean install or firmware-only update, then set Wi-Fi via the captive portal. No toolchain." />
+<meta name="description" content="Flash an ESP32 + I2S DAC ondaire player from your browser with ESP Web Tools — clean install or firmware-only update, then set Wi-Fi via the captive portal. No toolchain." />
 <meta name="theme-color" content="${esc(C.meta.themeColor)}" />${FAVICONS}
 <link rel="preload" href="assets/fonts/fraunces-wght.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin />
@@ -1100,11 +1102,7 @@ function flashPage(builds) {
 <body>
 <div class="grain" aria-hidden="true"></div>
 
-<header class="nav">
-  <a class="brand" href="index.html">${esc(C.brand.name)}<span class="brand-dot"></span></a>
-  <nav class="nav-links">${renderNav("index.html")}</nav>
-  <a class="btn btn-ghost nav-cta" href="index.html">← Home</a>
-</header>
+${navHeader("index.html", HOME_CTA)}
 
 <main id="top">
   <section class="dl">
@@ -1532,7 +1530,7 @@ async function main() {
     if (b.present) {
       await fs.copyFile(b.src, path.join(fwOut, b.file.split("/").pop()));
       // App-only image for keep-config (absent → the wizard disables that mode).
-      if (b.appSrc) await fs.copyFile(b.appSrc, path.join(fwOut, `ensemble-app-${b.id}.bin`));
+      if (b.appSrc) await fs.copyFile(b.appSrc, path.join(fwOut, `ondaire-app-${b.id}.bin`));
     }
   }
 

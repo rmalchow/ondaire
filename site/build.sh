@@ -12,34 +12,34 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
 
-"$repo/scripts/build.sh" --ui                       # web/dist + bin/ensemble-linux-*
+"$repo/scripts/build.sh" --ui                       # web/dist + bin/ondaire-linux-*
 
-# tar.gz each binary (renamed to `ensemble` inside, so it extracts to ./ensemble).
+# tar.gz each binary (renamed to `ondaire` inside, so it extracts to ./ondaire).
 dl="$here/src/assets/downloads"
 mkdir -p "$dl"
-rm -f "$dl"/ensemble-linux-*.tar.gz
-for bin in "$repo"/bin/ensemble-linux-*; do
-  name="$(basename "$bin")"                          # ensemble-linux-arm64
+rm -f "$dl"/ondaire-linux-*.tar.gz
+for bin in "$repo"/bin/ondaire-linux-*; do
+  name="$(basename "$bin")"                          # ondaire-linux-arm64
   tmp="$(mktemp -d)"
-  cp "$bin" "$tmp/ensemble"
-  tar -czf "$dl/$name.tar.gz" -C "$tmp" ensemble
+  cp "$bin" "$tmp/ondaire"
+  tar -czf "$dl/$name.tar.gz" -C "$tmp" ondaire
   rm -rf "$tmp"
 done
 
 # Stage any ESP32 firmware images already built locally (esp32/build-<board>/) so
 # the flasher in ./dist actually works — mirrors the CI docker-site job, which
-# stages fw/ensemble-fw-*.bin the same way. Build an image first with, e.g.,
+# stages fw/ondaire-fw-*.bin the same way. Build an image first with, e.g.,
 # `esp32/build.sh esp32s3-supermini`; if none exist the flasher just shows
 # "not built" for that board. (build.mjs also falls back to esp32/build-<id>/.)
 fw="$here/src/assets/firmware"
 mkdir -p "$fw"
-rm -f "$fw"/ensemble-fw-*.bin
+rm -f "$fw"/ondaire-fw-*.bin
 shopt -s nullglob
-for bin in "$repo"/esp32/build-*/ensemble-fw-*.bin; do
+for bin in "$repo"/esp32/build-*/ondaire-fw-*.bin; do
   cp "$bin" "$fw/$(basename "$bin")"
 done
 shopt -u nullglob
 
 cd "$here"
-ENSEMBLE_VERSION="${ENSEMBLE_VERSION:-$(git -C "$repo" describe --tags --always 2>/dev/null || echo dev)}" \
+ONDAIRE_VERSION="${ONDAIRE_VERSION:-$(git -C "$repo" describe --tags --always 2>/dev/null || echo dev)}" \
   node build.mjs

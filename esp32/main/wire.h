@@ -1,4 +1,4 @@
-// wire.h — the ensemble v2 on-wire protocol (magic 0xE5), mirrored byte-for-byte
+// wire.h — the ondaire v2 on-wire protocol (magic 0xE5), mirrored byte-for-byte
 // from internal/stream/wire.go and specified in docs/developer/player-protocol.md. All
 // multi-byte fields are big-endian. Receivers ignore unknown packet types and
 // drop datagrams whose first byte != 0xE5.

@@ -1,15 +1,15 @@
-# Ensemble master — example deployment. Full guide: ../QUICKSTART.md
+# Ondaire master — example deployment. Full guide: ../QUICKSTART.md
 #
 #   docker compose -f docker/docker-compose.yml up -d
 #
 services:
-  ensemble:
+  ondaire:
     # Pull the published image, or build locally (uncomment `build:`).
-    image: harbor.rand0m.me/public/ensemble:latest
+    image: harbor.rand0m.me/public/ondaire:latest
     # build:
     #   context: ..
     #   dockerfile: docker/Dockerfile
-    container_name: ensemble-master
+    container_name: ondaire-master
     restart: unless-stopped
 
     # Host networking is REQUIRED for a working cluster: playback nodes discover
@@ -20,18 +20,18 @@ services:
     network_mode: host
 
     environment:
-      ENSEMBLE_ROLE: master          # this image is master-only
-      ENSEMBLE_MEDIA_DIR: /media
-      ENSEMBLE_DATA_DIR: /data
-      # ENSEMBLE_LOG: info           # debug | info | warn | error
+      ONDAIRE_ROLE: master          # this image is master-only
+      ONDAIRE_MEDIA_DIR: /media
+      ONDAIRE_DATA_DIR: /data
+      # ONDAIRE_LOG: info           # debug | info | warn | error
 
-    # Sets the display name + the Spotify device name ("ensemble living-room").
+    # Sets the display name + the Spotify device name ("ondaire living-room").
     # First start only; afterwards the name lives in /data/node.json.
     command: ["--name", "living-room"]
 
     volumes:
       - /srv/music:/media:ro         # your library — READ-ONLY
-      - ensemble-data:/data          # node.json, cluster.json, go-librespot creds + FIFO — READ-WRITE
+      - ondaire-data:/data          # node.json, cluster.json, go-librespot creds + FIFO — READ-WRITE
 
 volumes:
-  ensemble-data:
+  ondaire-data:

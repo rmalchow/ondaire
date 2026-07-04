@@ -14,7 +14,7 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
 # Board selection (boards/board.h + default pin map).
-CONFIG_ENSEMBLE_BOARD_ESP32S3_LOUD=y
+CONFIG_ONDAIRE_BOARD_ESP32S3_LOUD=y
 
 # PSRAM: octal, auto-size, 80 MHz (players are PSRAM-only — docs/developer/esp32.md §3.1).
 CONFIG_SPIRAM=y

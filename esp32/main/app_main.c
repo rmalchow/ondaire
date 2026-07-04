@@ -1,4 +1,4 @@
-// app_main.c — ensemble playback node entry point. Brings up config + local control
+// app_main.c — ondaire playback node entry point. Brings up config + local control
 // (encoder, USB console) so a board is always configurable over USB. If Wi-Fi is
 // provisioned it connects (bounded wait); on success it starts the audio pipeline +
 // the data plane (net_audio) + the v2 control plane (control) + the mDNS advert, then
@@ -70,7 +70,7 @@ void app_main(void) {
 
     ens_config_t *cfg = config_load();
     char idhex[33]; config_node_id_hex(idhex);
-    ESP_LOGI(TAG, "ensemble playback node — id=%s name=%s", idhex, cfg->name);
+    ESP_LOGI(TAG, "ondaire playback node — id=%s name=%s", idhex, cfg->name);
 
     clock_init();
 
@@ -88,7 +88,7 @@ void app_main(void) {
 
     // Provisioned and connected → normal audio path. Bounded wait so a board whose
     // stored AP is gone doesn't block here forever; on timeout we fall into the portal.
-    if (have_wifi && netif_wait_ip(CONFIG_ENSEMBLE_STA_CONNECT_TIMEOUT_MS)) {
+    if (have_wifi && netif_wait_ip(CONFIG_ONDAIRE_STA_CONNECT_TIMEOUT_MS)) {
         xTaskCreate(services_task, "services", 3072, NULL, 5, NULL);
         return;
     }
@@ -98,7 +98,7 @@ void app_main(void) {
     // the node goes inert; the USB console stays live as the wired fallback.
     if (have_wifi) {
         ESP_LOGW(TAG, "no IP after %d ms — opening Wi-Fi captive portal",
-                 CONFIG_ENSEMBLE_STA_CONNECT_TIMEOUT_MS);
+                 CONFIG_ONDAIRE_STA_CONNECT_TIMEOUT_MS);
         provision_start(true);    // STA already inited; add the AP alongside it
     } else {
         ESP_LOGW(TAG, "no Wi-Fi configured — opening captive portal "

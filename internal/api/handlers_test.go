@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // snapWith builds a snapshot where self is in a group with the given master and

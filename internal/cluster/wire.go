@@ -6,7 +6,7 @@ import (
 
 	"github.com/hashicorp/memberlist"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 // kind tags a NotifyMsg broadcast payload (first byte before the JSON).

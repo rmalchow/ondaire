@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/api"
+	"ondaire/internal/api"
 )
 
 // --- helpers ---------------------------------------------------------------

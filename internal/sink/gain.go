@@ -5,7 +5,7 @@ import (
 	"math"
 	"sync/atomic"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // gainStage applies a per-node software volume (D35) as the LAST stage before

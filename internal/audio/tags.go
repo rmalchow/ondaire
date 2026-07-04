@@ -9,7 +9,7 @@ import (
 
 	"github.com/dhowden/tag"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 // ReadTags reads embedded media tags (ID3v1/v2, FLAC/Vorbis, MP4, OGG) from r

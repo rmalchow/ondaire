@@ -13,7 +13,7 @@ import (
 
 // placeholderSentinel marks the committed dist/index.html placeholder (S). When
 // present, the UI isn't built yet; we still serve it and log a warning once.
-const placeholderSentinel = "ensemble-placeholder"
+const placeholderSentinel = "ondaire-placeholder"
 
 // spaState holds the SPA file server + index bytes, built once at New.
 type spaState struct {

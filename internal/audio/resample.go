@@ -1,6 +1,6 @@
 package audio
 
-import "ensemble/internal/stream"
+import "ondaire/internal/stream"
 
 // resampler does linear interpolation from inRate to 48000 on interleaved
 // stereo int16 (it runs AFTER mono→stereo duplication, so it is always

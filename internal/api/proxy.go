@@ -10,14 +10,14 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 const (
 	// proxiedHeader marks a one-hop proxied request (§9.3).
-	proxiedHeader = "X-Ensemble-Proxied"
+	proxiedHeader = "X-Ondaire-Proxied"
 	// fromHeader carries the originating node id so the target can Observe it.
-	fromHeader = "X-Ensemble-From"
+	fromHeader = "X-Ondaire-From"
 )
 
 // reservedSegs are literal /api routes that are never node ids/names (§9.3).

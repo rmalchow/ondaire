@@ -9,7 +9,7 @@ Run from esp32/amp/:  python3 gen_symbols.py
 
 HDR = '''(kicad_symbol_lib
 \t(version 20251024)
-\t(generator "ensemble-amp-gen")
+\t(generator "ondaire-amp-gen")
 \t(generator_version "10.0")
 '''
 

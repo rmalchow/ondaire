@@ -14,9 +14,9 @@ package playback
 import (
 	"net/netip"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
+	"ondaire/internal/stream"
 )
 
 // Player is the verb interface every playout front-end drives (D54/D61,

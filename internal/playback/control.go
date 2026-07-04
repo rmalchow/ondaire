@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // statusInterval is the STATUS heartbeat cadence (PLAYER §6.3).

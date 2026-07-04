@@ -3,7 +3,7 @@ package cluster
 import (
 	"sync"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 // liveness tracks alive/dead + lastSeen, fed by EventDelegate. Separate from the

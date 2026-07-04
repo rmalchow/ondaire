@@ -1,5 +1,5 @@
 # Standalone DAC wiring bench test — plays a continuous sine tone over I2S using
-# the same pins/config as the ensemble player (board_esp32s3_supermini.h).
+# the same pins/config as the ondaire player (board_esp32s3_supermini.h).
 # Not part of the firmware; build/flash it to verify a PCM5102A is wired right.
 #
 #   cd esp32/tools/dac-tone

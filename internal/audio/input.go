@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // inputSource is a live-paced source over an exec-captured raw s16le pipe

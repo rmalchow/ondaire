@@ -3,7 +3,7 @@ package cluster
 import (
 	"testing"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 func nodeRec(nid id.ID, ver uint64, name string) *NodeRecord {

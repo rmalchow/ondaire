@@ -1,4 +1,4 @@
-# ensemble
+# ondaire
 
 **Self-organizing multiroom audio.** One small binary per device. Start it on
 two machines and they find each other, form a group, and play the same music
@@ -6,7 +6,7 @@ in sync — no server, no database, no config files, no cloud.
 
 ```
 ┌── kitchen ──┐   ┌── living room ──┐   ┌── bedroom ──┐
-│  ensemble   │◀─▶│    ensemble     │◀─▶│  ensemble   │
+│  ondaire   │◀─▶│    ondaire     │◀─▶│  ondaire   │
 └─────────────┘   └────────┬────────┘   └─────────────┘
                            │ plays a track from its library,
                            ▼ streams it in lock-step to the whole group
@@ -41,10 +41,10 @@ in sync — no server, no database, no config files, no cloud.
 Needs Go 1.26 and Node (for the UI). Pure-Go, statically-ish linked:
 
 ```sh
-git clone https://gitlab.rand0m.me/share/ensemble.git
-cd ensemble
+git clone https://gitlab.rand0m.me/share/ondaire.git
+cd ondaire
 ./scripts/build.sh --ui     # builds the SPA, then linux amd64 + arm64 into bin/,
-                            # plus ./ensemble for this host
+                            # plus ./ondaire for this host
 ```
 
 Prebuilt binaries are attached to each [tagged release](RELEASING.md).
@@ -58,7 +58,7 @@ built in) plus a Compose example live in [`docker/`](docker/) — see the
 On each device:
 
 ```sh
-./ensemble
+./ondaire
 ```
 
 That's it — defaults are sensible. The node mints a permanent ID on first run,
@@ -117,7 +117,7 @@ top-right).
 
 ## Configuration
 
-Flags (each has an `ENSEMBLE_*` env equivalent); all are optional:
+Flags (each has an `ONDAIRE_*` env equivalent); all are optional:
 
 | Flag | Default | What |
 |------|---------|------|
@@ -133,7 +133,7 @@ Flags (each has an `ENSEMBLE_*` env equivalent); all are optional:
 
 Ports are **bind-or-increment** *when left at the default*: if one is taken the
 node tries the next and advertises whatever it actually bound. A port you **set
-explicitly** (flag or `ENSEMBLE_*_PORT` env) is **pinned** — it binds that exact
+explicitly** (flag or `ONDAIRE_*_PORT` env) is **pinned** — it binds that exact
 number or the node exits with a clear error, so a misconfiguration surfaces
 immediately instead of silently drifting.
 
@@ -141,12 +141,12 @@ Env-only knobs:
 
 | Env | Default | What |
 |-----|---------|------|
-| `ENSEMBLE_ALSA_LATENCY_MS` | `200` | ALSA device buffer (raise on a glitchy Pi) |
-| `ENSEMBLE_LOG` | `info` | log level (`debug` \| `info` \| `warn` \| `error`) |
+| `ONDAIRE_ALSA_LATENCY_MS` | `200` | ALSA device buffer (raise on a glitchy Pi) |
+| `ONDAIRE_LOG` | `info` | log level (`debug` \| `info` \| `warn` \| `error`) |
 
 `auto` picks the best available backend: **alsa → exec** (`pw-play`/`aplay`/…)
-**→ null**. Pass `-v` for debug logging; `ensemble run …` is accepted as an
-alias for `ensemble …`.
+**→ null**. Pass `-v` for debug logging; `ondaire run …` is accepted as an
+alias for `ondaire …`.
 
 For a hermetic setup without mDNS (e.g. tests, or a segmented network), use
 `--no-mdns` with `--join <host:gossipPort>,…` seeds.

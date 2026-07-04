@@ -52,14 +52,14 @@ mDNS additionally uses standard multicast UDP 5353. A receive-only player also b
 **`CONTROL_PORT`** (default 9300) it advertises over mDNS, for master→player commands.
 
 Configuration is via flags with env-var fallbacks (`--http-port` /
-`ENSEMBLE_HTTP_PORT`, etc.); see [`user/config-reference.md`](../user/config-reference.md)
+`ONDAIRE_HTTP_PORT`, etc.); see [`user/config-reference.md`](../user/config-reference.md)
 for the full table.
 
 ## Discovery
 
 Two mechanisms, both always on:
 
-1. **mDNS** (`grandcat/zeroconf`): every node registers service `_ensemble._tcp` with
+1. **mDNS** (`grandcat/zeroconf`): every node registers service `_ondaire._tcp` with
    TXT records (`id`, `role`, the port set, `name`, and — for players — capability keys).
    Every node browses continuously; any peer not yet in the gossip cluster is joined via
    its discovered address. A receive-only player **announces over mDNS but never

@@ -1,0 +1,12 @@
+{
+  "domain": "ondaire",
+  "name": "ondaire",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://gitlab.rand0m.me/share/ondaire/-/tree/main/integrations/homeassistant",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "0.1.0",
+  "zeroconf": ["_ondaire._tcp.local."]
+}

@@ -3,8 +3,8 @@ package cluster
 import (
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // groupPlayback finds the playback record for the group mastered by master.

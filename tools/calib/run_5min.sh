@@ -6,7 +6,7 @@
 # calibrated) per playback node — that is the primary convergence signal; the WAV
 # is the acoustic cross-check. Run in background.
 set -u
-cd /home/rm/Git/gitlab.rand0m.me/share/ensemble
+cd /home/rm/Git/gitlab.rand0m.me/share/ondaire
 MASTER=http://192.168.71.63:8080
 WAV=tools/calib/results/tones_5min.wav
 LOG=tools/calib/results/tones_stats_5min.jsonl

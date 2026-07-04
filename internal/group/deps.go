@@ -3,9 +3,9 @@ package group
 import (
 	"net/netip"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
+	"ondaire/internal/stream"
 )
 
 // This file declares the minimal consumer-side interfaces H needs from its

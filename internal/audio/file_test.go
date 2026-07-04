@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 func TestFileTraversalRejected(t *testing.T) {

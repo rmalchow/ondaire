@@ -1,4 +1,4 @@
-// Command player is a protocol-minimal, receive-only ensemble audio
+// Command player is a protocol-minimal, receive-only ondaire audio
 // participant — the standalone reference implementation for docs/developer/player-protocol.md.
 //
 // It speaks ONLY the wire protocol (magic 0xE5): it subscribes to a master's
@@ -11,7 +11,7 @@
 // This is the BENCH/REFERENCE profile, not a deployed player: it uses the
 // self-directed modes (PLAYER.md §11) — it does NOT advertise over mDNS and is
 // not driven by / visible in the cluster UI. A real deployed player is the
-// in-binary Player (`ensemble --role playback`, internal/playback) or the ESP32
+// in-binary Player (`ondaire --role playback`, internal/playback) or the ESP32
 // firmware, both of which ARE mDNS-discovered and master-driven. Use this for
 // protocol conformance and bring-up only.
 //
@@ -626,7 +626,7 @@ func (c *clockFollower) genFor() uint32 {
 func main() {
 	log.SetFlags(log.Ltime)
 
-	node := flag.String("node", "", "discovery: ensemble node host:httpPort (poll /api/cluster)")
+	node := flag.String("node", "", "discovery: ondaire node host:httpPort (poll /api/cluster)")
 	source := flag.String("source", "", "fixed: master SOURCE ip:port (with --clock)")
 	clockAddr := flag.String("clock", "", "fixed: master STREAM/clock ip:port (with --source)")
 	group := flag.String("group", "", "group id or name to follow (default: first non-empty)")

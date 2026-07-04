@@ -4,8 +4,8 @@ import (
 	"log/slog"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/sink/device"
+	"ondaire/internal/contracts"
+	"ondaire/internal/sink/device"
 )
 
 // RestartFunc is the watchdog's escape hatch (§8.6). When playout starves for

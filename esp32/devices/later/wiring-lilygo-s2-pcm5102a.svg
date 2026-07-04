@@ -16,7 +16,7 @@
 
   <rect x="0" y="0" width="760" height="520" fill="#0a0c10"/>
   <text x="24" y="34" class="title">Wiring — LilyGo T8 ESP32-S2  →  PCM5102A I2S DAC</text>
-  <text x="24" y="54" class="cap">ensemble playback node · firmware defaults (board_esp32s2.h) · all pins re-provisionable over USB</text>
+  <text x="24" y="54" class="cap">ondaire playback node · firmware defaults (board_esp32s2.h) · all pins re-provisionable over USB</text>
 
   <!-- LilyGo board -->
   <rect x="40" y="90" width="240" height="370" rx="12" class="board"/>

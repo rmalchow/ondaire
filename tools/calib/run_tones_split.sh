@@ -4,7 +4,7 @@
 # run1) or a per-session servo-convergence transient (run2 repeats run1). Each run
 # records the mic + a 1 Hz stats poll with a PLAY marker, to separate files.
 set -u
-cd /home/rm/Git/gitlab.rand0m.me/share/ensemble
+cd /home/rm/Git/gitlab.rand0m.me/share/ondaire
 MASTER=http://192.168.71.63:8080
 DUR=185        # ~3 min record
 POLLS=180

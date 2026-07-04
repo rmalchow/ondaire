@@ -1,6 +1,6 @@
 package api
 
-import "ensemble/internal/contracts"
+import "ondaire/internal/contracts"
 
 // --- GET /api/status (D19) ------------------------------------
 

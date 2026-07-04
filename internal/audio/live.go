@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // readaheadFrames bounds the producer channel (~1 s at 20 ms/frame).

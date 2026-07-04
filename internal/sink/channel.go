@@ -3,7 +3,7 @@ package sink
 import (
 	"sync/atomic"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // Channel modes for dual-mono playout.

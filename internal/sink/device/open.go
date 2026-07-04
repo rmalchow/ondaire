@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Open resolves an ENSEMBLE_OUTPUT-style spec into a single Sink (D2/D27).
+// Open resolves an ONDAIRE_OUTPUT-style spec into a single Sink (D2/D27).
 //
 //	"" | "auto"      -> best available: alsa -> exec -> null (never errors)
 //	"alsa"           -> alsa sink; errors if unregistered or device won't open

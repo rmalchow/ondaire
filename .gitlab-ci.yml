@@ -90,7 +90,7 @@ e2e:
     - LDFLAGS="-s -w -X main.version=$VER"
     - if [ -n "${INTERP:-}" ]; then LDFLAGS="$LDFLAGS -I $INTERP"; fi
     - go build -trimpath -ldflags "$LDFLAGS"
-        -o "bin/ensemble-$SUFFIX" ./cmd/ensemble
+        -o "bin/ondaire-$SUFFIX" ./cmd/ondaire
     # Hand this job's id to the release stage (dotenv): release asset links
     # must address the EXACT build job — the by-ref artifacts endpoint resolves
     # branch/tag names only, never a commit SHA.
@@ -106,7 +106,7 @@ build:
       when: never
     - when: on_success
   artifacts:
-    name: "ensemble-${CI_COMMIT_REF_SLUG}"
+    name: "ondaire-${CI_COMMIT_REF_SLUG}"
     paths: [bin/]
     reports:
       dotenv: build.env
@@ -117,7 +117,7 @@ build-release:
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
   artifacts:
-    name: "ensemble-${CI_COMMIT_TAG}"
+    name: "ondaire-${CI_COMMIT_TAG}"
     paths: [bin/]
     reports:
       dotenv: build.env
@@ -125,7 +125,7 @@ build-release:
 
 # 3b) ESP32 playback-node firmware. Built in the official ESP-IDF image (it has
 # the toolchain + cmake/ninja/patch) — one matrix job per board class, each
-# producing a single merged flash image (fw/ensemble-fw-<board>.bin) the web
+# producing a single merged flash image (fw/ondaire-fw-<board>.bin) the web
 # flasher serves. Branch/MR pipelines build only when esp32/** changed; tag
 # pipelines always build (firmware-release, never-expiring artifacts for the
 # release links + the site image). See esp32/ and docs/developer/esp32.md.
@@ -164,12 +164,12 @@ build-release:
     - IDFARGS="-B build-$BOARD -DBOARD=$BOARD -DSDKCONFIG=build-$BOARD/sdkconfig"
     - idf.py $IDFARGS set-target "$TARGET"
     - idf.py $IDFARGS build
-    - idf.py $IDFARGS merge-bin -o "ensemble-fw-$BOARD.bin"   # → build-$BOARD/
+    - idf.py $IDFARGS merge-bin -o "ondaire-fw-$BOARD.bin"   # → build-$BOARD/
     - mkdir -p ../fw
     # Merged image (flash-all, offset 0) + the app-only image (keep-config, the
     # ota_0 app at 0x20000) the flasher writes for a config-preserving update.
-    - cp "build-$BOARD/ensemble-fw-$BOARD.bin" "../fw/ensemble-fw-$BOARD.bin"
-    - cp "build-$BOARD/ensemble-node.bin" "../fw/ensemble-app-$BOARD.bin"
+    - cp "build-$BOARD/ondaire-fw-$BOARD.bin" "../fw/ondaire-fw-$BOARD.bin"
+    - cp "build-$BOARD/ondaire-node.bin" "../fw/ondaire-app-$BOARD.bin"
     - cd ..
     # Per-board job id for the release asset links (dotenv; by-ref artifacts
     # endpoint resolves names only, never a SHA — same reason as the Go build).
@@ -187,7 +187,7 @@ firmware:
     - if: $CI_COMMIT_BRANCH
       changes: [esp32/**/*]
   artifacts:
-    name: "ensemble-fw-${CI_COMMIT_REF_SLUG}"
+    name: "ondaire-fw-${CI_COMMIT_REF_SLUG}"
     paths: [fw/]
     reports:
       dotenv: firmware.env
@@ -198,13 +198,13 @@ firmware-release:
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
   artifacts:
-    name: "ensemble-fw-${CI_COMMIT_TAG}"
+    name: "ondaire-fw-${CI_COMMIT_TAG}"
     paths: [fw/]
     reports:
       dotenv: firmware.env
     expire_in: never
 
-# 3c) Multi-arch (amd64 + arm64) Docker image of an ensemble MASTER, Spotify built
+# 3c) Multi-arch (amd64 + arm64) Docker image of an ondaire MASTER, Spotify built
 # in. REUSES the per-arch binaries from the build stage (already version-stamped +
 # SPA-embedded) rather than recompiling — the Dockerfile just drops the right one
 # onto the go-librespot base. Pushes :dev on the default branch, and :<tag>/:latest
@@ -226,7 +226,7 @@ docker:
   # over the default unix socket. binfmt + a docker-container buildx builder give
   # the multi-platform manifest.
   variables:
-    IMAGE: "harbor.rand0m.me/public/ensemble"
+    IMAGE: "harbor.rand0m.me/public/ondaire"
     PLATFORMS: "linux/amd64,linux/arm64"
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
@@ -238,8 +238,8 @@ docker:
     - docker run --privileged --rm tonistiigi/binfmt --install all
     # Fresh docker-container builder (the default "docker" driver can't emit a
     # multi-platform manifest). Idempotent across the shared host daemon.
-    - docker buildx rm ensemble-builder >/dev/null 2>&1 || true
-    - docker buildx create --use --name ensemble-builder
+    - docker buildx rm ondaire-builder >/dev/null 2>&1 || true
+    - docker buildx create --use --name ondaire-builder
   script:
     # main → "dev"; release tag → the tag itself (also moves :latest). The binary
     # carries its own -X main.version stamp from the build job, so no build-arg.
@@ -252,7 +252,7 @@ docker:
       --push
       .
   after_script:
-    - docker buildx rm ensemble-builder >/dev/null 2>&1 || true
+    - docker buildx rm ondaire-builder >/dev/null 2>&1 || true
   tags:
     - shared
 
@@ -266,7 +266,7 @@ docker-site:
   # ESP32 firmware images (flasher page); all optional so the site still builds
   # when a given producer job didn't run this pipeline.
   variables:
-    IMAGE: "harbor.rand0m.me/public/ensemble-site"
+    IMAGE: "harbor.rand0m.me/public/ondaire-site"
     PLATFORMS: "linux/amd64,linux/arm64"
   needs:
     - job: build
@@ -293,15 +293,15 @@ docker-site:
   script:
     - VER="${CI_COMMIT_TAG:-dev}"
     - TAGS="-t $IMAGE:$VER"; if [ -n "$CI_COMMIT_TAG" ]; then TAGS="$TAGS -t $IMAGE:latest"; fi
-    # Stage the prebuilt binaries as tar.gz (renamed to `ensemble` inside) where
+    # Stage the prebuilt binaries as tar.gz (renamed to `ondaire` inside) where
     # build.mjs hashes them into the download page, and the installer for /get.sh.
     - |
       mkdir -p site/src/assets/downloads
-      for bin in bin/ensemble-linux-*; do
+      for bin in bin/ondaire-linux-*; do
         name=$(basename "$bin")
         tmp=$(mktemp -d)
-        cp "$bin" "$tmp/ensemble"
-        tar -czf "site/src/assets/downloads/$name.tar.gz" -C "$tmp" ensemble
+        cp "$bin" "$tmp/ondaire"
+        tar -czf "site/src/assets/downloads/$name.tar.gz" -C "$tmp" ondaire
         rm -rf "$tmp"
       done
       cp scripts/get.sh site/get.sh
@@ -309,8 +309,8 @@ docker-site:
     # flasher page + ESP Web Tools manifest (absent if no firmware job ran).
     - |
       mkdir -p site/src/assets/firmware
-      cp fw/ensemble-fw-*.bin site/src/assets/firmware/ 2>/dev/null || true
-      cp fw/ensemble-app-*.bin site/src/assets/firmware/ 2>/dev/null || true
+      cp fw/ondaire-fw-*.bin site/src/assets/firmware/ 2>/dev/null || true
+      cp fw/ondaire-app-*.bin site/src/assets/firmware/ 2>/dev/null || true
     - docker buildx build --builder site-builder
       --platform "$PLATFORMS"
       --build-arg VER="$VER"
@@ -323,7 +323,7 @@ docker-site:
   tags:
     - shared
 
-# 3e) Home Assistant custom integration — zip custom_components/ensemble for
+# 3e) Home Assistant custom integration — zip custom_components/ondaire for
 # HACS / manual install. Tags only; never-expiring artifact (grab it from the
 # release / job page and unzip into <config>). No build step: it's pure Python.
 homeassistant:
@@ -335,15 +335,15 @@ homeassistant:
   script:
     - apk add --no-cache zip
     - cd integrations/homeassistant
-    - zip -r "$CI_PROJECT_DIR/ensemble-hacs.zip" custom_components/ensemble hacs.json README.md
+    - zip -r "$CI_PROJECT_DIR/ondaire-hacs.zip" custom_components/ondaire hacs.json README.md
   artifacts:
-    name: "ensemble-hacs-${CI_COMMIT_TAG}"
-    paths: [ensemble-hacs.zip]
+    name: "ondaire-hacs-${CI_COMMIT_TAG}"
+    paths: [ondaire-hacs.zip]
     expire_in: never
   tags:
     - shared
 
-# The Android companion app lives in its own repo (share/ensemble-android) and
+# The Android companion app lives in its own repo (share/ondaire-android) and
 # builds/releases its APK there.
 
 # 4) Changelog for a tagged release: commits since the previous v* tag.
@@ -371,7 +371,7 @@ changelog:
         echo
         echo "Pure-Go binaries for linux/amd64 + linux/arm64 (64-bit only; use Raspberry Pi OS 64-bit on a Pi 3/4/5/Zero 2)."
         echo "Optional libraries (libopus, libasound) are loaded at runtime."
-        echo "Android companion APK: see the share/ensemble-android project."
+        echo "Android companion APK: see the share/ondaire-android project."
       } > release-notes.md
     - cat release-notes.md
   artifacts:
@@ -403,18 +403,18 @@ release:
   script: [ 'echo "Releasing $CI_COMMIT_TAG (amd64 $BUILD_JOB_ID_AMD64, arm64 $BUILD_JOB_ID_ARM64)"' ]
   release:
     tag_name: "$CI_COMMIT_TAG"
-    name: "Ensemble $CI_COMMIT_TAG"
+    name: "Ondaire $CI_COMMIT_TAG"
     description: "./release-notes.md"
     assets:
       links:
-        - name: "ensemble-linux-amd64 ($CI_COMMIT_TAG)"
-          url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_AMD64/artifacts/raw/bin/ensemble-linux-amd64"
-        - name: "ensemble-linux-arm64 ($CI_COMMIT_TAG)"
-          url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_ARM64/artifacts/raw/bin/ensemble-linux-arm64"
+        - name: "ondaire-linux-amd64 ($CI_COMMIT_TAG)"
+          url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_AMD64/artifacts/raw/bin/ondaire-linux-amd64"
+        - name: "ondaire-linux-arm64 ($CI_COMMIT_TAG)"
+          url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_ARM64/artifacts/raw/bin/ondaire-linux-arm64"
   tags:
     - shared
 
-# 6) Mirror the release to GitHub (github.com/rmalchow/ensemble) — TAGS ONLY.
+# 6) Mirror the release to GitHub (github.com/rmalchow/ondaire) — TAGS ONLY.
 # Runs only after the full test/build/release stages succeed (no `needs`, so it
 # waits on the prior stages), so a broken tag never reaches GitHub. Pushes the
 # tag's commit to GitHub `main` and the tag itself; histories already match, so
@@ -428,7 +428,7 @@ github-mirror:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
   variables:
     GIT_DEPTH: "0"   # full history so the fast-forward push has every ancestor
-    GITHUB_REPO: "github.com/rmalchow/ensemble.git"
+    GITHUB_REPO: "github.com/rmalchow/ondaire.git"
   script:
     - apk add --no-cache git
     - git remote remove github 2>/dev/null || true

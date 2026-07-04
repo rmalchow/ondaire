@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 // spotifyInputRate is the PCM sample rate go-librespot's pipe backend emits for

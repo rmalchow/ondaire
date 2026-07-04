@@ -1,23 +1,23 @@
-// All marketing copy for the ensemble site lives here. Edit this file and run
+// All marketing copy for the ondaire site lives here. Edit this file and run
 // `node build.mjs` (or `npm run build`) to regenerate site/dist/. No other file
 // needs to change to update the words on the page.
 
-const REPO = "https://gitlab.rand0m.me/share/ensemble";
-const GITHUB = "https://github.com/rmalchow/ensemble";
+const REPO = "https://gitlab.rand0m.me/share/ondaire";
+const GITHUB = "https://github.com/rmalchow/ondaire";
 const RELEASES = `${REPO}/-/releases`;
 const DOC = (f) => `${REPO}/-/blob/main/docs/user/${f}`;
 const GUIDE = DOC("README.md");
 
 export const content = {
   meta: {
-    title: "ensemble — synchronized multiroom audio",
+    title: "ondaire — synchronized multiroom audio",
     description:
       "Open-source, self-hosted multiroom audio. Drop one small binary on each device — they find each other and play in perfect sync. No cloud, no accounts, no config.",
     url: "",
     themeColor: "#0a0c10",
   },
 
-  brand: { name: "ensemble" },
+  brand: { name: "ondaire" },
 
   // Header nav now points at the three topic pages the home blocks link to, plus
   // the source. download.html is the CTA; the "Flash a node" page (flash.html) is
@@ -35,12 +35,12 @@ export const content = {
     // each line is rendered on its own row
     title: ["Every room.", "One sound.", "Zero fuss."],
     lede:
-      "ensemble is self-hosted, synchronized audio for your whole home. Drop one small binary on each device — they discover each other and play in perfect sync. No cloud, no accounts, no config files.",
+      "ondaire is self-hosted, synchronized audio for your whole home. Drop one small binary on each device — they discover each other and play in perfect sync. No cloud, no accounts, no config files.",
     primary: { label: "Get it", href: "download.html" },
     secondary: { label: "View source", href: GITHUB },
     shot: {
       src: "assets/img/overview.png",
-      alt: "The ensemble web app on a phone: a playing room group with cover art, now-playing track, group volume and per-speaker volumes.",
+      alt: "The ondaire web app on a phone: a playing room group with cover art, now-playing track, group volume and per-speaker volumes.",
     },
   },
 
@@ -57,8 +57,8 @@ export const content = {
         cta: { label: "See all install options", href: "install.html" },
         // Rendered as a terminal window rather than a screenshot.
         term: [
-          { p: "$", t: "./ensemble" },
-          { c: "ensemble — node “living-room”" },
+          { p: "$", t: "./ondaire" },
+          { c: "ondaire — node “living-room”" },
           { c: "mdns:  discovered 2 peers on the LAN" },
           { c: "http:  UI at http://living-room:8080" },
           { c: "audio: aligned to shared clock ✓" },
@@ -71,7 +71,7 @@ export const content = {
           "Every node serves the same web app and proxies to the rest — open it from any phone or browser, with nothing to install. Group rooms, balance volume per speaker, browse your library, share a queue anyone can add to, watch live per-node stats, and reskin the whole thing with a single click.",
         cta: { label: "Tour the interface", href: "ui.html" },
         img: "assets/img/room-expanded.png",
-        alt: "The ensemble web app showing a room’s player roster and the media browser.",
+        alt: "The ondaire web app showing a room’s player roster and the media browser.",
         // Portrait phone shot — frame it like the hero rather than full-bleed.
         phone: true,
       },
@@ -137,7 +137,7 @@ export const content = {
         kicker: "Spotify Connect",
         title: "Multi-room Spotify",
         body:
-          "Expose named Connect devices that each map to a set of speakers. Pick one in the Spotify app and ensemble forms that group and plays — built in via go-librespot.",
+          "Expose named Connect devices that each map to a set of speakers. Pick one in the Spotify app and ondaire forms that group and plays — built in via go-librespot.",
       },
       {
         page: "nodes",
@@ -159,7 +159,7 @@ export const content = {
     intro:
       "The control app is fully themed — a single switch re-skins everything, fonts and all. A few built in, from a warm studio console to a pixel-art throwback.",
     items: [
-      { name: "mint", img: "assets/img/themes/mint.png", blurb: "The classic Ensemble identity." },
+      { name: "mint", img: "assets/img/themes/mint.png", blurb: "The classic Ondaire identity." },
       { name: "studio", img: "assets/img/themes/studio.png", blurb: "Warm tube-amp dark on walnut veneer." },
       { name: "nocturne", img: "assets/img/themes/nocturne.png", blurb: "Indigo night with a drifting starfield." },
       { name: "paper", img: "assets/img/themes/paper.png", blurb: "Bright, editorial light mode." },
@@ -174,7 +174,7 @@ export const content = {
   // SHA-256s live on the separate download.html (linked from the first method).
   install: {
     eyebrow: "Install",
-    title: "Run ensemble anywhere.",
+    title: "Run ondaire anywhere.",
     intro:
       "One small, static binary per device — pure Go, no runtime, no dependencies. Pick the path that fits your setup; every one ends with a node on your network in a few minutes.",
     methods: [
@@ -183,15 +183,15 @@ export const content = {
         title: "Just run it",
         body:
           "Grab the build for your hardware, unpack it, and run it. No flags required — it picks sensible defaults, finds your audio device, and joins the cluster on its own. That’s the whole setup.",
-        code: "tar -xzf ensemble-linux-arm64.tar.gz\n./ensemble",
+        code: "tar -xzf ondaire-linux-arm64.tar.gz\n./ondaire",
         cta: { label: "Download a build", href: "download.html" },
       },
       {
         tag: "fastest",
         title: "Guided installer",
         body:
-          "The quickest way onto a Linux box: a guided one-liner. It detects your OS and CPU, downloads the matching build, then walks you through the optional extras — Spotify Connect and a boot-time service — and sets them up. Installs into /usr/local/lib/ensemble; re-run any time to update.",
-        code: "curl -fsSL https://ensemble.rand0m.me/get.sh | sudo bash",
+          "The quickest way onto a Linux box: a guided one-liner. It detects your OS and CPU, downloads the matching build, then walks you through the optional extras — Spotify Connect and a boot-time service — and sets them up. Installs into /usr/local/lib/ondaire; re-run any time to update.",
+        code: "curl -fsSL https://ondaire.rand0m.me/get.sh | sudo bash",
         copy: true,
         doc: { label: "What the installer does", href: `${REPO}/-/blob/main/scripts/get.sh` },
       },
@@ -203,8 +203,8 @@ export const content = {
         code: [
           "docker run -d --network host \\",
           "  -v /srv/music:/media:ro \\",
-          "  -v ensemble-data:/data \\",
-          "  harbor.rand0m.me/public/ensemble:latest --name living-room",
+          "  -v ondaire-data:/data \\",
+          "  harbor.rand0m.me/public/ondaire:latest --name living-room",
         ].join("\n"),
         copy: true,
         note:
@@ -214,14 +214,14 @@ export const content = {
         tag: "always on",
         title: "Start at boot (systemd)",
         body:
-          "Want ensemble to come up with the machine and restart on failure? The guided installer offers to write and enable a systemd service for you — no hand-editing unit files. Choose “yes” when it asks, or set it up later following the user guide.",
+          "Want ondaire to come up with the machine and restart on failure? The guided installer offers to write and enable a systemd service for you — no hand-editing unit files. Choose “yes” when it asks, or set it up later following the user guide.",
         cta: { label: "Running it as a service", href: DOC("running.md") },
       },
       {
         tag: "diy",
         title: "ESP32 player",
         body:
-          "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ensemble player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Tested on the ESP32-S3 Super Mini and Waveshare ESP32-S3-Zero with a PCM5102A DAC.",
+          "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ondaire player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Tested on the ESP32-S3 Super Mini and Waveshare ESP32-S3-Zero with a PCM5102A DAC.",
         cta: { label: "Open the browser flasher", href: "flash.html" },
       },
     ],
@@ -242,7 +242,7 @@ export const content = {
 
   tech: {
     eyebrow: "Under The Hood",
-    title: "Playing in sync is hard. ensemble does the hard part.",
+    title: "Playing in sync is hard. ondaire does the hard part.",
     intro:
       "Getting two speakers to play the very same instant over flaky Wi-Fi means fighting both the network and physics at once — and then proving you actually won. Below are the four problems that pull rooms apart and the fix for each, followed by the measurements that back it up: first from a microphone in the room, then from the cluster’s own live telemetry. Four problems, four fixes:",
     items: [
@@ -386,7 +386,7 @@ export const content = {
         name: "Miles Davis",
         role: "Jazz · 1926–1991",
         quote:
-          "It’s not the notes you sync, it’s the ones you don’t. ensemble gets the silence right in all five rooms.",
+          "It’s not the notes you sync, it’s the ones you don’t. ondaire gets the silence right in all five rooms.",
         img: "assets/img/testimonials/miles-davis.jpg",
         credit: { author: "Tom Palumbo", license: "CC BY-SA 2.0", href: "https://commons.wikimedia.org/wiki/File:Miles_Davis_by_Palumbo.jpg" },
       },
@@ -449,9 +449,9 @@ export const content = {
   // fills in its SHA-256 + size. `docker` options carry a pull command instead.
   download: {
     eyebrow: "Download",
-    title: "Get ensemble for your hardware.",
+    title: "Get ondaire for your hardware.",
     intro:
-      "One small, static binary per device — pure Go, no runtime, no dependencies. Each archive is the build attached to the matching tagged release: verify its SHA-256, unpack it, and run ./ensemble. Prefer containers? Pull the master image with Spotify Connect built in.",
+      "One small, static binary per device — pure Go, no runtime, no dependencies. Each archive is the build attached to the matching tagged release: verify its SHA-256, unpack it, and run ./ondaire. Prefer containers? Pull the master image with Spotify Connect built in.",
     // Caveat rendered as a tip under the page intro: a uniform fleet syncs best.
     note:
       "For the tightest sync, use the same TYPE of player throughout — e.g. all Raspberry Pi nodes, or all ESP32 nodes. Mixed fleets work (the master equalizes each node's output latency), but identical hardware shares the same latency and clock behaviour, so it lines up best.",
@@ -461,7 +461,7 @@ export const content = {
       badge: "DIY",
       title: "ESP32 players",
       body:
-        "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ensemble player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Tested on the ESP32-S3 Super Mini and the Waveshare ESP32-S3-Zero (both PSRAM) with a PCM5102A DAC.",
+        "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ondaire player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Tested on the ESP32-S3 Super Mini and the Waveshare ESP32-S3-Zero (both PSRAM) with a PCM5102A DAC.",
       href: "flash.html",
       hrefLabel: "Open the browser flasher",
     },
@@ -470,8 +470,8 @@ export const content = {
     installer: {
       title: "Installer",
       body:
-        "The quickest way onto a Linux box: a guided one-liner. It detects your OS and CPU, downloads the matching ensemble build, then walks you through the optional extras — Spotify Connect (go-librespot) and a boot-time systemd service — and sets them up. Installs into /usr/local/lib/ensemble; re-run any time to update.",
-      code: "curl -fsSL https://ensemble.rand0m.me/get.sh | sudo bash",
+        "The quickest way onto a Linux box: a guided one-liner. It detects your OS and CPU, downloads the matching ondaire build, then walks you through the optional extras — Spotify Connect (go-librespot) and a boot-time systemd service — and sets them up. Installs into /usr/local/lib/ondaire; re-run any time to update.",
+      code: "curl -fsSL https://ondaire.rand0m.me/get.sh | sudo bash",
       // Expandable, annotated walkthrough of scripts/get.sh — its real flow with
       // section labels + explanatory comments (not the verbatim 256 lines).
       walkthrough: {
@@ -479,7 +479,7 @@ export const content = {
         hrefLabel: "Read the full get.sh",
         href: `${REPO}/-/blob/main/scripts/get.sh`,
         script: `#!/usr/bin/env bash
-#   curl -fsSL https://ensemble.rand0m.me/get.sh | sudo bash
+#   curl -fsSL https://ondaire.rand0m.me/get.sh | sudo bash
 set -euo pipefail
 
 # ── 1. Pre-flight ──────────────────────────────────────────────
@@ -494,10 +494,10 @@ case "$(uname -m)" in
 esac
 
 # ── 3. Download + install ──────────────────────────────────────
-# Binary lands in /usr/local/lib/ensemble, symlinked onto your PATH.
-fetch "$BASE/assets/downloads/ensemble-linux-$ARCH.tar.gz" | tar -xz
-install -m755 ensemble /usr/local/lib/ensemble/ensemble
-ln -sf  /usr/local/lib/ensemble/ensemble /usr/local/bin/ensemble
+# Binary lands in /usr/local/lib/ondaire, symlinked onto your PATH.
+fetch "$BASE/assets/downloads/ondaire-linux-$ARCH.tar.gz" | tar -xz
+install -m755 ondaire /usr/local/lib/ondaire/ondaire
+ln -sf  /usr/local/lib/ondaire/ondaire /usr/local/bin/ondaire
 
 # ── 4. Choose a role (prompts read the terminal, so they work
 #       even under  curl | bash) ─────────────────────────────────
@@ -508,13 +508,13 @@ else
 fi
 
 # ── 5. Spotify Connect — masters only, optional ────────────────
-# Fetches the matching go-librespot build alongside ensemble.
+# Fetches the matching go-librespot build alongside ondaire.
 [ "$ROLE" != playback ] && ask "Install Spotify Connect?" && install_go_librespot
 
 # ── 6. Boot service — optional ─────────────────────────────────
-# Writes /etc/systemd/system/ensemble.service and enables it, so
-# ensemble starts at boot and restarts on failure.
-ask "Start ensemble at boot (systemd)?" && install_systemd_unit
+# Writes /etc/systemd/system/ondaire.service and enables it, so
+# ondaire starts at boot and restarts on failure.
+ask "Start ondaire at boot (systemd)?" && install_systemd_unit
 
 # ── 7. Appliance hardening — optional, for an SD-card Pi ───────
 # Console-only (frees the audio card from the desktop), trims extra
@@ -530,16 +530,16 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         rec: "Raspberry Pi OS Lite (64-bit) on a Pi 3 / 4 / 5 or Zero 2, or any other arm64 Linux. 32-bit Pi OS is no longer supported.",
         arch: "linux · arm64",
         logos: ["raspberrypi"],
-        file: "assets/downloads/ensemble-linux-arm64.tar.gz",
+        file: "assets/downloads/ondaire-linux-arm64.tar.gz",
         note:
-          "Heads-up: Opus playback loads <strong>libopus</strong> at runtime. The Desktop image already has it; on a minimal Lite install that lacks it, add it with <code>sudo apt install libopus0</code> (uncompressed PCM works without it). Audio hardware that needs third-party drivers is out of ensemble's scope — get the card working in Linux first.",
+          "Heads-up: Opus playback loads <strong>libopus</strong> at runtime. The Desktop image already has it; on a minimal Lite install that lacks it, add it with <code>sudo apt install libopus0</code> (uncompressed PCM works without it). Audio hardware that needs third-party drivers is out of ondaire's scope — get the card working in Linux first.",
       },
       {
         name: "PC or server — x86-64",
         rec: "Any modern Linux distribution on a 64-bit Intel/AMD machine.",
         arch: "linux · amd64",
         logos: ["fedora", "ubuntu", "debian", "arch", "manjaro"],
-        file: "assets/downloads/ensemble-linux-amd64.tar.gz",
+        file: "assets/downloads/ondaire-linux-amd64.tar.gz",
       },
       {
         name: "Docker",
@@ -549,12 +549,12 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         docker: [
           "docker run -d --network host \\",
           "  -v /srv/music:/media:ro \\",
-          "  -v ensemble-data:/data \\",
-          "  harbor.rand0m.me/public/ensemble:latest --name living-room",
+          "  -v ondaire-data:/data \\",
+          "  harbor.rand0m.me/public/ondaire:latest --name living-room",
         ].join("\n"),
         // First paragraph: trusted author HTML, rendered as plain body text.
         body:
-          "The image runs the <strong>master role only</strong> by default — it sources audio (your library + Spotify Connect) and controls the cluster, but does not play locally. Reaching host audio hardware (sound cards, USB DACs, I2S) from a container isn't reliable and is <strong>out of scope</strong>: the actual output happens on your players (the Pi binary, or an ESP32 node). Mount your library read-only on <code>/media</code>; mutable state lives on <code>/data</code>. You can change any default with the <code>ENSEMBLE_*</code> environment variables — see the config flags below.",
+          "The image runs the <strong>master role only</strong> by default — it sources audio (your library + Spotify Connect) and controls the cluster, but does not play locally. Reaching host audio hardware (sound cards, USB DACs, I2S) from a container isn't reliable and is <strong>out of scope</strong>: the actual output happens on your players (the Pi binary, or an ESP32 node). Mount your library read-only on <code>/media</code>; mutable state lives on <code>/data</code>. You can change any default with the <code>ONDAIRE_*</code> environment variables — see the config flags below.",
         // The one genuine gotcha, kept as a callout.
         note:
           "<strong><code>--network host</code> is required.</strong> Players discover the master over mDNS and go-librespot advertises Spotify Connect over zeroconf — multicast doesn't cross Docker's bridge network (and ports bind-or-increment, so there's nothing to publish).",
@@ -564,16 +564,16 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
     flags: {
       title: "Common config flags",
       intro:
-        "Almost every flag has an ENSEMBLE_* environment equivalent (handy in Docker); all are optional, with sensible defaults. Ports left at their default bind-or-increment (run several nodes on one box); a port you set explicitly is pinned (binds exactly or exits).",
+        "Almost every flag has an ONDAIRE_* environment equivalent (handy in Docker); all are optional, with sensible defaults. Ports left at their default bind-or-increment (run several nodes on one box); a port you set explicitly is pinned (binds exactly or exits).",
       // Rendered as a param · env var · default · description table.
       cols: ["param", "env var", "default", "description"],
       params: [
         { param: "--name <name>", env: "—", def: "node id", what: "display name + Spotify device name (first start only)" },
-        { param: "--role <role>", env: "ENSEMBLE_ROLE", def: "both", what: "master | playback | master,playback" },
-        { param: "--media <dir>", env: "ENSEMBLE_MEDIA_DIR", def: "<data>/media", what: "library directory, browsed recursively" },
-        { param: "--data <dir>", env: "ENSEMBLE_DATA_DIR", def: "./data", what: "node.json, cluster state, Spotify creds" },
-        { param: "--http-port <n>", env: "ENSEMBLE_HTTP_PORT", def: "8080", what: "UI + REST API + WebSocket + node proxy" },
-        { param: "--output <spec>", env: "ENSEMBLE_OUTPUT", def: "auto", what: "alsa · exec · null · file:<path>" },
+        { param: "--role <role>", env: "ONDAIRE_ROLE", def: "both", what: "master | playback | master,playback" },
+        { param: "--media <dir>", env: "ONDAIRE_MEDIA_DIR", def: "<data>/media", what: "library directory, browsed recursively" },
+        { param: "--data <dir>", env: "ONDAIRE_DATA_DIR", def: "./data", what: "node.json, cluster state, Spotify creds" },
+        { param: "--http-port <n>", env: "ONDAIRE_HTTP_PORT", def: "8080", what: "UI + REST API + WebSocket + node proxy" },
+        { param: "--output <spec>", env: "ONDAIRE_OUTPUT", def: "auto", what: "alsa · exec · null · file:<path>" },
       ],
       doc: { label: "Full configuration reference", href: DOC("config-reference.md") },
     },
@@ -603,7 +603,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
     eyebrow: "Build a node",
     title: "Flash a DIY speaker, right from your browser.",
     intro:
-      "Turn an ESP32 + an I2S DAC (or an all-in-one amp board) into a real ensemble player — it shows up in the cluster, joins any group, and plays in lock-step like every other room. No toolchain, no app: plug it in over USB-C in Chrome or Edge and flash. On first boot it hosts a Wi-Fi hotspot for setup. Receive-only, opus over Wi-Fi.",
+      "Turn an ESP32 + an I2S DAC (or an all-in-one amp board) into a real ondaire player — it shows up in the cluster, joins any group, and plays in lock-step like every other room. No toolchain, no app: plug it in over USB-C in Chrome or Edge and flash. On first boot it hosts a Wi-Fi hotspot for setup. Receive-only, opus over Wi-Fi.",
     // Progress header — one chip per wizard step.
     wizard: [
       { id: "board", label: "Select board" },
@@ -643,7 +643,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         title: "What to flash",
         all: {
           label: "Flash everything (first-time setup)",
-          note: "Writes a clean image and clears any stored settings. On reboot the node hosts a Wi-Fi hotspot named “ensemble-…”: join it from a phone or laptop and a setup page opens where you enter your 2.4 GHz Wi-Fi. Pick this for a new board or a clean slate.",
+          note: "Writes a clean image and clears any stored settings. On reboot the node hosts a Wi-Fi hotspot named “ondaire-…”: join it from a phone or laptop and a setup page opens where you enter your 2.4 GHz Wi-Fi. Pick this for a new board or a clean slate.",
         },
         keep: {
           label: "Update firmware only (keep my config)",
@@ -660,8 +660,8 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
     // Step 3 — finished. Congratulations + how to finish setup (captive portal for
     // a full flash) + a link to the board's page (wiring, pinouts, build notes).
     finished: {
-      title: "You’ve flashed an ensemble node.",
-      body: "If you flashed everything, the node is now hosting a Wi-Fi hotspot named “ensemble-…”. Join it from your phone or laptop and a setup page opens — enter your 2.4 GHz Wi-Fi and the node reboots, joins your network, and appears in the cluster within a few seconds, ready to join any group. (Updated firmware only? It rejoins on its own.)",
+      title: "You’ve flashed an ondaire node.",
+      body: "If you flashed everything, the node is now hosting a Wi-Fi hotspot named “ondaire-…”. Join it from your phone or laptop and a setup page opens — enter your 2.4 GHz Wi-Fi and the node reboots, joins your network, and appears in the cluster within a few seconds, ready to join any group. (Updated firmware only? It rejoins on its own.)",
       warning:
         "ESP32 joins 2.4 GHz Wi-Fi only. If your router uses band steering (one shared name for the 2.4 and 5 GHz bands), give the 2.4 GHz band its own SSID if you can — otherwise the node may keep trying the 5 GHz radio and fail to connect.",
       docLink: "Wiring & board guide",
@@ -675,11 +675,11 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
   // Tools manifest. `file` is resolved at build time (build.mjs resolveFirmware)
   // into a per-board manifest (manifest-<id>.json) + SHA-256. `id` must match the
   // esp32 board profile (esp32/boards/ + sdkconfig.defaults.<id>) so the locally
-  // built merged image (esp32/build-<id>/ensemble-fw-<id>.bin) lines up.
+  // built merged image (esp32/build-<id>/ondaire-fw-<id>.bin) lines up.
   firmware: {
-    manifestName: "ensemble player",
-    // Each build maps to a CI firmware image (ensemble-fw-<id>.bin + the app-only
-    // ensemble-app-<id>.bin) and its own ESP Web Tools manifest pair. `tested: true`
+    manifestName: "ondaire player",
+    // Each build maps to a CI firmware image (ondaire-fw-<id>.bin + the app-only
+    // ondaire-app-<id>.bin) and its own ESP Web Tools manifest pair. `tested: true`
     // means the image has been flashed + verified on real hardware; untested boards
     // are built pin-map-correct from the vendor's schematics/ESPHome configs but not
     // yet bench-checked — the flasher badges them so people know (all pins are
@@ -702,7 +702,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         // The board's own page in the repo (wiring, pinouts, build notes). Since the
         // flasher knows the selected board, the finished step links straight to it.
         doc: `${REPO}/-/blob/main/esp32/devices/esp32-s3-super-mini.md`,
-        file: "assets/firmware/ensemble-fw-esp32s3-supermini.bin",
+        file: "assets/firmware/ondaire-fw-esp32s3-supermini.bin",
       },
       {
         id: "esp32s3-zero",
@@ -715,7 +715,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         // in esp32/devices/ for the GitLab device sheet).
         img: "assets/img/esp32-s3-zero.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/esp32-s3-zero.md`,
-        file: "assets/firmware/ensemble-fw-esp32s3-zero.bin",
+        file: "assets/firmware/ondaire-fw-esp32s3-zero.bin",
       },
       {
         id: "esp32s3-hifi",
@@ -725,7 +725,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         tested: false,
         img: "assets/img/hifi-esp32.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#hifi-esp32-s3`,
-        file: "assets/firmware/ensemble-fw-esp32s3-hifi.bin",
+        file: "assets/firmware/ondaire-fw-esp32s3-hifi.bin",
       },
       {
         id: "esp32s3-hifi-plus",
@@ -735,7 +735,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         tested: false,
         img: "assets/img/hifi-esp32-plus.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#hifi-esp32-plus`,
-        file: "assets/firmware/ensemble-fw-esp32s3-hifi-plus.bin",
+        file: "assets/firmware/ondaire-fw-esp32s3-hifi-plus.bin",
       },
       {
         id: "esp32s3-amped",
@@ -745,7 +745,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         tested: false,
         img: "assets/img/amped-esp32.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#amped-esp32-s3`,
-        file: "assets/firmware/ensemble-fw-esp32s3-amped.bin",
+        file: "assets/firmware/ondaire-fw-esp32s3-amped.bin",
       },
       {
         id: "esp32s3-amped-plus",
@@ -757,7 +757,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         // in site/src/assets/img/; ships via copyDir like the other boards' photos.
         img: "assets/img/amped-esp32-s3-plus.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/amped-esp32-s3-plus.md`,
-        file: "assets/firmware/ensemble-fw-esp32s3-amped-plus.bin",
+        file: "assets/firmware/ondaire-fw-esp32s3-amped-plus.bin",
       },
       {
         id: "esp32s3-loud",
@@ -767,7 +767,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         tested: false,
         img: "assets/img/loud-esp32.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#loud-esp32-s3`,
-        file: "assets/firmware/ensemble-fw-esp32s3-loud.bin",
+        file: "assets/firmware/ondaire-fw-esp32s3-loud.bin",
       },
       {
         id: "esp32s3-loud-plus",
@@ -777,7 +777,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         tested: false,
         img: "assets/img/loud-esp32-plus.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#loud-esp32-plus`,
-        file: "assets/firmware/ensemble-fw-esp32s3-loud-plus.bin",
+        file: "assets/firmware/ondaire-fw-esp32s3-loud-plus.bin",
       },
       {
         id: "esp32s3-louder",
@@ -787,7 +787,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         tested: false,
         img: "assets/img/louder-esp32.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#louder-esp32-s3-mini`,
-        file: "assets/firmware/ensemble-fw-esp32s3-louder.bin",
+        file: "assets/firmware/ondaire-fw-esp32s3-louder.bin",
       },
       {
         id: "esp32s3-louder-plus",
@@ -797,7 +797,7 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         tested: false,
         img: "assets/img/louder-esp32-plus.jpg",
         doc: `${REPO}/-/blob/main/esp32/devices/sonocotta-audio-dock.md#louder-esp32-plus-pro`,
-        file: "assets/firmware/ensemble-fw-esp32s3-louder-plus.bin",
+        file: "assets/firmware/ondaire-fw-esp32s3-louder-plus.bin",
       },
     ],
   },

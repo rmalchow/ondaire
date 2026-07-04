@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // e2eDeliver collects delivered frames from a stream.Client.

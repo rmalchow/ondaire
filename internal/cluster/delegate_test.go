@@ -7,7 +7,7 @@ import (
 
 	"github.com/hashicorp/memberlist"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 func TestEncodeDecodeDeltaAllKinds(t *testing.T) {

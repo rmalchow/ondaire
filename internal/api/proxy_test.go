@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // startNode spins up a real api.Server on a loopback listener with the given

@@ -1,7 +1,7 @@
 # Marketing-site image: build the static site, serve it with nginx.
 # Build context is ./site:
-#   docker build -t ensemble-site -f site/Dockerfile site
-#   docker run --rm -p 8080:80 ensemble-site   →  http://localhost:8080
+#   docker build -t ondaire-site -f site/Dockerfile site
+#   docker run --rm -p 8080:80 ondaire-site   →  http://localhost:8080
 #
 # Multi-arch friendly: the generator runs once on the BUILD platform (its output
 # is byte-identical across arches) and only the nginx layer is per-arch — no
@@ -9,10 +9,10 @@
 
 FROM --platform=$BUILDPLATFORM node:24-alpine AS build
 ARG VER=
-ENV ENSEMBLE_VERSION=$VER
+ENV ONDAIRE_VERSION=$VER
 WORKDIR /site
 COPY . .
-# The CI job stages bin/ensemble-linux-* into src/assets/downloads/ before this
+# The CI job stages bin/ondaire-linux-* into src/assets/downloads/ before this
 # build (see .gitlab-ci.yml docker-site); build.mjs hashes them into the download
 # page and they ship under /site/dist for direct download.
 RUN node build.mjs            # → /site/dist (fully static)

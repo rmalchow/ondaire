@@ -3,7 +3,7 @@ package group
 import (
 	"time"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 // logCompositionLocked diffs this node's freshly-derived view against the previous

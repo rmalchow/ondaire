@@ -1,6 +1,6 @@
 <script>
   // Spotify Connect endpoints editor (D57), shown on a node that runs go-librespot.
-  // The DEFAULT device ("ensemble <node>") is implicit + read-only (legacy
+  // The DEFAULT device ("ondaire <node>") is implicit + read-only (legacy
   // behavior). Below it, the operator manages named PRESETS: each is a name + a
   // row of toggleable players (speakers). Playing to a preset's Connect device
   // regroups those players and plays. All edits persist via PATCH /node, which
@@ -32,7 +32,7 @@
       .sort((a, b) => (a.name || "").localeCompare(b.name || "")),
   );
 
-  let baseName = $derived("ensemble " + (node.name || "node"));
+  let baseName = $derived("ondaire " + (node.name || "node"));
 
   function save() {
     setSpotifyEndpoints(node.id, endpoints).catch(() => {});

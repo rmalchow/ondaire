@@ -7,7 +7,7 @@ view, the [user guide](docs/user/).
 ## Package map
 
 ```
-cmd/ensemble/        main: flag parsing, capability probing, wiring, lifecycle
+cmd/ondaire/        main: flag parsing, capability probing, wiring, lifecycle
 cmd/player/          standalone reference player (pure stdlib; proves the player protocol)
 cmd/soundcheck/      local tone / bring-up tool
 internal/id/         node/group IDs (gen, parse, XOR, JSON)

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
+	"ondaire/internal/stream"
 )
 
 // defaultDriveInterval is the soft-state re-assert cadence (D58): the driver

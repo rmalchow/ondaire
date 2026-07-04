@@ -1,0 +1,27 @@
+{
+  "config": {
+    "flow_title": "ondaire ({host})",
+    "step": {
+      "user": {
+        "title": "Connect to ondaire",
+        "description": "Enter the host and port of any ondaire room (master) node.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Add ondaire",
+        "description": "Add the ondaire cluster discovered at {host}?"
+      }
+    },
+    "abort": {
+      "already_configured": "This ondaire cluster is already configured.",
+      "cannot_connect": "Failed to connect to the ondaire node.",
+      "not_a_master": "This ondaire node is a player only and has no API to connect to."
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the ondaire node."
+    }
+  }
+}

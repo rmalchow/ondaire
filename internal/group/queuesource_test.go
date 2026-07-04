@@ -4,8 +4,8 @@ import (
 	"io"
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/stream"
 )
 
 // qFrameSrc is a pull source yielding n frames then io.EOF, tracking close.

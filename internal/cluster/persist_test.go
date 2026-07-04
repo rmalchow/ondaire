@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // TestStateSaveLoadRoundTrip: a SetGroupName persists (debounced) and a fresh

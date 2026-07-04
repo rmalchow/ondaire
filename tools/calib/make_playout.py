@@ -2,7 +2,7 @@
 """
 make_playout.py — render the interleaved L/R sweep playout for a coherence run.
 
-Produces the STEREO file ensemble plays to the pi01+pi02 group. pi01 is routed
+Produces the STEREO file ondaire plays to the pi01+pi02 group. pi01 is routed
 to L, pi02 to R (physical routing), so putting the wideband sweep on the LEFT at
 even cadence slots and on the RIGHT at odd slots makes the two speakers sound
 one-at-a-time, time-interleaved — exactly what lr_drift.py expects

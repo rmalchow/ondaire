@@ -23,7 +23,7 @@
 // Pin map below matches board_esp32s3.h (DevKitC): every value listed there is
 // exposed and conflict-free on the Super Mini too, so one wiring fits both.
 #pragma once
-#define BOARD_NAME      "ensemble-s3mini"
+#define BOARD_NAME      "ondaire-s3mini"
 
 #define DEF_I2S_BCLK    5    // -> PCM5102A BCK
 #define DEF_I2S_LRCK    6    // -> PCM5102A LCK

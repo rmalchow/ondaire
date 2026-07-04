@@ -106,7 +106,7 @@ function open() {
 // (the one serving the page) drops, the UI can still offer links to its peers.
 // Addresses are NOT pre-filtered here — the banner probes each before showing it,
 // so internal/unreachable CIDRs are dropped by an actual reachability test.
-const ROSTER_KEY = "ensemble.roster";
+const ROSTER_KEY = "ondaire.roster";
 
 // originsFor turns a node's self-reported CIDRs + httpPort into http(s) origins,
 // stripping the mask and bracketing IPv6. Same scheme as the current page.

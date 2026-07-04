@@ -25,7 +25,7 @@ import wave
 import numpy as np
 
 # ----------------------------------------------------------------------------
-# Canonical constants. 48 kHz everywhere, matching ensemble's canonical audio.
+# Canonical constants. 48 kHz everywhere, matching ondaire's canonical audio.
 # ----------------------------------------------------------------------------
 SAMPLE_RATE = 48_000
 

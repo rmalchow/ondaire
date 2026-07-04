@@ -1,4 +1,4 @@
-// GPIO continuity walk for the ensemble DAC wiring.
+// GPIO continuity walk for the ondaire DAC wiring.
 //
 // Drives the three I2S pins high ONE AT A TIME, for distinct durations, in a
 // loop, so you can probe the DAC's input pads with a multimeter on DC volts

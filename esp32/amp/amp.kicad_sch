@@ -1,6 +1,6 @@
 (kicad_sch
 	(version 20251024)
-	(generator "ensemble-amp-gen")
+	(generator "ondaire-amp-gen")
 	(generator_version "10.0")
 	(uuid "a3c1e0d2-0001-4a00-8000-656e73656d62")
 	(paper "A1")

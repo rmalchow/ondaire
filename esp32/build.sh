@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build the ensemble playback-node firmware for a board, producing a single
-# merged flash image (build-<board>/ensemble-fw-<board>.bin) ready for the web
+# Build the ondaire playback-node firmware for a board, producing a single
+# merged flash image (build-<board>/ondaire-fw-<board>.bin) ready for the web
 # flasher / esptool.
 #
 #   ./build.sh esp32s3            # build for the S3 devkit
@@ -45,8 +45,8 @@ do_build() {
   idf.py $IDFARGS set-target "$TARGET"
   idf.py $IDFARGS build
   # Single merged image at offset 0 for the web flasher (one part per chipFamily).
-  idf.py $IDFARGS merge-bin -o "ensemble-fw-$BOARD.bin"
-  echo "merged image: $HERE/$BUILD_DIR/ensemble-fw-$BOARD.bin"
+  idf.py $IDFARGS merge-bin -o "ondaire-fw-$BOARD.bin"
+  echo "merged image: $HERE/$BUILD_DIR/ondaire-fw-$BOARD.bin"
 }
 
 # Resolve a local IDF, else use Docker.
@@ -71,6 +71,6 @@ if [ "$HAVE_IDF" = "1" ]; then
 else
   echo "No local ESP-IDF found — building in Docker (espressif/idf:$IDF_VERSION)…"
   docker run --rm -v "$HERE:/project" -w /project -e HOME=/tmp "espressif/idf:$IDF_VERSION" \
-    bash -c "idf.py $IDFARGS set-target '$TARGET' && idf.py $IDFARGS build && idf.py $IDFARGS merge-bin -o 'ensemble-fw-$BOARD.bin'"
-  echo "merged image: $HERE/$BUILD_DIR/ensemble-fw-$BOARD.bin"
+    bash -c "idf.py $IDFARGS set-target '$TARGET' && idf.py $IDFARGS build && idf.py $IDFARGS merge-bin -o 'ondaire-fw-$BOARD.bin'"
+  echo "merged image: $HERE/$BUILD_DIR/ondaire-fw-$BOARD.bin"
 fi

@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // Defaults (spec §2). Ports are bases; bind-or-increment happens in netx/main.
@@ -35,20 +35,20 @@ const (
 
 // Env var names (spec §2, §8.5). Flags override env; env overrides defaults.
 const (
-	EnvHTTPPort    = "ENSEMBLE_HTTP_PORT"
-	EnvStreamPort  = "ENSEMBLE_STREAM_PORT"
-	EnvSourcePort  = "ENSEMBLE_SOURCE_PORT"
-	EnvControlPort = "ENSEMBLE_CONTROL_PORT"
-	EnvGossipPort  = "ENSEMBLE_GOSSIP_PORT"
-	EnvRole        = "ENSEMBLE_ROLE" // "master" | "playback" | "master,playback" (D49); default both
-	EnvDataDir     = "ENSEMBLE_DATA_DIR"
-	EnvMediaDir    = "ENSEMBLE_MEDIA_DIR"
-	EnvOutput      = "ENSEMBLE_OUTPUT"  // named sink backend: "", "auto", "exec", "null", "file:<path>", "alsa"
-	EnvJoin        = "ENSEMBLE_JOIN"    // dev seed list: comma-separated host:gossipPort (§2, D20)
-	EnvNoMDNS      = "ENSEMBLE_NO_MDNS" // "1"/"true": disable mDNS register+browse (tests; gossip via --join)
+	EnvHTTPPort    = "ONDAIRE_HTTP_PORT"
+	EnvStreamPort  = "ONDAIRE_STREAM_PORT"
+	EnvSourcePort  = "ONDAIRE_SOURCE_PORT"
+	EnvControlPort = "ONDAIRE_CONTROL_PORT"
+	EnvGossipPort  = "ONDAIRE_GOSSIP_PORT"
+	EnvRole        = "ONDAIRE_ROLE" // "master" | "playback" | "master,playback" (D49); default both
+	EnvDataDir     = "ONDAIRE_DATA_DIR"
+	EnvMediaDir    = "ONDAIRE_MEDIA_DIR"
+	EnvOutput      = "ONDAIRE_OUTPUT"  // named sink backend: "", "auto", "exec", "null", "file:<path>", "alsa"
+	EnvJoin        = "ONDAIRE_JOIN"    // dev seed list: comma-separated host:gossipPort (§2, D20)
+	EnvNoMDNS      = "ONDAIRE_NO_MDNS" // "1"/"true": disable mDNS register+browse (tests; gossip via --join)
 
-	EnvMediaIndex         = "ENSEMBLE_MEDIA_INDEX"          // "0"/"false": disable the searchable SQLite index (§6)
-	EnvMediaIndexInterval = "ENSEMBLE_MEDIA_INDEX_INTERVAL" // rescan cadence, e.g. "5m"
+	EnvMediaIndex         = "ONDAIRE_MEDIA_INDEX"          // "0"/"false": disable the searchable SQLite index (§6)
+	EnvMediaIndexInterval = "ONDAIRE_MEDIA_INDEX_INTERVAL" // rescan cadence, e.g. "5m"
 )
 
 // Config is the fully-resolved startup configuration. All fields are final:
@@ -106,7 +106,7 @@ type Config struct {
 	Output string
 
 	// Join is the dev-only gossip seed list (§2, D20): comma-separated
-	// host:gossipPort entries, parsed from --join / ENSEMBLE_JOIN. Empty in
+	// host:gossipPort entries, parsed from --join / ONDAIRE_JOIN. Empty in
 	// production (mDNS is the discovery path). main (K) passes it to
 	// cluster.Join for hermetic loopback e2e tests; config only carries it.
 	Join []string
@@ -140,7 +140,7 @@ func Load(opts Options) (*Config, error) {
 	// Parse flags with zero sentinels so we can tell "unset" from "set to
 	// default": 0 for ports, "" for strings. Real defaults are applied after,
 	// only when both the flag and env are unset.
-	fs := flag.NewFlagSet("ensemble", flag.ContinueOnError)
+	fs := flag.NewFlagSet("ondaire", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var (
 		fHTTP    = fs.Int("http-port", 0, "HTTP API base port")
@@ -353,7 +353,7 @@ type PortFlags struct{ HTTP, Stream, Source, Control, Gossip bool }
 // whether the value was set explicitly (flag or env) rather than defaulted.
 func resolvePort(flagVal int, envVal string, def int, envName string) (int, bool, error) {
 	if flagVal != 0 {
-		p, err := validatePort(flagVal, "--"+strings.TrimPrefix(envName, "ENSEMBLE_"))
+		p, err := validatePort(flagVal, "--"+strings.TrimPrefix(envName, "ONDAIRE_"))
 		return p, true, err
 	}
 	if envVal != "" {

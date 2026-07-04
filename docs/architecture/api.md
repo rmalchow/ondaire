@@ -40,7 +40,7 @@ SPA renders exclusively from these events after the initial load.
 unique node *name*), the request is transparently proxied to that node's HTTP port
 (address chosen per the [observed-IP rules](discovery-and-cluster.md#addresses-and-observed-ip-reporting)).
 E.g. `GET http://node1:8080/api/<aliceId>/media` lists alice's media via node1. **One
-hop only**: proxied requests carry `X-Ensemble-Proxied: 1` and a request with that header
+hop only**: proxied requests carry `X-Ondaire-Proxied: 1` and a request with that header
 is never re-proxied. This is what lets any node's UI control and browse the whole cluster.
 
 ## Web UI (Svelte SPA)

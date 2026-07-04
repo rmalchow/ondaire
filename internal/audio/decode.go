@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // sampleReader is a native-rate, native-channel PCM sample producer — the

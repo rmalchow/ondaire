@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // A 2 s, 48 kHz stereo WAV whose first second is +1000 and second is -1000.

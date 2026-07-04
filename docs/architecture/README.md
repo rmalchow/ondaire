@@ -1,6 +1,6 @@
 # Architecture overview
 
-Ensemble is a self-organizing multiroom audio system. Every node runs the **same
+Ondaire is a self-organizing multiroom audio system. Every node runs the **same
 single binary**. Nodes find each other automatically (mDNS + gossip), organize
 into **groups**, and play audio in sync: the group **master** runs an audio
 **source** that decodes media into timestamped PCM (or Opus); every member —
@@ -152,7 +152,7 @@ master-clock nanoseconds — playout scheduling). See the [wire protocol](wire-p
 ## Repository layout
 
 ```
-cmd/ensemble/        main: flag parsing, wiring, lifecycle
+cmd/ondaire/        main: flag parsing, wiring, lifecycle
 cmd/player/          standalone reference player (proves player-protocol.md)
 cmd/soundcheck/      local tone/bring-up tool
 internal/id/         node/group IDs (gen, parse, XOR)

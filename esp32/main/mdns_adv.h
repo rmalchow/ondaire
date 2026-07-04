@@ -1,4 +1,4 @@
-// mdns_adv.h — advertise the _ensemble._tcp playback service with role=playback
+// mdns_adv.h — advertise the _ondaire._tcp playback service with role=playback
 // and the capability TXT keys masters browse (PLAYER §5). Never gossips.
 #pragma once
 #include <stdbool.h>

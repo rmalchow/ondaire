@@ -3,7 +3,7 @@ package source
 import (
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // primePaceUDP is the inter-frame delay for a UDP prime burst: ~5 ms/frame,

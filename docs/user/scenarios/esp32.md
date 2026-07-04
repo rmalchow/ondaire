@@ -50,7 +50,7 @@ What a conforming node does (from the wire spec):
    instant as every other speaker.
 4. **Plays out** through its I²S DAC, buffering to ride out Wi-Fi jitter.
 5. **Decodes Opus** — effectively mandatory on Wi-Fi hardware (small packets that
-   don't fragment), which is why **opus** is ensemble's default group codec.
+   don't fragment), which is why **opus** is ondaire's default group codec.
 
 > Because it's Wi-Fi + Opus, keep the group on the **opus** codec (the default) and
 > give it a comfortable buffer — the same Wi-Fi advice as for a

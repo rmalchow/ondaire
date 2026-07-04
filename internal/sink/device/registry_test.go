@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 func TestSplitSpec(t *testing.T) {

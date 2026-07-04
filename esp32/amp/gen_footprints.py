@@ -25,7 +25,7 @@ def footprint(name, descr):
     y0 = -(n - 1) * pitch / 2
     lines = [f'(footprint "{name}"',
              '\t(version 20240108)',
-             '\t(generator "ensemble-amp-gen")',
+             '\t(generator "ondaire-amp-gen")',
              '\t(layer "F.Cu")',
              f'\t(descr "{descr}")',
              '\t(attr through_hole)']

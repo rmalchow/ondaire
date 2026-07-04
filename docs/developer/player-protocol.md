@@ -1,14 +1,14 @@
 # The player protocol — receive-only, master-driven audio
 
-This is a **self-contained** implementer's spec for an ensemble **player**: a
+This is a **self-contained** implementer's spec for an ondaire **player**: a
 receive-only participant (a Go playback-only daemon, or ESP32 firmware) that plays
 a group's audio in sync. You do not need to read any other document to implement
 it. The standalone reference implementation is
 [`cmd/player/main.go`](../../cmd/player/main.go) (pure stdlib, no `internal/` imports —
 it proves this spec is sufficient); the production implementation is the in-binary
-`Player` (`internal/playback`, run as `ensemble --role playback`).
+`Player` (`internal/playback`, run as `ondaire --role playback`).
 
-> **Two roles, one binary.** An ensemble node runs two independently-enableable
+> **Two roles, one binary.** An ondaire node runs two independently-enableable
 > roles: a **room** (the `master`
 > role — gossips, owns cluster state, serves the API + SPA, sources audio, and
 > *drives* players) and a **player** (the `playback` role — this document). A node
@@ -162,7 +162,7 @@ TCP connection to `sourceEndpoint`; the clock still uses UDP to `clockEndpoint`.
 
 ## 5. mDNS announcement + capabilities
 
-A player advertises the standard `_ensemble._tcp` service (domain `local.`) with a
+A player advertises the standard `_ondaire._tcp` service (domain `local.`) with a
 TXT record. Masters browse this service to discover players. A player advertises
 **no gossip port** (it never joins memberlist). The mDNS **instance name is the node
 `id`** (32 hex), stable across reboots, so a master always re-discovers the same
@@ -416,7 +416,7 @@ Playout is **DAC-pull-paced**: your output device's **blocking write** sets the 
 schedule to correct — the write *is* the clock. But your DAC drains at its own crystal
 rate (tens of ppm off), so the master time of the audio actually reaching the speaker
 slowly slides off the master clock — and naive correction would skip or pad a whole
-20 ms frame (audible). The canonical fix (and what a full ensemble member does) is a
+20 ms frame (audible). The canonical fix (and what a full ondaire member does) is a
 **phase-lock servo + fractional resampler**:
 
 - the controlled variable is your **play head** — the master timestamp of content

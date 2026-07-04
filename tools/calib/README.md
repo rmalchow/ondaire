@@ -1,6 +1,6 @@
 # Calibration & measurement toolkit (`tools/calib/`)
 
-The **independent hardware arbiter** for ensemble's playout drift/sync work.
+The **independent hardware arbiter** for ondaire's playout drift/sync work.
 These are standalone Python tools that turn a single microphone (or a played
 file plus the players' own telemetry) into ground-truth numbers about how well
 the speakers are actually aligned in time — independent of what the Go servo
@@ -46,7 +46,7 @@ and file names are real.
 
 ## 0. Units & constants
 
-Everything is fixed at **48 kHz** (`SR = 48_000`), ensemble's canonical rate.
+Everything is fixed at **48 kHz** (`SR = 48_000`), ondaire's canonical rate.
 
 | Quantity | Value |
 |----------|-------|
@@ -171,7 +171,7 @@ seconds (not interleaved — coherence of a single stream), `plot_coherence.py`:
    least-squares with one 4σ residual purge),
 3. reports the residual as the per-sweep timing error in µs (**this residual IS
    the sync jitter**; the fitted rate is the constant crystal offset between the
-   ensemble clock and the mic ADC — not a defect),
+   ondaire clock and the mic ADC — not a defect),
 4. renders a brand-styled jitter graph (SVG + PNG) with a marginal histogram,
 5. dumps the points as JSON.
 
@@ -210,7 +210,7 @@ self-test, not by the drift analyzers.
 
 ### 3.5 Validation against the system's own delay control
 
-This proves the acoustic measurement and ensemble's playout-delay control agree:
+This proves the acoustic measurement and ondaire's playout-delay control agree:
 
 1. Measure the A→B offset at default delay (`O0`).
 2. Inject a known delay on B via its **`outputDelayMs`** in the UI.

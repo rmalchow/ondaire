@@ -27,7 +27,7 @@ network receiver ─► decode ─► jitter buffer ─► resampler ─► gain
   `BytesPerSmpl=2` (s16le), `FrameSamples=960`, `FrameBytes=3840`, `FrameDuration=20`
   ms, `FrameNanos=20_000_000`.
 - Intake → sink seam: the receiver/decoder calls `contracts.Sink.Push(gen, seq, pts,
-  payload)` with canonical PCM (opus decoded first; `cmd/ensemble/main.go` deliver
+  payload)` with canonical PCM (opus decoded first; `cmd/ondaire/main.go` deliver
   loop). `Push` is fire-and-forget, non-blocking; copies payload; drops+counts
   stale-gen / late frames; signals the scheduler.
 - `pts` is **master time** (set at the source). A frame's content should hit the
@@ -179,7 +179,7 @@ and re-prime under the new anchor; `SetEqualizeDelay` is a no-op on an unchanged
 | buffer | size | absorbs |
 |---|---|---|
 | INPUT jitter buffer (`jitter.go`) | bulk of `bufferMs` | NETWORK jitter (bursty Wi-Fi) |
-| OUTPUT device buffer (alsa) | ~40 ms / 2 frames (`ENSEMBLE_ALSA_LATENCY_MS`, 20..500) | scheduling slack only |
+| OUTPUT device buffer (alsa) | ~40 ms / 2 frames (`ONDAIRE_ALSA_LATENCY_MS`, 20..500) | scheduling slack only |
 
 The output buffer cannot absorb network jitter (it is downstream of the resampler) —
 it is only scheduling slack for the playout goroutine plus something for the blocking
@@ -431,7 +431,7 @@ It's worth being explicit about why there are *two* buffers, because conflating 
 is a common mistake. The **input jitter buffer** soaks up *network* jitter — the
 bursty, lossy nature of Wi-Fi — and that's where almost all of the buffer budget
 lives. The **output device buffer** (about 40 ms on ALSA, configurable via
-`ENSEMBLE_ALSA_LATENCY_MS`) is something else entirely: it's just a bit of scheduling
+`ONDAIRE_ALSA_LATENCY_MS`) is something else entirely: it's just a bit of scheduling
 slack so our playout goroutine has a small cushion if the OS is briefly late waking
 it, plus a little something for the blocking `Write` to block against. It sits
 *downstream* of the resampler, so it physically cannot help with network jitter — a

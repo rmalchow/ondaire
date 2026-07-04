@@ -12,7 +12,7 @@
 #include "soc/gpio_num.h"
 
 static const char *TAG = "config";
-static const char *NS = "ensemble";
+static const char *NS = "ondaire";
 
 static ens_config_t g;
 
@@ -73,10 +73,10 @@ ens_config_t *config_load(void) {
             ESP_LOGI(TAG, "derived node id from MAC %02x:%02x:%02x:%02x:%02x:%02x",
                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         }
-        // Default friendly name shares the AP/mDNS short id, e.g. "ensemble-8cd0",
+        // Default friendly name shares the AP/mDNS short id, e.g. "ondaire-8cd0",
         // so it too is stable per board (overwritten by the console / portal).
         char idhex[33]; config_node_id_hex(idhex);
-        char defname[33]; snprintf(defname, sizeof defname, "ensemble-%.4s", idhex);
+        char defname[33]; snprintf(defname, sizeof defname, "ondaire-%.4s", idhex);
         get_str(h, "wifi_ssid", g.wifi_ssid, sizeof g.wifi_ssid, "");
         get_str(h, "wifi_pass", g.wifi_pass, sizeof g.wifi_pass, "");
         get_str(h, "name", g.name, sizeof g.name, defname);
@@ -95,7 +95,7 @@ ens_config_t *config_load(void) {
         g.dac = get_u8(h, "dac", DEF_DAC);
         g.codec_pref = get_u8(h, "codec", 0);
         g.buffer_ms = get_u16(h, "buffer_ms", 150);
-        g.control_port = get_u16(h, "control_port", CONFIG_ENSEMBLE_CONTROL_PORT);
+        g.control_port = get_u16(h, "control_port", CONFIG_ONDAIRE_CONTROL_PORT);
         g.vol = get_u8(h, "vol", 60);
         g.disc_mode = get_u8(h, "disc_mode", 0);
         get_str(h, "master_ip", g.master_ip, sizeof g.master_ip, "");

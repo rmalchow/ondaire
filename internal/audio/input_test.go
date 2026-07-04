@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // withFakeCapture installs the fake capture binary as "pw-record" on PATH and

@@ -9,7 +9,7 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
 # Board selection (boards/board.h + default pin map).
-CONFIG_ENSEMBLE_BOARD_ESP32S3_SUPERMINI=y
+CONFIG_ONDAIRE_BOARD_ESP32S3_SUPERMINI=y
 
 # PSRAM: the player target is the ESP32-S3FH4R2 variant (2 MB embedded quad
 # PSRAM) — see docs/developer/esp32.md §3.1 (players are PSRAM-only). QUAD mode,

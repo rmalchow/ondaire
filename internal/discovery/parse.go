@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 // parseEntry converts a raw mDNS entry into a Peer, returning ok=false for our

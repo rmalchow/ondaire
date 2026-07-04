@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"ensemble/internal/sink/device"
-	"ensemble/internal/stream"
+	"ondaire/internal/sink/device"
+	"ondaire/internal/stream"
 )
 
 // framePeriod is the exact wall-clock duration one canonical frame represents.

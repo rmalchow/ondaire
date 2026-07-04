@@ -13,9 +13,9 @@ import (
 
 	"github.com/hashicorp/memberlist"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/discovery"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/discovery"
+	"ondaire/internal/id"
 )
 
 // observeBroadcastInterval throttles re-broadcasting the same (peer, ip)

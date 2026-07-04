@@ -16,7 +16,7 @@
 // below are free broken-out pads so config validation passes — provision real pins
 // over USB if you solder an encoder on.
 #pragma once
-#define BOARD_NAME      "ensemble-loud-plus-s3"
+#define BOARD_NAME      "ondaire-loud-plus-s3"
 
 #define DEF_I2S_BCLK    14   // -> MA12070P BCK
 #define DEF_I2S_LRCK    15   // -> MA12070P LRCK/WS

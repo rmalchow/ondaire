@@ -1,9 +1,9 @@
 # Debugging & reading the logs
 
 > **You are here:** [User Guide](README.md) › **Debugging**
-> See also: [Configuration Reference](config-reference.md) · [Running ensemble](running.md)
+> See also: [Configuration Reference](config-reference.md) · [Running ondaire](running.md)
 
-ensemble logs to **stderr** as structured `key=value` lines, preceded by a one-time
+ondaire logs to **stderr** as structured `key=value` lines, preceded by a one-time
 **banner**. This page explains the banner, the events you'll see during normal
 operation, and how to read the per-second **clock** and **playback** fields when a
 room won't sync or stutters.
@@ -13,17 +13,17 @@ Where the logs land depends on how you started the node:
 | How it runs | Where to look |
 |-------------|---------------|
 | foreground | the terminal |
-| systemd | `journalctl -u ensemble -f` |
+| systemd | `journalctl -u ondaire -f` |
 | Docker | `docker logs -f <container>` |
-| `nohup … >ensemble.log` | the file you redirected to |
+| `nohup … >ondaire.log` | the file you redirected to |
 
 ## Log levels
 
-One knob, `ENSEMBLE_LOG` (or the `-v` shorthand):
+One knob, `ONDAIRE_LOG` (or the `-v` shorthand):
 
 ```sh
-ENSEMBLE_LOG=debug ./ensemble     # debug | info (default) | warn | error
-./ensemble -v                     # same as ENSEMBLE_LOG=debug
+ONDAIRE_LOG=debug ./ondaire     # debug | info (default) | warn | error
+./ondaire -v                     # same as ONDAIRE_LOG=debug
 ```
 
 `info` is the normal level: lifecycle events plus a 1 Hz stats line **only while
@@ -39,7 +39,7 @@ handy for filtering:
 `pb-remote` (the master↔playback control plane) · `deliver` · `audio` · `api`.
 
 ```sh
-journalctl -u ensemble -f | grep 'comp=sink'      # just the playout stats
+journalctl -u ondaire -f | grep 'comp=sink'      # just the playout stats
 ```
 
 ---
@@ -51,7 +51,7 @@ I, where, and what can I do":
 
 ```
 ═══════════════════════════════════════════════════════════════
-  ensemble v0.3.6 — ready
+  ondaire v0.3.6 — ready
 ───────────────────────────────────────────────────────────────
   node      kitchen  (a1b2c3d4e5f6…)
   roles     master,playback
@@ -62,7 +62,7 @@ I, where, and what can I do":
   codecs    pcm, opus
   sources   file, http, https, input
   backends  alsa, exec, null
-  spotify   /usr/local/bin/go-librespot  (Connect device: "ensemble kitchen")
+  spotify   /usr/local/bin/go-librespot  (Connect device: "ondaire kitchen")
 ═══════════════════════════════════════════════════════════════
 ```
 
@@ -160,7 +160,7 @@ playing side=member played=3000 silence=2 lateDrop=0 buffered=10 ratePPM=18.4 \
 |-------|-------------------------|
 | `played` | frames written to the sound card (20 ms each). Should advance by ~50/s while playing. |
 | `silence` | silent frames inserted to fill gaps (underrun). A few at startup is normal; **climbing `silence` = frames aren't arriving in time** (loss or CPU starvation). |
-| `lateDrop` | frames that arrived *past* their play deadline and were dropped. **Climbing `lateDrop` = buffer too small or the clock isn't holding** — raise the group buffer or `ENSEMBLE_ALSA_LATENCY_MS`. |
+| `lateDrop` | frames that arrived *past* their play deadline and were dropped. **Climbing `lateDrop` = buffer too small or the clock isn't holding** — raise the group buffer or `ONDAIRE_ALSA_LATENCY_MS`. |
 | `buffered` | current jitter-buffer depth, in frames. Should hover near the configured buffer; trending toward 0 precedes underruns. |
 | `ratePPM` | the rate-servo's current micro-correction for sound-card clock drift, in ppm. Healthy: settles to a small **steady** value (tens of ppm). Pegged near ±300 or swinging = the servo is "hunting" — usually a too-small buffer or a very jittery device. |
 | `delivered` | frames the subscriber received from the source. |
@@ -176,7 +176,7 @@ playing side=member played=3000 silence=2 lateDrop=0 buffered=10 ratePPM=18.4 \
 
 ## Reading debug logs
 
-`ENSEMBLE_LOG=debug` (or `-v`) adds the detail you need when the info line points at
+`ONDAIRE_LOG=debug` (or `-v`) adds the detail you need when the info line points at
 a problem but not its cause:
 
 **Clock probe loop** (`comp=clock-follower`, msg=`stats`) — one line per probe
@@ -208,9 +208,9 @@ the other node's advert, mDNS isn't crossing your network — fall back to
 | Symptom | Look at | Likely fix |
 |---------|---------|------------|
 | Room is silent, others play | `synced` (false?), `delivered` (advancing?) | clock/port not reachable; check stream port & `--join` |
-| Stutters / dropouts | `silence`, `lateDrop` climbing; `lost` > 0 | raise group buffer / `ENSEMBLE_ALSA_LATENCY_MS`; keep codec on **opus**; try **TCP** transport |
+| Stutters / dropouts | `silence`, `lateDrop` climbing; `lost` > 0 | raise group buffer / `ONDAIRE_ALSA_LATENCY_MS`; keep codec on **opus**; try **TCP** transport |
 | Rooms slowly drift apart | `ratePPM` (pegged/swinging?), `offsetNs` (unstable?) | jittery link or buffer too small; prefer wired, raise buffer |
-| Wrong/no sound device | banner `output` row (`null`?) | set `ENSEMBLE_OUTPUT` / pick the device in the UI |
+| Wrong/no sound device | banner `output` row (`null`?) | set `ONDAIRE_OUTPUT` / pick the device in the UI |
 | Phone can't see the node | banner `spotify` row; `comp=spotify` logs | install go-librespot ([Spotify Connect](spotify.md)); host networking under Docker |
 
 The Wi-Fi tuning dials (group buffer, ALSA latency, opus vs TCP) are covered in the
@@ -220,5 +220,5 @@ and the [Configuration Reference](config-reference.md#6-audio-output-backend).
 ---
 
 **See also:** [Configuration Reference](config-reference.md) ·
-[Running ensemble](running.md) · [UI Reference](ui-reference.md) ·
+[Running ondaire](running.md) · [UI Reference](ui-reference.md) ·
 [User Guide](README.md)

@@ -1,14 +1,14 @@
-# Ensemble — UI Reference
+# Ondaire — UI Reference
 
 > **You are here:** [User Guide](README.md) › **UI Reference**
-> New to ensemble? Start with the [overview and setup scenarios](README.md). This
+> New to ondaire? Start with the [overview and setup scenarios](README.md). This
 > page is the screen-by-screen reference for the web app — where every control
 > lives and what it does.
 
-Ensemble turns the speakers around your home into synchronized, groupable rooms
+Ondaire turns the speakers around your home into synchronized, groupable rooms
 you control from a phone or browser. This page walks through the web UI.
 
-> **One app, every node.** Every ensemble node serves the *same* web app and
+> **One app, every node.** Every ondaire node serves the *same* web app and
 > proxies to the others, so it doesn't matter which node's address you open
 > (`http://<any-node-ip>:8080`). There are two pages: the **Rooms** overview
 > (landing page) and the **Nodes** page (the **⚙ gear**, top-right). The pill
@@ -152,11 +152,11 @@ the node name (click to rename), its short ID, and live/last-seen status.
 On a node that runs go-librespot, the **Spotify endpoints** section manages the
 Spotify Connect devices it advertises:
 
-- **Default device** — `ensemble <node>` (read-only). Playing to it from the
+- **Default device** — `ondaire <node>` (read-only). Playing to it from the
   Spotify app plays to whatever group that node currently masters — the original
   behavior.
 - **Presets** — add named endpoints (e.g. **`all`**). Each advertises its own
-  Connect device, **`ensemble <node>: <name>`**, and carries a row of **player
+  Connect device, **`ondaire <node>: <name>`**, and carries a row of **player
   chips** (the playback-capable nodes); tap a chip to toggle a player in/out
   (**green = included**). When you pick that device in the Spotify app, the node
   **regroups to exactly those players, then plays**. Only the part after the colon

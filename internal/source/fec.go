@@ -1,6 +1,6 @@
 package source
 
-import "ensemble/internal/stream"
+import "ondaire/internal/stream"
 
 // fecBlockSize is the number of data frames per FEC block (§8.4).
 const fecBlockSize = 4

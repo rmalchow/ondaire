@@ -1,47 +1,47 @@
-menu "ensemble playback node"
+menu "ondaire playback node"
 
-    choice ENSEMBLE_BOARD
+    choice ONDAIRE_BOARD
         prompt "Target board"
-        default ENSEMBLE_BOARD_ESP32S3
+        default ONDAIRE_BOARD_ESP32S3
         help
             Selects the default pin map and capabilities in boards/. Every value
             is overridable at provisioning time over USB and stored in NVS, so one
             image still fits many wirings — this only sets the power-on defaults.
 
-        config ENSEMBLE_BOARD_ESP32S3
+        config ONDAIRE_BOARD_ESP32S3
             bool "ESP32-S3-WROOM-1 / DevKitC-1"
-        config ENSEMBLE_BOARD_ESP32S3_SUPERMINI
+        config ONDAIRE_BOARD_ESP32S3_SUPERMINI
             bool "ESP32-S3 Super Mini (22.5x18mm, USB-C, WS2812 on GPIO48)"
-        config ENSEMBLE_BOARD_ESP32S3_ZERO
+        config ONDAIRE_BOARD_ESP32S3_ZERO
             bool "Waveshare ESP32-S3-Zero (23.5x18mm, USB-C, WS2812 on GPIO21)"
-        config ENSEMBLE_BOARD_ESP32S3_AMPED_PLUS
+        config ONDAIRE_BOARD_ESP32S3_AMPED_PLUS
             bool "Sonocotta Amped-ESP32-S3-Plus (PCM5122 DAC + TPA3110 amp, N16R8)"
-        config ENSEMBLE_BOARD_ESP32S3_HIFI
+        config ONDAIRE_BOARD_ESP32S3_HIFI
             bool "Sonocotta HiFi-ESP32-S3 (PCM5100A DAC, line-out)"
-        config ENSEMBLE_BOARD_ESP32S3_AMPED
+        config ONDAIRE_BOARD_ESP32S3_AMPED
             bool "Sonocotta Amped-ESP32-S3 (PCM5100A DAC + TPA3110 amp)"
-        config ENSEMBLE_BOARD_ESP32S3_LOUD
+        config ONDAIRE_BOARD_ESP32S3_LOUD
             bool "Sonocotta Loud-ESP32-S3 (dual MAX98357A DAC+amp)"
-        config ENSEMBLE_BOARD_ESP32S3_HIFI_PLUS
+        config ONDAIRE_BOARD_ESP32S3_HIFI_PLUS
             bool "Sonocotta HiFi-ESP32-Plus (PCM5122 DSP DAC, line-out)"
-        config ENSEMBLE_BOARD_ESP32S3_LOUDER
+        config ONDAIRE_BOARD_ESP32S3_LOUDER
             bool "Sonocotta Louder-ESP32-S3 / Mini (TAS5805M DSP amp)"
-        config ENSEMBLE_BOARD_ESP32S3_LOUDER_PLUS
+        config ONDAIRE_BOARD_ESP32S3_LOUDER_PLUS
             bool "Sonocotta Louder-ESP32-Plus / Pro (TAS5825M DSP amp)"
-        config ENSEMBLE_BOARD_ESP32S3_LOUD_PLUS
+        config ONDAIRE_BOARD_ESP32S3_LOUD_PLUS
             bool "Sonocotta Loud-ESP32-Plus (MA12070P DSP amp)"
-        config ENSEMBLE_BOARD_GENERIC
+        config ONDAIRE_BOARD_GENERIC
             bool "Generic (compile-time pins, no board profile)"
     endchoice
 
-    config ENSEMBLE_CONTROL_PORT
+    config ONDAIRE_CONTROL_PORT
         int "Default CONTROL_PORT (master -> playback commands)"
         default 9300
         help
             UDP port advertised over mDNS where the master sends ATTACH / DETACH /
             SETVOL etc. (PLAYER §4). Overridable in NVS.
 
-    config ENSEMBLE_STA_CONNECT_TIMEOUT_MS
+    config ONDAIRE_STA_CONNECT_TIMEOUT_MS
         int "Wi-Fi connect timeout before falling into the captive portal (ms)"
         default 30000
         help
@@ -49,7 +49,7 @@ menu "ensemble playback node"
             giving up and opening the Wi-Fi captive portal (provision.c). Covers a
             transient outage of the stored AP.
 
-    config ENSEMBLE_PORTAL_TIMEOUT_MS
+    config ONDAIRE_PORTAL_TIMEOUT_MS
         int "Captive-portal lifetime before going inert (ms)"
         default 600000
         help

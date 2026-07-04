@@ -1,8 +1,8 @@
 package group
 
 import (
-	"ensemble/internal/contracts"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/stream"
 )
 
 // settings bounds (§9.1).

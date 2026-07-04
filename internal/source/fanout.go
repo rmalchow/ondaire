@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"io"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // TCP length framing (D13: uint32 big-endian length prefix before each

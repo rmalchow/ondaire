@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // These tests are a PURE, deterministic closed-loop simulation of the low-pass-filtered

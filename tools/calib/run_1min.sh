@@ -2,7 +2,7 @@
 # Quick 1-minute dual-tone capture to validate the servo fix (fedPTS anchored to
 # consumed-at-prime). Records mic + plays calib_tones.wav + polls statuses at 1 Hz.
 set -u
-cd /home/rm/Git/gitlab.rand0m.me/share/ensemble
+cd /home/rm/Git/gitlab.rand0m.me/share/ondaire
 MASTER=http://192.168.71.63:8080
 WAV=tools/calib/results/tones_1min.wav
 LOG=tools/calib/results/tones_stats_1min.jsonl

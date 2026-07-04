@@ -1,4 +1,4 @@
-# ensemble — a skeptic's read
+# ondaire — a skeptic's read
 
 *Notes from an experienced developer / smart-home tinkerer who found the
 marketing site, read it with a raised eyebrow, then went and read the source.*
@@ -6,7 +6,7 @@ marketing site, read it with a raised eyebrow, then went and read the source.*
 ## First impression (the site)
 
 The landing copy is *suspiciously* clean. "Every room. One sound. Zero fuss."
-→ `./ensemble` → "That's the whole setup." My reflex with that kind of pitch is
+→ `./ondaire` → "That's the whole setup." My reflex with that kind of pitch is
 to assume it's hiding a config nightmare behind a hero animation. Snapcast does
 multiroom too, and anyone who's actually run Snapcast knows the gap between "it
 syncs!" and "it syncs reliably on my WiFi" is where the weekends go.

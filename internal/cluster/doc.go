@@ -1,8 +1,8 @@
 package cluster
 
 import (
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // Document is the whole replicated state (§4). In-memory only; never persisted.

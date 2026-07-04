@@ -28,7 +28,7 @@ func TestOpenLibcSucceeds(t *testing.T) {
 }
 
 func TestOpenBogusSonameUnavailable(t *testing.T) {
-	_, err := Open([]string{"libdefinitelynotreal_ensemble.so.999"}, []string{"foo"})
+	_, err := Open([]string{"libdefinitelynotreal_ondaire.so.999"}, []string{"foo"})
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("want ErrUnavailable, got %v", err)
 	}

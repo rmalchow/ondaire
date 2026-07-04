@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 // maxPlaylistDepth bounds .pls/.m3u indirection so a self-referential playlist

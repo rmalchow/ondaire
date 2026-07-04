@@ -5,12 +5,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 // observeMiddleware records a peer's real source IP into the cluster's
-// observation map (§3.1). A request carrying X-Ensemble-Proxied:1 came directly
-// from a peer node's socket, and X-Ensemble-From names that peer — so its
+// observation map (§3.1). A request carrying X-Ondaire-Proxied:1 came directly
+// from a peer node's socket, and X-Ondaire-From names that peer — so its
 // RemoteAddr IP is a genuine observed address for THAT peer. We never trust
 // X-Forwarded-For (§3.1 trust model); RemoteAddr only.
 func (s *Server) observeMiddleware(next echo.HandlerFunc) echo.HandlerFunc {

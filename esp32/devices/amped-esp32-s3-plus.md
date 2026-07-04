@@ -20,7 +20,7 @@ external DAC to wire. This is the `esp32s3-amped-plus` board profile
   *"N16R8"* (16 MB), but the shipping board reports **8 MB** (`esptool flash_id`
   / the boot log) and Sonocotta's own ESPHome build uses 8 MB — flashing a 16 MB
   image boot-loops (*"Detected size smaller than the binary image header"*).
-- PSRAM: **8 MB** embedded **octal** — comfortably over the ensemble
+- PSRAM: **8 MB** embedded **octal** — comfortably over the ondaire
   player minimum (players are PSRAM-only; see
   [`docs/developer/esp32.md`](../../docs/developer/esp32.md) §3.1)
 - USB: native USB-Serial-JTAG over USB-C (the only USB port; flashing + console).
@@ -61,7 +61,7 @@ Source: the rev-C schematic plus Sonocotta's own ESPHome / Squeezelite configs
 (`dac_config: bck=14,ws=15,do=16,sda=18,scl=8,i2c=77`; `set_GPIO: 7=ir,17=amp`)
 at <https://github.com/sonocotta/esp32-audio-dock>.
 
-## Use as an ensemble player
+## Use as an ondaire player
 
 Build and flash:
 

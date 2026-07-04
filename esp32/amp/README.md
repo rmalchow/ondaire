@@ -1,4 +1,4 @@
-# ensemble amp — ESP32-S3 carrier / 50 W class-D node
+# ondaire amp — ESP32-S3 carrier / 50 W class-D node
 
 A KiCad 10 project for a **powered-speaker node**: an ESP32-S3 dev board drops
 into a socket, an I²S DAC + class-D amp turn the stream into ~40–50 W of audio,

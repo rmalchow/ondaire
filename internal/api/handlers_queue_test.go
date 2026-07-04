@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 func TestEnqueueFoldsAndDelegates(t *testing.T) {

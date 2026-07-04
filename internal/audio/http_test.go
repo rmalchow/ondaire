@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 func TestHTTPContentTypeDispatch(t *testing.T) {

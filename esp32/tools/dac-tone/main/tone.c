@@ -2,7 +2,7 @@
 //
 // Cycles a 480 Hz tone through LEFT-only, RIGHT-only, BOTH, then silence — so
 // you can confirm both line-out channels are alive and not swapped. Uses the
-// same I2S setup as the ensemble player: Philips/I2S, 16-bit stereo, 48 kHz,
+// same I2S setup as the ondaire player: Philips/I2S, 16-bit stereo, 48 kHz,
 // MCLK off (PCM5102A onboard PLL), APLL when the silicon has it (the S3 doesn't).
 //
 // Default pins = board_esp32s3_supermini.h:  BCK=GPIO5, LCK=GPIO6, DIN=GPIO7.

@@ -10,7 +10,7 @@ way as the S3-Zero.
 
 > **PSRAM warning — check before you buy/build.** "ESP32-S3 Super Mini" is sold
 > in two flavors: a bare **ESP32-S3** (no PSRAM) and an **ESP32-S3FH4R2** with
-> 2 MB embedded PSRAM. ensemble players are **PSRAM-only** (see
+> 2 MB embedded PSRAM. ondaire players are **PSRAM-only** (see
 > [`docs/developer/esp32.md`](../../docs/developer/esp32.md) §3.1) — only the
 > 2 MB-PSRAM variant is a viable player. Confirm with `esptool.py flash_id`
 > (looks for `Features: ... Embedded PSRAM 2MB`).
@@ -101,7 +101,7 @@ these are not on the headers and must never be repurposed.
 - There is no separate UART bridge chip; the broken-out TX/RX (GPIO43/44) are
   plain UART0 you can repurpose.
 
-## Use as an ensemble player
+## Use as an ondaire player
 
 - **DAC wiring** matches the DevKitC profile exactly — see
   [`pcm5102a-dac.md`](pcm5102a-dac.md). Default pins (board profile

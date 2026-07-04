@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"ensemble/internal/sink/device"
+	"ondaire/internal/sink/device"
 )
 
 // compile-time capability assertions: exec honours Sink + Flusher + Interrupter +

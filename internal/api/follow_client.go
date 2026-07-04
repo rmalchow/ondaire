@@ -10,14 +10,14 @@ import (
 	"strconv"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // FollowClientImpl implements contracts.FollowClient. The group engine (H) calls
 // it during takeover (§5.2) to drive POST /api/follow / /api/unfollow on peers.
 // It dials peers directly (not through the proxy) using DialCandidates, setting
-// X-Ensemble-Proxied:1 so the peer treats it as a terminal request. Built before
+// X-Ondaire-Proxied:1 so the peer treats it as a terminal request. Built before
 // the engine (D16/D31), bound only to the cluster — no dependency on the server.
 type FollowClientImpl struct {
 	cluster Cluster

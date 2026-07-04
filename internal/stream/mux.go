@@ -84,7 +84,7 @@ func (m *Mux) loop() {
 			}
 		}
 		if n < HeaderSize || buf[0] != Magic {
-			continue // drop malformed / non-ensemble datagrams
+			continue // drop malformed / non-ondaire datagrams
 		}
 		typ := buf[1]
 		m.mu.RLock()

@@ -9,7 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 // wsEvent is the envelope for every server→client WS message (§9.2).

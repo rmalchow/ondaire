@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // registry holds the live subscribers, keyed by their OBSERVED source address

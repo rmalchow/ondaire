@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 func ap(s string) netip.AddrPort { return netip.MustParseAddrPort(s) }

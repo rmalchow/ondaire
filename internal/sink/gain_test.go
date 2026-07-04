@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 func dcFrame(v int16) []byte {

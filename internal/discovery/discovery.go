@@ -1,4 +1,4 @@
-// Package discovery registers and browses the _ensemble._tcp mDNS service and
+// Package discovery registers and browses the _ondaire._tcp mDNS service and
 // emits discovered peers on a channel (§3 / §3.1). It is the mDNS half of
 // discovery only: it does no gossip joining — the cluster piece (C) consumes
 // the deduplicated Peer channel and joins peers itself. The dependency arrow is
@@ -20,15 +20,15 @@ import (
 	"sync"
 	"time"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 
 	"github.com/grandcat/zeroconf"
 	"github.com/hashicorp/mdns"
 )
 
-// ServiceName / Domain are the fixed mDNS coordinates for ensemble (§3).
+// ServiceName / Domain are the fixed mDNS coordinates for ondaire (§3).
 const (
-	ServiceName = "_ensemble._tcp"
+	ServiceName = "_ondaire._tcp"
 	Domain      = "local."
 )
 
@@ -78,7 +78,7 @@ func fromMDNS(e *mdns.ServiceEntry) *mdnsEntry {
 	return m
 }
 
-// Peer is one discovered ensemble node, as advertised in its mDNS TXT record
+// Peer is one discovered ondaire node, as advertised in its mDNS TXT record
 // (§3 / PLAYER §5) plus the address the responder was reached on. It is the
 // unit C consumes: a Master peer is gossip-joined; a playback-only peer (D50) is
 // represented as a non-gossiping member instead.
@@ -144,10 +144,10 @@ type Config struct {
 	Instance string // mDNS instance name; use ID.String() for uniqueness
 
 	// HostIP, when set, is the single IP advertised in the mDNS A/AAAA record
-	// (§3.1). It comes from an explicit --host / ENSEMBLE_HOST. Empty => let
+	// (§3.1). It comes from an explicit --host / ONDAIRE_HOST. Empty => let
 	// zeroconf enumerate every multicast interface, which on a host-networked
 	// container picks up docker-bridge addresses (e.g. 172.18.0.1) that peers
-	// can't route to. Pinning it makes ENSEMBLE_HOST authoritative for discovery,
+	// can't route to. Pinning it makes ONDAIRE_HOST authoritative for discovery,
 	// not just for binding.
 	HostIP string
 
@@ -347,7 +347,7 @@ func proxyHost() string {
 	if h, err := os.Hostname(); err == nil && h != "" {
 		return h
 	}
-	return "ensemble"
+	return "ondaire"
 }
 
 // registerKeeper registers the mDNS service, retrying on failure until ctx is

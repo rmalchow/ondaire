@@ -3,8 +3,8 @@ package group
 import (
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // follow sets the node's PLAYER target (D49+). Any id is allowed — including self

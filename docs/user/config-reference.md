@@ -1,11 +1,11 @@
-# Ensemble — Configuration Reference
+# Ondaire — Configuration Reference
 
 > **You are here:** [User Guide](README.md) › **Configuration Reference**
-> This page documents every knob ensemble has, with the *why* behind each one.
+> This page documents every knob ondaire has, with the *why* behind each one.
 > For where controls live in the app, see the [UI Reference](ui-reference.md). For
 > step-by-step setup, see the [scenarios](README.md#pick-your-setup).
 
-Ensemble is designed to need **no configuration** — `./ensemble` with no arguments
+Ondaire is designed to need **no configuration** — `./ondaire` with no arguments
 is the intended way to run it on most machines. Everything below is optional, for
 when you want to pin a port, point at a library elsewhere, restrict a node to one
 role, or understand a setting you found in the UI.
@@ -24,7 +24,7 @@ There are two layers of configuration, and it's worth keeping them straight:
 ## 1. How options are resolved
 
 Every startup option can be given as a command-line **flag** or an
-**`ENSEMBLE_*` environment variable**. Precedence, highest first:
+**`ONDAIRE_*` environment variable**. Precedence, highest first:
 
 ```
 flag  >  environment variable  >  built-in default
@@ -35,21 +35,21 @@ So a flag always wins over the matching env var, and either wins over the defaul
 **Native binary** — pass flags, or export env vars:
 
 ```sh
-./ensemble --name kitchen --role playback
+./ondaire --name kitchen --role playback
 # equivalently:
-ENSEMBLE_ROLE=playback ./ensemble --name kitchen
+ONDAIRE_ROLE=playback ./ondaire --name kitchen
 ```
 
 **Docker** — env vars via Compose `environment:` (or `-e`), and/or flags **after**
 the image name:
 
 ```sh
-docker run --network host -e ENSEMBLE_LOG=debug \
-  harbor.rand0m.me/public/ensemble:latest --name living-room
+docker run --network host -e ONDAIRE_LOG=debug \
+  harbor.rand0m.me/public/ondaire:latest --name living-room
 ```
 
-> `ensemble run …` is accepted as an alias for `ensemble …`, and `-v` is shorthand
-> for `ENSEMBLE_LOG=debug`. For what the banner and log lines mean — including the
+> `ondaire run …` is accepted as an alias for `ondaire …`, and `-v` is shorthand
+> for `ONDAIRE_LOG=debug`. For what the banner and log lines mean — including the
 > per-second clock & playback fields — see [Debugging](debugging.md).
 
 ---
@@ -58,9 +58,9 @@ docker run --network host -e ENSEMBLE_LOG=debug \
 
 | Flag | Env | Default | What it does |
 |------|-----|---------|--------------|
-| `--name <name>` | — | first 8 hex of the node ID | The node's **display name**, shown in the UI and used to derive its Spotify Connect device name (`ensemble <name>`). **Applied on first start only** — afterwards, rename from the Nodes page (the name is persisted and replicated). |
-| `--data <dir>` | `ENSEMBLE_DATA_DIR` | `./data` (relative to the working dir) | The **data directory**: holds `node.json` (this node's identity + settings), `cluster.json` (replicated cluster state), and — if Spotify is used — go-librespot's credentials and audio FIFO. Must be **writable** and should **persist across restarts/upgrades** so the node keeps its identity and Spotify login. |
-| `--media <dir>` | `ENSEMBLE_MEDIA_DIR` | `<data>/media` | The **library directory**, browsed **recursively** in the UI. Point it at your existing music folder. Read-only is fine — ensemble only ever reads from it. |
+| `--name <name>` | — | first 8 hex of the node ID | The node's **display name**, shown in the UI and used to derive its Spotify Connect device name (`ondaire <name>`). **Applied on first start only** — afterwards, rename from the Nodes page (the name is persisted and replicated). |
+| `--data <dir>` | `ONDAIRE_DATA_DIR` | `./data` (relative to the working dir) | The **data directory**: holds `node.json` (this node's identity + settings), `cluster.json` (replicated cluster state), and — if Spotify is used — go-librespot's credentials and audio FIFO. Must be **writable** and should **persist across restarts/upgrades** so the node keeps its identity and Spotify login. |
+| `--media <dir>` | `ONDAIRE_MEDIA_DIR` | `<data>/media` | The **library directory**, browsed **recursively** in the UI. Point it at your existing music folder. Read-only is fine — ondaire only ever reads from it. |
 
 **Identity.** On first start a node mints a permanent random ID and writes
 `node.json`. That ID — not the name or IP — is the node's stable identity; you can
@@ -71,7 +71,7 @@ and the node keeps its identity.
 
 ## 3. Roles
 
-A node runs one or both roles. Set with `--role` / `ENSEMBLE_ROLE`:
+A node runs one or both roles. Set with `--role` / `ONDAIRE_ROLE`:
 
 | Value | Meaning |
 |-------|---------|
@@ -92,11 +92,11 @@ is an error.
 
 | Flag | Env | Default | Purpose |
 |------|-----|---------|---------|
-| `--http-port` | `ENSEMBLE_HTTP_PORT` | `8080` | UI + REST API + WebSocket + node-to-node proxy |
-| `--stream-port` | `ENSEMBLE_STREAM_PORT` | `9090` | member-side stream + clock sync (TCP+UDP) |
-| `--source-port` | `ENSEMBLE_SOURCE_PORT` | `9200` | audio source: subscriptions + stream control (TCP+UDP) |
-| `--control-port` | `ENSEMBLE_CONTROL_PORT` | `9300` | master→playback commands |
-| `--gossip-port` | `ENSEMBLE_GOSSIP_PORT` | `7946` | cluster gossip / membership (TCP+UDP) |
+| `--http-port` | `ONDAIRE_HTTP_PORT` | `8080` | UI + REST API + WebSocket + node-to-node proxy |
+| `--stream-port` | `ONDAIRE_STREAM_PORT` | `9090` | member-side stream + clock sync (TCP+UDP) |
+| `--source-port` | `ONDAIRE_SOURCE_PORT` | `9200` | audio source: subscriptions + stream control (TCP+UDP) |
+| `--control-port` | `ONDAIRE_CONTROL_PORT` | `9300` | master→playback commands |
+| `--gossip-port` | `ONDAIRE_GOSSIP_PORT` | `7946` | cluster gossip / membership (TCP+UDP) |
 
 ### Bind-or-increment vs. pinned
 
@@ -127,8 +127,8 @@ in each other's UI within seconds of starting.
 
 | Flag | Env | What it does |
 |------|-----|--------------|
-| `--no-mdns` | `ENSEMBLE_NO_MDNS=1` | **Disable mDNS** entirely (no announce, no browse). For hermetic tests or networks where multicast is blocked. You must then seed the cluster manually with `--join`. |
-| `--join <host:gossipPort>,…` | `ENSEMBLE_JOIN` | **Seed list** of peers to gossip with directly, comma-separated (e.g. `192.168.1.10:7946`). Used together with `--no-mdns`, or to bridge across subnets. |
+| `--no-mdns` | `ONDAIRE_NO_MDNS=1` | **Disable mDNS** entirely (no announce, no browse). For hermetic tests or networks where multicast is blocked. You must then seed the cluster manually with `--join`. |
+| `--join <host:gossipPort>,…` | `ONDAIRE_JOIN` | **Seed list** of peers to gossip with directly, comma-separated (e.g. `192.168.1.10:7946`). Used together with `--no-mdns`, or to bridge across subnets. |
 
 > mDNS is the recommended path on a normal home LAN. Reach for `--no-mdns`/`--join`
 > only when multicast doesn't work (some managed switches, VLANs, or Docker
@@ -142,10 +142,10 @@ How a **player** gets sound out of the box it runs on:
 
 | Flag | Env | Default | What it does |
 |------|-----|---------|--------------|
-| `--output <spec>` | `ENSEMBLE_OUTPUT` | `auto` | Selects the output backend (see below). |
-| — | `ENSEMBLE_ALSA_LATENCY_MS` | `200` | ALSA device buffer in ms. **Raise it** (e.g. `400`) if a Pi crackles or underruns; lower it for tighter latency on a solid machine. |
+| `--output <spec>` | `ONDAIRE_OUTPUT` | `auto` | Selects the output backend (see below). |
+| — | `ONDAIRE_ALSA_LATENCY_MS` | `200` | ALSA device buffer in ms. **Raise it** (e.g. `400`) if a Pi crackles or underruns; lower it for tighter latency on a solid machine. |
 
-`--output` / `ENSEMBLE_OUTPUT` values:
+`--output` / `ONDAIRE_OUTPUT` values:
 
 - **`auto`** *(default)* — pick the best available backend, in order:
   **alsa → exec → null**. This is what makes "just run it" work everywhere.
@@ -203,7 +203,7 @@ Different speakers and amplifiers add different fixed delays of their own (DSP,
 Bluetooth-style buffering, a slow DAC). When two rooms are *almost* in sync but one
 trails the other by a hair, **hw delay** nudges that node's output earlier or later
 to compensate that fixed device latency, so the rooms line up perfectly. It only
-corrects a *constant* offset — ensemble's clock sync and rate servo already handle
+corrects a *constant* offset — ondaire's clock sync and rate servo already handle
 drift over time. Hovering the label in the UI shows the same explanation; changing
 it causes a brief local restart of that node's output.
 
@@ -215,10 +215,10 @@ it causes a brief local restart of that node's output.
 ## 9. go-librespot resolution
 
 Spotify Connect is provided by an external **go-librespot** binary. At startup,
-ensemble looks for it (then for `librespot`) in this order:
+ondaire looks for it (then for `librespot`) in this order:
 
 1. **The working directory** — an executable `./go-librespot` next to where you
-   launched ensemble.
+   launched ondaire.
 2. **`$PATH`** — anywhere on the system path.
 
 If neither is found, Spotify is simply disabled (the banner says so) and everything
@@ -233,14 +233,14 @@ extra steps.
 
 ```sh
 # A headless NAS master, library on an existing folder, verbose logs:
-ENSEMBLE_ROLE=master ENSEMBLE_MEDIA_DIR=/srv/music ENSEMBLE_LOG=debug ./ensemble --name house
+ONDAIRE_ROLE=master ONDAIRE_MEDIA_DIR=/srv/music ONDAIRE_LOG=debug ./ondaire --name house
 
 # A Raspberry Pi player with a roomier ALSA buffer (it was crackling):
-ENSEMBLE_ALSA_LATENCY_MS=400 ./ensemble --role playback --name bathroom
+ONDAIRE_ALSA_LATENCY_MS=400 ./ondaire --role playback --name bathroom
 
 # Two throwaway nodes on one laptop to try grouping (null audio, auto-incrementing ports):
-ENSEMBLE_OUTPUT=null ./ensemble --data /tmp/n1 --name a &
-ENSEMBLE_OUTPUT=null ./ensemble --data /tmp/n2 --name b &
+ONDAIRE_OUTPUT=null ./ondaire --data /tmp/n1 --name a &
+ONDAIRE_OUTPUT=null ./ondaire --data /tmp/n2 --name b &
 ```
 
 ---

@@ -1,8 +1,8 @@
 {
-  "name": "ensemble-site",
+  "name": "ondaire-site",
   "version": "1.0.0",
   "private": true,
-  "description": "Marketing site for ensemble — a zero-dependency static generator.",
+  "description": "Marketing site for ondaire — a zero-dependency static generator.",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",

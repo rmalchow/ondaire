@@ -3,7 +3,7 @@ package audio
 import (
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 func TestResamplePassthrough48k(t *testing.T) {

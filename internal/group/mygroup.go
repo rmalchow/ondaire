@@ -1,8 +1,8 @@
 package group
 
 import (
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // myView is this node's resolved position in the pre-derived snapshot. Under the

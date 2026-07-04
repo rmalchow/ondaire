@@ -9,12 +9,12 @@ import (
 	"os"
 	"time"
 
-	"ensemble/internal/sink/device"
-	_ "ensemble/internal/sink/device/alsa"
-	_ "ensemble/internal/sink/device/exec"
-	_ "ensemble/internal/sink/device/file"
-	_ "ensemble/internal/sink/device/null"
-	"ensemble/internal/stream"
+	"ondaire/internal/sink/device"
+	_ "ondaire/internal/sink/device/alsa"
+	_ "ondaire/internal/sink/device/exec"
+	_ "ondaire/internal/sink/device/file"
+	_ "ondaire/internal/sink/device/null"
+	"ondaire/internal/stream"
 )
 
 func main() {

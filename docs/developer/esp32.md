@@ -1,6 +1,6 @@
 # ESP32 player (PSRAM ESP32-S3 / WROVER)
 
-A hardware **player**: a tiny receive-only ensemble speaker built on a
+A hardware **player**: a tiny receive-only ondaire speaker built on a
 **PSRAM-equipped ESP32** (ESP32-S3-WROOM-1 or classic ESP32-WROVER) + an I2S DAC.
 It is **visible and
 assignable** in the cluster (it shows up in the UI, you can drop it into any
@@ -151,7 +151,7 @@ browser-based flasher/provisioner.
 ## 1b. Membership — discovered, represented, assigned (no gossip, no HTTP on the MCU)
 
 A player is **visible and assignable**, not a hidden fixed-IP speaker — yet it
-neither gossips nor runs any HTTP. ensemble's gossip is hashicorp/memberlist (SWIM,
+neither gossips nor runs any HTTP. ondaire's gossip is hashicorp/memberlist (SWIM,
 TCP push/pull, msgpack, LWW-doc replication) — too heavy for an MCU and unnecessary.
 Instead the MCU only **advertises over mDNS** and **answers the v2 control plane**;
 a master (the "room" role) discovers, represents, and drives it:
@@ -159,7 +159,7 @@ a master (the "room" role) discovers, represents, and drives it:
 ```
    ESP player                       master (a "room")
    ──────────                       ─────────────────
-   mDNS advertise  ───────────────▶ discovers _ensemble._tcp (role=playback, caps)
+   mDNS advertise  ───────────────▶ discovers _ondaire._tcp (role=playback, caps)
    role=playback,id,control         │  injects a NON-GOSSIPING node record into the
                                      │  cluster doc; liveness = mDNS freshness OR STATUS
    ATTACH/SETVOL/SETDELAY  ◀─────────┤  drives it (assigned via `Following`); the UI's
@@ -322,7 +322,7 @@ silence. Apply local volume (gain or DAC register) just before I2S.
 
 ## 5. Configuration (NVS)
 
-All settings persist in NVS namespace `ensemble`. Defaults let an unprovisioned
+All settings persist in NVS namespace `ondaire`. Defaults let an unprovisioned
 board boot into AP/provisioning mode.
 
 | Key | Type | Meaning |
@@ -435,9 +435,9 @@ portal** (`main/provision.c`). It comes up in two cases:
 
 - **Unprovisioned** — no `wifi_ssid` in NVS; or
 - **Can't connect** — creds exist but no IP within
-  `CONFIG_ENSEMBLE_STA_CONNECT_TIMEOUT_MS` (default 30 s), e.g. the stored AP is gone.
+  `CONFIG_ONDAIRE_STA_CONNECT_TIMEOUT_MS` (default 30 s), e.g. the stored AP is gone.
 
-It opens an **open AP** named `ensemble-<first-4-hex-of-node-id>` (matching the mDNS
+It opens an **open AP** named `ondaire-<first-4-hex-of-node-id>` (matching the mDNS
 hostname), runs in **AP+STA** so the page can scan, and serves:
 
 - `GET /` — a small offline form: Wi-Fi network (a datalist populated from `/scan`,
@@ -448,7 +448,7 @@ hostname), runs in **AP+STA** so the page can scan, and serves:
 - a catch-all **302 → `http://192.168.4.1/`** plus a wildcard **DNS responder** so
   the OS "sign-in" sheet pops up automatically.
 
-The portal lives `CONFIG_ENSEMBLE_PORTAL_TIMEOUT_MS` (default **10 min**), then tears
+The portal lives `CONFIG_ONDAIRE_PORTAL_TIMEOUT_MS` (default **10 min**), then tears
 itself down and the node goes **inert** — no reboot, no retry — until it is
 power-cycled. The USB console stays live the whole time as the wired fallback. This
 realigns with §5 ("an unprovisioned board boots into AP/provisioning mode").
@@ -466,7 +466,7 @@ realigns with §5 ("an unprovisioned board boots into AP/provisioning mode").
 ## 7. Build, partitions, OTA
 - **ESP-IDF 5.x**; pick a target with `./build.sh <board>` (or `idf.py
   -DBOARD=<board> build`) per [Boards & build targets](#boards--build-targets).
-  Each board build merges to one `ensemble-fw-<board>.bin` for the flasher
+  Each board build merges to one `ondaire-fw-<board>.bin` for the flasher
   manifest; CI produces them alongside the Go release.
 - Partition table: NVS + otadata + 2 OTA slots (`esp32/partitions.csv`). App-only
   flash at `0x20000` preserves NVS (node id + Wi-Fi); a merged flash at `0x0`
@@ -490,5 +490,5 @@ to remove the fixed per-device offset).
 Receive-only and non-mastering (no library, never sources); membership via mDNS +
 the v2 control plane (no gossip, no HTTP on the MCU — a master discovers, represents,
 and drives it, §1b); opus on Wi-Fi; one group at a time; 2.4 GHz Wi-Fi. No TLS/auth
-(trusted LAN, matching the rest of ensemble). Mic/voice and BLE are out of scope (a
+(trusted LAN, matching the rest of ondaire). Mic/voice and BLE are out of scope (a
 player is receive-only over Wi-Fi).

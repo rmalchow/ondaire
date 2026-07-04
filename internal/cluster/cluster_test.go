@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/discovery"
-	"ensemble/internal/id"
+	"ondaire/internal/discovery"
+	"ondaire/internal/id"
 )
 
 // freeUDPPort returns a likely-free UDP port on loopback. memberlist binds both

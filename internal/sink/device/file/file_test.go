@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/sink/device"
-	"ensemble/internal/stream"
+	"ondaire/internal/sink/device"
+	"ondaire/internal/stream"
 )
 
 // compile-time capability assertions for the file adapter.

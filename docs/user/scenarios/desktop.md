@@ -6,16 +6,16 @@
 ## What this is, and why
 
 The computer **already on your desk** — a Linux desktop, a laptop, an old machine
-in the corner — using **its existing sound card and speakers**. Run ensemble on it
+in the corner — using **its existing sound card and speakers**. Run ondaire on it
 and it becomes a node like any other: it can play out its speakers *and* (because
 it has storage) host a library and master a group.
 
 **Why start here?**
 
 - **Zero new hardware.** You already own the computer and the speakers; this is the
-  fastest way to hear ensemble working.
+  fastest way to hear ondaire working.
 - **It's both player and master.** Unlike a thin Pi or a headless NAS, a desktop can
-  do everything — so a single desktop is a complete, one-machine ensemble, and a
+  do everything — so a single desktop is a complete, one-machine ondaire, and a
   room full of desktops needs no separate server at all.
 - **Great for an office.** In the **shared studio** every desk is already a capable
   node; group them and you've got whole-floor sound with nothing extra to buy.
@@ -27,10 +27,10 @@ This is the heart of the **studio** example, and a fine alternative to a NAS for
 
 ## Quick start: one machine
 
-The fastest way to see ensemble run at all:
+The fastest way to see ondaire run at all:
 
 ```sh
-./ensemble                       # no flags: sensible defaults, both roles
+./ondaire                       # no flags: sensible defaults, both roles
 ```
 
 Then:
@@ -41,13 +41,13 @@ Then:
 3. Select the room, browse to a track, hit **Play here** — it plays out your
    computer's speakers.
 
-That's a complete, if lonely, ensemble. The magic starts with a second node.
+That's a complete, if lonely, ondaire. The magic starts with a second node.
 
 ---
 
 ## Add a second node (the studio floor)
 
-Run ensemble on a colleague's machine on the same network — same command — and the
+Run ondaire on a colleague's machine on the same network — same command — and the
 two **find each other within seconds** over mDNS. Now:
 
 - Open **any** of the machines' addresses (they all serve the same app and proxy to
@@ -63,7 +63,7 @@ Three colleagues, three desktops, one soundtrack: that's the studio.
 > your shared music folder and let it be the master:
 >
 > ```sh
-> ./ensemble --name studio --media /shared/music
+> ./ondaire --name studio --media /shared/music
 > ```
 >
 > The other desks can stay pure players if you prefer (`--role playback`), or remain
@@ -74,7 +74,7 @@ Three colleagues, three desktops, one soundtrack: that's the studio.
 
 ## Audio output on a desktop
 
-Most Linux desktops run **PipeWire** or **PulseAudio**. Ensemble's `auto` backend
+Most Linux desktops run **PipeWire** or **PulseAudio**. Ondaire's `auto` backend
 handles this:
 
 - It uses **ALSA** directly where it can.
@@ -82,7 +82,7 @@ handles this:
   so audio is piped to a player command:
 
   ```sh
-  ENSEMBLE_OUTPUT=exec ./ensemble --name desk
+  ONDAIRE_OUTPUT=exec ./ondaire --name desk
   ```
 
   (`auto` already falls back to `exec`/`pw-play`/`aplay` when direct ALSA isn't the
@@ -98,17 +98,17 @@ handles this:
 ## Spotify & podcasts from a desktop
 
 Want this desktop to be the thing your phone casts Spotify (or podcasts) to? Give it
-a **go-librespot** binary and it advertises an `ensemble <name>` Connect device:
+a **go-librespot** binary and it advertises an `ondaire <name>` Connect device:
 
 ```sh
-# put go-librespot next to the ensemble binary, then run as usual
-ls            # ensemble  go-librespot
-./ensemble --name studio
+# put go-librespot next to the ondaire binary, then run as usual
+ls            # ondaire  go-librespot
+./ondaire --name studio
 ```
 
 The native binary does **not** bundle go-librespot (only the Docker master image
 does) — it's a separate, open-source project you add yourself. Where to download it,
-which release to match, and exactly how ensemble locates it (working directory
+which release to match, and exactly how ondaire locates it (working directory
 first, then `$PATH`) is in
 **[Spotify Connect](../spotify.md#native-install-go-librespot)**. Spotify
 **Premium** is required; the login is saved in the data dir.

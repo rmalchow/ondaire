@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 func TestSessionReleasesInOrder(t *testing.T) {

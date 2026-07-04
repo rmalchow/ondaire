@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Launch two ensemble nodes on loopback with four disjoint port blocks, tmp data
+# Launch two ondaire nodes on loopback with four disjoint port blocks, tmp data
 # dirs, and the null sink. Run directly and sourced by e2e.sh (DEV2_WAIT=0,
 # which lets the caller control lifetime and start N3 for the late-join test).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/ensemble"
-go build -o "$BIN" ./cmd/ensemble
+BIN="$ROOT/ondaire"
+go build -o "$BIN" ./cmd/ondaire
 
 # A canonical 48k stereo s16le tone for `play`.
 [ -f "$ROOT/testdata/media/tone.wav" ] || "$ROOT/scripts/fixtures.sh"
 
 DATA1="$(mktemp -d)"; DATA2="$(mktemp -d)"; DATA3="$(mktemp -d)"
 LOG1="$(mktemp)"; LOG2="$(mktemp)"; LOG3="$(mktemp)"
-export ENSEMBLE_OUTPUT=null
-export ENSEMBLE_LOG="${ENSEMBLE_LOG:-info}"
+export ONDAIRE_OUTPUT=null
+export ONDAIRE_LOG="${ONDAIRE_LOG:-info}"
 
 # Four ports per node, distinct blocks:
 #   N1: http 18080 stream 19090 source 19200 gossip 17946

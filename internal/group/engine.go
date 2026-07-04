@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"ensemble/internal/clock"
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/clock"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // Typed errors surfaced to the API (I), which maps them to HTTP responses.

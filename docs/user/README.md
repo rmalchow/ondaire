@@ -1,23 +1,23 @@
-# Ensemble — User Guide
+# Ondaire — User Guide
 
-**Ensemble turns the speakers scattered around your home, office, or studio into
+**Ondaire turns the speakers scattered around your home, office, or studio into
 synchronized, groupable "rooms" you steer from any phone or browser.** Put music
 in one place, run one small program on each device with a speaker, and they find
 each other and play in perfect sync — no cloud, no accounts, no config files.
 
 <p align="center">
-  <img src="images/overview.png" width="320" alt="The ensemble web app on a phone: a playing room group with cover art, now-playing track, group volume and per-speaker volumes" />
+  <img src="images/overview.png" width="320" alt="The ondaire web app on a phone: a playing room group with cover art, now-playing track, group volume and per-speaker volumes" />
 </p>
 
 This guide gets you from zero to music:
 
 1. **[The mental model](#the-mental-model)** — the handful of ideas everything is built on.
-2. **[Three homes, one app](#three-homes-one-app)** — real setups that show what ensemble is *for*.
+2. **[Three homes, one app](#three-homes-one-app)** — real setups that show what ondaire is *for*.
 3. **[Pick your setup](#pick-your-setup)** — install instructions for each kind of device.
-4. **[Running ensemble](running.md)** — every way to start a node and keep it running (foreground, `nohup`, systemd, Docker, Compose).
+4. **[Running ondaire](running.md)** — every way to start a node and keep it running (foreground, `nohup`, systemd, Docker, Compose).
 5. **[What can it play?](#what-can-it-play)** — local files, Spotify/podcasts, radio, line-in.
 6. **[Spotify Connect](spotify.md)** — play Spotify & podcasts to any group (bundled in Docker; one binary to add natively).
-7. **[Debugging](debugging.md)** — read the startup banner, the events ensemble logs, and the per-second clock & playback fields.
+7. **[Debugging](debugging.md)** — read the startup banner, the events ondaire logs, and the per-second clock & playback fields.
 8. **Reference** — the [UI Reference](ui-reference.md) (every screen and control) and the [Configuration Reference](config-reference.md) (every knob, explained).
 
 ---
@@ -26,7 +26,7 @@ This guide gets you from zero to music:
 
 Five ideas and you understand the whole system:
 
-- **A node** is one device running the ensemble program — a Raspberry Pi, a NAS, a
+- **A node** is one device running the ondaire program — a Raspberry Pi, a NAS, a
   desktop, a laptop. Every node runs the *identical* binary.
 - **Every node serves the same web app** at `http://<that-node>:8080` and proxies
   to all the others. Open *any* node's address and you can control the whole house.
@@ -47,7 +47,7 @@ time grouping rooms and picking music, not configuring software.
 
 ## Three homes, one app
 
-Ensemble looks different in every home. Three sketches, which we'll return to as
+Ondaire looks different in every home. Three sketches, which we'll return to as
 running examples throughout the guide:
 
 ### 🎧 The shared studio
@@ -118,7 +118,7 @@ the hardware and firmware are being built now; this page is a preview of the
 design and how it will join a cluster.
 → **[About the ESP32 speaker node (in development)](scenarios/esp32.md)**
 
-> **Just want to try it on one machine first?** Download a build, run `./ensemble`,
+> **Just want to try it on one machine first?** Download a build, run `./ondaire`,
 > open `http://localhost:8080`, and drop a few audio files in `./data/media`. Then
 > run it on a second machine on the same network and watch them find each other.
 > The [desktop guide](scenarios/desktop.md) covers this in full.
@@ -137,7 +137,7 @@ kinds:
   shows up as a device in your Spotify app; pick it and the whole group plays your
   Spotify music *or podcasts*. Premium required. **Bundled in the Docker master
   image**; on native nodes you add the binary yourself — full setup, release links,
-  and how ensemble finds it in **[Spotify Connect](spotify.md)**.
+  and how ondaire finds it in **[Spotify Connect](spotify.md)**.
 - **📻 Internet radio** — paste an `http(s)://…` stream URL in the media browser.
 - **🎚️ Line-in** — capture a sound card's input (a turntable, a TV) on nodes where
   the **input** feature is enabled, and stream *that* to the group.
@@ -149,7 +149,7 @@ kitchen plays Spotify, all from the same app.
 
 ## Reference
 
-- **[Running ensemble](running.md)** — every way to launch and supervise a node:
+- **[Running ondaire](running.md)** — every way to launch and supervise a node:
   foreground, `nohup`, systemd (system **and** user services), Docker, and Compose,
   with the exact commands and unit/yml files.
 - **[UI Reference](ui-reference.md)** — a screen-by-screen tour of the web app:

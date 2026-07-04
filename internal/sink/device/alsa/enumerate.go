@@ -4,8 +4,8 @@ import (
 	"os"
 	"strings"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/sink/device"
+	"ondaire/internal/contracts"
+	"ondaire/internal/sink/device"
 )
 
 // procPCMPath is the kernel's ALSA PCM listing. Overridable in tests.

@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // buildStereoFrame makes a FrameBytes stereo frame with L sample-times = lv and

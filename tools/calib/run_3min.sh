@@ -1,6 +1,6 @@
 #!/bin/bash
 set -u
-cd /home/rm/Git/gitlab.rand0m.me/share/ensemble
+cd /home/rm/Git/gitlab.rand0m.me/share/ondaire
 M=http://192.168.71.63:8080
 WAV=tools/calib/results/tones_v0150.wav
 LOG=tools/calib/results/tones_stats_v0150.jsonl

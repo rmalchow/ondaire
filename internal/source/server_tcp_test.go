@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // tcpSub dials a source's SOURCE_PORT and exchanges length-prefixed frames.

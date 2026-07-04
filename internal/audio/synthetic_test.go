@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 func s16(b []byte) int16 { return int16(uint16(b[0]) | uint16(b[1])<<8) }

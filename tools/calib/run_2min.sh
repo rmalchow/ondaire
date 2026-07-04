@@ -2,7 +2,7 @@
 # 2-minute dual-tone capture. Records mic + plays calib_tones.wav + polls
 # statuses at 1 Hz. Feeds analyze_servo.py / graph_servo_ppm.py.
 set -u
-cd /home/rm/Git/gitlab.rand0m.me/share/ensemble
+cd /home/rm/Git/gitlab.rand0m.me/share/ondaire
 MASTER=http://192.168.71.63:8080
 WAV=tools/calib/results/tones_2min.wav
 LOG=tools/calib/results/tones_stats_2min.jsonl

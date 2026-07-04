@@ -6,11 +6,11 @@ import (
 	"strings"
 	"sync"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 // Factory builds a device from its spec argument (the part after the colon in
-// ENSEMBLE_OUTPUT, e.g. the path for "file:/tmp/x", "" for "null"/"exec"). Each
+// ONDAIRE_OUTPUT, e.g. the path for "file:/tmp/x", "" for "null"/"exec"). Each
 // adapter registers one from its package init().
 type Factory func(arg string, log *slog.Logger) (Sink, error)
 

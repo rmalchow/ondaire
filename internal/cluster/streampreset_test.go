@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 func findPreset(s contracts.Snapshot, pid id.ID) (contracts.StreamPresetView, bool) {

@@ -2,7 +2,7 @@
 """
 plot_coherence.py — turn a long sweep recording into a coherence-stability graph.
 
-Given a continuous microphone recording of an ensemble group playing a periodic
+Given a continuous microphone recording of an ondaire group playing a periodic
 sine-sweep file (one sweep every `--cadence` seconds), this:
 
   1. matched-filters each sweep to a sub-sample acoustic arrival time,
@@ -13,7 +13,7 @@ sine-sweep file (one sweep every `--cadence` seconds), this:
 
 The residual-from-best-fit-rate IS the sync jitter: how far each speaker strays
 from a perfectly steady clock. The fitted rate is the (constant) crystal offset
-between the ensemble master clock and the measuring mic's ADC — not a defect.
+between the ondaire master clock and the measuring mic's ADC — not a defect.
 
 Usage:
   python plot_coherence.py --rec run5min.wav --cadence 2.5 --discard 4 \
@@ -29,7 +29,7 @@ import sweep as sweepmod
 
 SR = 48_000
 
-# ---- ensemble brand tokens (design/DESIGN.md, control app) ----
+# ---- ondaire brand tokens (design/DESIGN.md, control app) ----
 BG     = "#11151a"
 PANEL  = "#1a212b"
 FG     = "#e6edf3"
@@ -150,7 +150,7 @@ def main():
     span_min = (t_min[kept].max() - t_min[kept].min())
 
     print(f"sweeps used: {n} (of {len(ks)} found) over {span_min:.1f} min")
-    print(f"rate offset (ensemble vs mic clock): {rate_ppm:+.1f} ppm")
+    print(f"rate offset (ondaire vs mic clock): {rate_ppm:+.1f} ppm")
     print(f"RMS jitter: {rms:.2f} us | p95: {p95:.2f} us | peak: {pk:.2f} us")
 
     # ---------------- plot ----------------

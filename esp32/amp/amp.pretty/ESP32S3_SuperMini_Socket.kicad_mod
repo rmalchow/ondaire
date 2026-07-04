@@ -1,6 +1,6 @@
 (footprint "ESP32S3_SuperMini_Socket"
 	(version 20240108)
-	(generator "ensemble-amp-gen")
+	(generator "ondaire-amp-gen")
 	(layer "F.Cu")
 	(descr "ESP32-S3 Super Mini socket (GPIO1-18 edge) - PLACEHOLDER, verify board geometry")
 	(attr through_hole)

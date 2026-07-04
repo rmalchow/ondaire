@@ -15,7 +15,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 func newLocalListener() (net.Listener, error) {
@@ -40,7 +40,7 @@ func testServer(t *testing.T, cfg Config) (*Server, *httptest.Server) {
 	}
 	if cfg.DistFS == nil {
 		cfg.DistFS = fstest.MapFS{
-			"index.html": &fstest.MapFile{Data: []byte("<html><!-- ensemble-placeholder --></html>")},
+			"index.html": &fstest.MapFile{Data: []byte("<html><!-- ondaire-placeholder --></html>")},
 		}
 	}
 	s := New(cfg)

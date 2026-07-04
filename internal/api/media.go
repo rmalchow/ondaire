@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"ensemble/internal/audio"
+	"ondaire/internal/audio"
 )
 
 // mediaExts are the playable file extensions (§6, lowercase, with dot).

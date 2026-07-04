@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 func TestSPAServesIndexAtRoot(t *testing.T) {
@@ -84,7 +84,7 @@ func TestSPAAssetMissing404(t *testing.T) {
 func TestSPAPlaceholderDetected(t *testing.T) {
 	cfg, _, _ := baseConfig(id.New())
 	cfg.DistFS = distWith(map[string]string{
-		"index.html": "<html><!-- ensemble-placeholder --></html>",
+		"index.html": "<html><!-- ondaire-placeholder --></html>",
 	})
 	// We can't easily capture the slog warning without a custom handler; assert
 	// initSPA detects it by checking the served placeholder still loads.
@@ -95,7 +95,7 @@ func TestSPAPlaceholderDetected(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := readBody(t, resp)
-	if resp.StatusCode != 200 || !bytes.Contains(b, []byte("ensemble-placeholder")) {
+	if resp.StatusCode != 200 || !bytes.Contains(b, []byte("ondaire-placeholder")) {
 		t.Fatalf("placeholder should still serve: status=%d", resp.StatusCode)
 	}
 }

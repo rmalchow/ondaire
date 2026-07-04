@@ -12,7 +12,7 @@ boards differ only in the LED pin (GPIO21 here, GPIO48 on the Super Mini).
 
 > **This is the PSRAM variant.** Waveshare ships the S3-Zero as the
 > **ESP32-S3FH4R2** (4 MB quad flash + **2 MB embedded quad PSRAM**), which is
-> what ensemble players require (see
+> what ondaire players require (see
 > [`docs/developer/esp32.md`](../../docs/developer/esp32.md) §3.1 — players are
 > PSRAM-only). Confirm with `esptool.py flash_id` (looks for
 > `Features: ... Embedded PSRAM 2MB`).
@@ -100,7 +100,7 @@ pads and must never be repurposed.
 - There is no separate UART bridge chip; the broken-out TX/RX (GPIO43/44) are
   plain UART0 you can repurpose.
 
-## Use as an ensemble player
+## Use as an ondaire player
 
 - **DAC wiring** matches the DevKitC and Super Mini profiles exactly — see
   [`pcm5102a-dac.md`](pcm5102a-dac.md). Default pins (board profile

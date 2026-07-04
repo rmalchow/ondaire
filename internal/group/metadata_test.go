@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 // metaSrc is a MediaSource that also exposes the optional metadata channel.

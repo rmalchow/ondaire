@@ -25,8 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ensemble/internal/sink/device"
-	"ensemble/internal/stream"
+	"ondaire/internal/sink/device"
+	"ondaire/internal/stream"
 )
 
 // execTool is one player command in the auto-pick order (§8.5).

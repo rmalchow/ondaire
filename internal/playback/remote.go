@@ -5,7 +5,7 @@ import (
 	"net"
 	"net/netip"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // controlWriter is the slice of *net.UDPConn the remotePlayer needs to send control

@@ -1,6 +1,6 @@
 package group
 
-import "ensemble/internal/id"
+import "ondaire/internal/id"
 
 // follow sets this node's PLAYER target (D49+ crosswise): its speakers play the
 // stream of group(target). target == self ⇒ play its own group; target == Zero ⇒

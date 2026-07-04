@@ -1,6 +1,6 @@
 package source
 
-import "ensemble/internal/stream"
+import "ondaire/internal/stream"
 
 // ringBuffer is a fixed-capacity ring of recently released frames — the source
 // for burst priming (§8.2/D24). Sized to hold max(2*bufferMs, 1000) ms of 20 ms

@@ -44,7 +44,7 @@ def read_wav(path: str) -> tuple[np.ndarray, int]:
     Read a WAV into a mono float64 array in roughly [-1, 1], plus its rate.
 
     Stereo (or N-channel) input is summed/averaged to one channel — the mic
-    capture path in ensemble produces stereo s16le, and a single physical mic
+    capture path in ondaire produces stereo s16le, and a single physical mic
     duplicated across channels (or a true stereo capture) is fine to fold: we
     only need one acoustic arrival.
 

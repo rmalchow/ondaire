@@ -3,7 +3,7 @@
 > Status: design spec. Implemented in three independent pieces (1 → 2 → 3).
 > Piece 3 is independent of 1 & 2 and may be built first for an early visible win.
 
-Ensemble keeps players in sync with an NTP-style clock follower
+Ondaire keeps players in sync with an NTP-style clock follower
 (`internal/clock`) and a rate-servo that resamples to correct drift
 (`internal/sink/servo.go`). We trust this chain, but we have **never measured the
 actual acoustic coherence** — the real, at-the-speaker offset between two players.
@@ -210,7 +210,7 @@ calibration recording; see the file comment at `input.go:65`). The orchestrator 
 it once for the whole run, reads the window into a buffer, closes.
 
 Device enumeration is already wired end-to-end: `internal/audio/devices.go:27
-ListInputDevices()` → boot probe (`cmd/ensemble/main.go`) → `NodeView.InputDevices`
+ListInputDevices()` → boot probe (`cmd/ondaire/main.go`) → `NodeView.InputDevices`
 → **already in the UI snapshot**. The mic selector needs no new plumbing.
 
 ### UI — the Calibration section
@@ -301,7 +301,7 @@ session-cumulative, so the numbers reflect *current* drift behaviour.
 
 ### Clock RTT fix
 
-`RTTNs` is currently hard-wired to 0 in the status closure (`cmd/ensemble/main.go`,
+`RTTNs` is currently hard-wired to 0 in the status closure (`cmd/ondaire/main.go`,
 the `StatusStats` wiring). Thread the follower's real RTT from `clockFol.Stats()` so
 "protocol-corrected latency" is meaningful.
 

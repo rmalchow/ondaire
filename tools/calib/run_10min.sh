@@ -3,7 +3,7 @@
 # mic, poll stats at 1 Hz. Single uninterrupted session. Feeds analyze_2h.py /
 # offset_pass2.py / extras.py.
 set -u
-cd /home/rm/Git/gitlab.rand0m.me/share/ensemble
+cd /home/rm/Git/gitlab.rand0m.me/share/ondaire
 MASTER=http://192.168.71.63:8080
 WAV=tools/calib/results/tones_10min.wav
 LOG=tools/calib/results/tones_stats_10min.jsonl

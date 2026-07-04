@@ -1,26 +1,26 @@
 # Home Assistant integration — design & implementation plan
 
 > Status: **plan only** (not yet implemented). This document is the agreed design for a
-> Home Assistant custom integration that controls ensemble.
+> Home Assistant custom integration that controls ondaire.
 
 ## Context
 
-Ensemble is a Go daemon for multi-room synchronized audio. Every node runs one binary and
+Ondaire is a Go daemon for multi-room synchronized audio. Every node runs one binary and
 can be a **room** (`master` role — gossips, owns cluster state, serves the HTTP API, sources
 audio, drives players) and/or a **player** (`playback` role — receive-only, no HTTP API of
 its own, driven over UDP by its master; ESP32 speakers are playback-only). There is **no
 existing external control surface beyond the REST + WebSocket HTTP API** — no Home Assistant,
 MQTT, or `media_player` code anywhere in the repo. This is greenfield.
 
-The goal is to let Home Assistant discover ensemble, browse the media library, and play out to
+The goal is to let Home Assistant discover ondaire, browse the media library, and play out to
 rooms/players. The idiomatic way is a **HA custom integration** (Python
-`custom_components/ensemble`) that talks to a master node's HTTP API and mirrors live state
+`custom_components/ondaire`) that talks to a master node's HTTP API and mirrors live state
 from its WebSocket feed. HA cannot run the Go daemon itself, so the integration is a *control
 surface* over existing master node(s), not a new master.
 
 **Agreed decisions:**
 1. **One `media_player` per node** — rooms and players alike are speakers, each with its own
-   volume; grouping via HA join/unjoin ↔ ensemble follow/unfollow (Sonos/HEOS convention).
+   volume; grouping via HA join/unjoin ↔ ondaire follow/unfollow (Sonos/HEOS convention).
 2. **v1 = core** — playback + grouping + browse + push. Calibration/diagnostics deferred.
 3. **Code lives in this repo** under `integrations/homeassistant/`, with a CI job to build a
    HACS-installable zip.
@@ -43,7 +43,7 @@ surface* over existing master node(s), not a new master.
 - Grouping: `POST /api/follow {target}` / `/unfollow` (normal nodes).
 - **Playback-only nodes** (`playbackNode==true`, no HTTP API): mutate master-side via
   `POST /api/playback/patch {node, volume?, name?, following?, channel?}` — **never proxied**.
-- mDNS `_ensemble._tcp.local.`; TXT always `id`,`role`,`ver`; masters add `name`,`http`.
+- mDNS `_ondaire._tcp.local.`; TXT always `id`,`role`,`ver`; masters add `name`,`http`.
 
 **Model (crosswise):** every alive node always masters its own group; **group id == master
 node id**. Groups are derived from each node's `following` field. "Join room X" = follow X.
@@ -63,28 +63,28 @@ node id**. Groups are derived from each node's `following` field. "Join room X" 
 ```
 integrations/homeassistant/
   README.md                    # HACS + manual install, config, screenshots
-  hacs.json                    # {"name":"ensemble","content_in_root":false}
-  custom_components/ensemble/
+  hacs.json                    # {"name":"ondaire","content_in_root":false}
+  custom_components/ondaire/
     __init__.py                # async_setup_entry: build client+coordinator, forward platform
-    manifest.json              # domain=ensemble, iot_class=local_push, integration_type=hub,
-                               #   config_flow=true, zeroconf=["_ensemble._tcp.local."], version
+    manifest.json              # domain=ondaire, iot_class=local_push, integration_type=hub,
+                               #   config_flow=true, zeroconf=["_ondaire._tcp.local."], version
     const.py                   # DOMAIN, PLATFORMS=[MEDIA_PLAYER], default port, WS path, backoff,
                                #   config keys (CONF_HOST, CONF_PORT, CONF_SELF_ID, CONF_ROSTER)
     models.py                  # frozen dataclasses mirroring contracts.go + from_json();
                                #   helpers: Snapshot.node(id), group_of(node_id), masters(),
                                #   smallest_master_id()
-    api.py                     # EnsembleClient(session, origin): base(node,self_id); get_status,
+    api.py                     # OndaireClient(session, origin): base(node,self_id); get_status,
                                #   get_cluster, get_media, get_cover; play/pause/resume/stop/next/
                                #   seek/enqueue; patch_node; follow/unfollow; patch_playback;
                                #   node-aware set_volume/set_following (branch on playbackNode);
-                               #   ws_connect(). Raises EnsembleApiError(code,hint,status) on non-2xx
-    coordinator.py             # EnsembleCoordinator(DataUpdateCoordinator[Snapshot], push):
+                               #   ws_connect(). Raises OndaireApiError(code,hint,status) on non-2xx
+    coordinator.py             # OndaireCoordinator(DataUpdateCoordinator[Snapshot], push):
                                #   update_interval=None; owns WS task + backoff + roster failover;
                                #   parse frames → async_set_updated_data; capture position timestamp;
                                #   dispatch SIGNAL_ADD_ENTITIES for late-joining nodes
     config_flow.py             # zeroconf (masters only) + manual host; dedup via
                                #   async_set_unique_id(smallest_master_id) + _abort_if_configured
-    media_player.py            # platform setup (dynamic add/remove) + EnsembleMediaPlayer entity
+    media_player.py            # platform setup (dynamic add/remove) + OndaireMediaPlayer entity
     browse_media.py            # flat /api/media → path trie BrowseMedia; presets; resolve_play_uri
     strings.json               # config-flow strings (cannot_connect, already_configured, ...)
     translations/en.json       # mirror of strings.json
@@ -100,7 +100,7 @@ from every snapshot; on WS close/timeout, backoff then **rotate to another maste
 (playback-only nodes have no HTTP) and re-resolve `self_id`. Store position + a monotonic
 timestamp at receipt so the entity can extrapolate `media_position`.
 
-**Entity — `EnsembleMediaPlayer(CoordinatorEntity, MediaPlayerEntity)`**, one per node,
+**Entity — `OndaireMediaPlayer(CoordinatorEntity, MediaPlayerEntity)`**, one per node,
 `_attr_unique_id = node_id`, one HA device per node (`sw_version=appVersion`, model = master
 vs player). All properties read live from `coordinator.data` (the node + `group_of(node_id)`).
 
@@ -140,7 +140,7 @@ normalizes the id (`file:`/`stream:`/`http(s)://`/`spotify`/`input:` pass throug
 `/queue`. Cache the flat media list per master with a short TTL (no media revision in snapshot).
 
 **Distribution.** `hacs.json` with `content_in_root:false`; add a `.gitlab-ci.yml` job to zip
-`custom_components/ensemble` on tag for HACS/manual install. README documents HACS-custom-repo
+`custom_components/ondaire` on tag for HACS/manual install. README documents HACS-custom-repo
 (via a GitHub mirror) and copy-in manual install.
 
 ## Deferred (later, not v1)
@@ -151,13 +151,13 @@ normalizes the id (`file:`/`stream:`/`http(s)://`/`spotify`/`input:` pass throug
 
 ## Verification (end-to-end, once implemented)
 
-1. **Run ensemble locally:** `./ensemble` with `MEDIA_DIR=./testdata` (or `data/media`) on
+1. **Run ondaire locally:** `./ondaire` with `MEDIA_DIR=./testdata` (or `data/media`) on
    :8080; optionally a second master on another port + `./player` for a playback node. Confirm
    `curl localhost:8080/api/cluster` and `websocat ws://localhost:8080/api/ws` show frames.
 2. **Run HA against it:** official `ghcr.io/home-assistant/home-assistant` (or a venv `hass`)
-   with a config dir whose `custom_components/ensemble` bind-mounts this repo's component. Add
+   with a config dir whose `custom_components/ondaire` bind-mounts this repo's component. Add
    via UI (zeroconf auto-discovers on host-network docker, else manual host). Enable
-   `logger: logs: custom_components.ensemble: debug`.
+   `logger: logs: custom_components.ondaire: debug`.
 3. **Functional checks:** one entity per node; states track `/api/cluster`; play a file from
    the browser → snapshot flips to `playing`, metadata+cover render; volume slider ↔ `PATCH
    /node` (and ESP32 volume via `playback/patch`); HA join/unjoin ↔ `follow`/`unfollow` +

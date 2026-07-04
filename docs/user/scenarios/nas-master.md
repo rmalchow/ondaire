@@ -18,7 +18,7 @@ house.
   house — the NAS stays up, so music (and the kids' audiobooks) never depends on a
   particular computer being awake.
 - **It's the natural home for Spotify Connect.** One always-on device advertising
-  `ensemble <name>` to every phone in the house.
+  `ondaire <name>` to every phone in the house.
 
 In our running examples this is the **family's** library box in the cupboard and the
 **studio's** shared library on the office NAS. (The three flatmates may skip it and
@@ -40,11 +40,11 @@ go-librespot** so Spotify Connect works out of the box. It deliberately publishe
 ports and expects host networking (see [why](#why-host-networking)).
 
 ```sh
-docker run -d --name ensemble-master \
+docker run -d --name ondaire-master \
   --network host \
   -v /srv/music:/media:ro \
-  -v ensemble-data:/data \
-  harbor.rand0m.me/public/ensemble:latest --name house
+  -v ondaire-data:/data \
+  harbor.rand0m.me/public/ondaire:latest --name house
 ```
 
 That's the whole master. Open `http://<nas-ip>:8080`, then bring up a
@@ -64,7 +64,7 @@ If your NAS/server runs the binary directly (no Docker), it's the same idea —
 restrict it to the master role so it never tries to grab a sound card:
 
 ```sh
-ENSEMBLE_ROLE=master ENSEMBLE_MEDIA_DIR=/srv/music ./ensemble --name house
+ONDAIRE_ROLE=master ONDAIRE_MEDIA_DIR=/srv/music ./ondaire --name house
 ```
 
 Prebuilt binaries are attached to each [release](../../../RELEASING.md); building
@@ -76,8 +76,8 @@ from source is covered in the [project README](../../../README.md#build).
 
 | Container path | Native equivalent | Notes |
 |----------------|-------------------|-------|
-| `/media` (mount **read-only**, `:ro`) | `--media <dir>` / `ENSEMBLE_MEDIA_DIR` | Your music. Browsed **recursively** — folders become navigable folders in the UI. Read-only on purpose: ensemble only ever reads it. |
-| `/data` (mount **read-write**) | `--data <dir>` / `ENSEMBLE_DATA_DIR` | `node.json` (stable ID + name), `cluster.json`, and go-librespot's credentials + audio FIFO. **Persist this** (a named volume or host dir) so the node keeps its identity and Spotify login across upgrades. |
+| `/media` (mount **read-only**, `:ro`) | `--media <dir>` / `ONDAIRE_MEDIA_DIR` | Your music. Browsed **recursively** — folders become navigable folders in the UI. Read-only on purpose: ondaire only ever reads it. |
+| `/data` (mount **read-write**) | `--data <dir>` / `ONDAIRE_DATA_DIR` | `node.json` (stable ID + name), `cluster.json`, and go-librespot's credentials + audio FIFO. **Persist this** (a named volume or host dir) so the node keeps its identity and Spotify login across upgrades. |
 
 Supported file types: `wav`, `mp3`, `flac`. Point `/media` (or `--media`) at your
 existing collection — for the family, that's the shared audiobooks + music folder;
@@ -90,7 +90,7 @@ directory semantics.
 ## Spotify Connect & podcasts
 
 A node that can find a **go-librespot** binary advertises a Spotify Connect device
-named **`ensemble <name>`**. On your phone: Spotify → **Connect to a device** → pick
+named **`ondaire <name>`**. On your phone: Spotify → **Connect to a device** → pick
 it → press play, and the master switches that group to the Spotify source and
 streams it to every speaker in the group. Works for **podcasts** too — anything you
 play in the Spotify app. Pausing/stopping in Spotify returns the group to idle.
@@ -108,7 +108,7 @@ play in the Spotify app. Pausing/stopping in Spotify returns the group to idle.
   go-librespot (built on the upstream `ghcr.io/devgianlu/go-librespot:v0.7.3`
   image), so Spotify Connect works out of the box.
 - **Native node:** install the separate `go-librespot` binary and drop it next to
-  `ensemble` (or on `$PATH`) — full steps, release links, and how ensemble locates
+  `ondaire` (or on `$PATH`) — full steps, release links, and how ondaire locates
   it are in **[Spotify Connect](../spotify.md#native-install-go-librespot)**.
 
 If no binary is found, Spotify is simply disabled and a line in the startup banner
@@ -130,7 +130,7 @@ real LAN presence, none of which survive a NAT bridge:
 
 The ports a master binds (all default, all overridable) are listed in the
 [Config Reference](../config-reference.md#4-ports). The image does **not** pin them;
-if you set an `ENSEMBLE_*_PORT` yourself it becomes pinned (binds exactly or exits).
+if you set an `ONDAIRE_*_PORT` yourself it becomes pinned (binds exactly or exits).
 The startup banner prints the actual bound ports.
 
 ### Bridge-mode fallback
@@ -141,8 +141,8 @@ mappings and wire the cluster by hand:
 
 ```yaml
 services:
-  ensemble:
-    image: harbor.rand0m.me/public/ensemble:latest
+  ondaire:
+    image: harbor.rand0m.me/public/ondaire:latest
     command: ["--no-mdns", "--name", "house"]
     ports:
       - "8080:8080"            # UI + API
@@ -154,7 +154,7 @@ services:
       - "7946:7946/udp"        # gossip
     volumes:
       - /srv/music:/media:ro
-      - ensemble-data:/data
+      - ondaire-data:/data
 ```
 
 Players then need `--no-mdns --join <nas-ip>:7946`. This is the unusual path — host
@@ -171,11 +171,11 @@ all of them appear together in any node's UI because they share the LAN and goss
 
 ```sh
 # storage room
-docker run -d --network host -v /srv/music:/media:ro -v ensemble-a:/data \
-  harbor.rand0m.me/public/ensemble:latest --name downstairs
+docker run -d --network host -v /srv/music:/media:ro -v ondaire-a:/data \
+  harbor.rand0m.me/public/ondaire:latest --name downstairs
 # studio
-docker run -d --network host -v /srv/jazz:/media:ro -v ensemble-b:/data \
-  harbor.rand0m.me/public/ensemble:latest --name studio
+docker run -d --network host -v /srv/jazz:/media:ro -v ondaire-b:/data \
+  harbor.rand0m.me/public/ondaire:latest --name studio
 ```
 
 ---
@@ -188,7 +188,7 @@ docker run -d --network host -v /srv/jazz:/media:ro -v ensemble-b:/data \
 3. The library browser (select the room → **Media**) lists your folders.
 4. A [player node](raspberry-pi.md) on the same LAN appears within seconds; group
    it and **Play here** a track — you hear it on the player, not the NAS.
-5. For Spotify: the `ensemble <name>` device shows up in your phone's Spotify app.
+5. For Spotify: the `ondaire <name>` device shows up in your phone's Spotify app.
 
 ---
 

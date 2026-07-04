@@ -5,9 +5,9 @@ import (
 	"reflect"
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
+	"ondaire/internal/stream"
 )
 
 // --- fakes ------------------------------------------------------------------

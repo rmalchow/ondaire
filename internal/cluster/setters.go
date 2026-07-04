@@ -3,9 +3,9 @@ package cluster
 import (
 	"net/netip"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/discovery"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/discovery"
+	"ondaire/internal/id"
 )
 
 // own returns this node's own record (always present after New). Caller holds mu.

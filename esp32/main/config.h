@@ -1,4 +1,4 @@
-// config.h — persistent node configuration (NVS namespace "ensemble"). Every
+// config.h — persistent node configuration (NVS namespace "ondaire"). Every
 // field has a board default (boards/board.h) so an unprovisioned board still
 // boots; the USB JSON console (console.c) overwrites them. See docs/developer/esp32.md §5.
 #pragma once

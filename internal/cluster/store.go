@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // Snapshot returns a deep-copied, resolved, JSON-ready view: every node record

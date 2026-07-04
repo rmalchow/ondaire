@@ -330,7 +330,7 @@ for net, members in NETS.items():
 out = []
 out.append('(kicad_sch')
 out.append('\t(version 20251024)')
-out.append('\t(generator "ensemble-amp-gen")')
+out.append('\t(generator "ondaire-amp-gen")')
 out.append('\t(generator_version "10.0")')
 ROOT_UUID = "a3c1e0d2-0001-4a00-8000-656e73656d62"  # stable, referenced by amp.kicad_pro
 out.append(f'\t(uuid "{ROOT_UUID}")')

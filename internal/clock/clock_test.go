@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // fakeClock is a monotonic-ish test clock. base is the "master" reference; each

@@ -3,7 +3,7 @@
 # session, so the servo runs without reset and we can see whether/when it
 # converges), record the mic, poll stats at 1 Hz. Feeds analyze_2h.py.
 set -u
-cd /home/rm/Git/gitlab.rand0m.me/share/ensemble
+cd /home/rm/Git/gitlab.rand0m.me/share/ondaire
 MASTER=http://192.168.71.63:8080
 WAV=tools/calib/results/tones_1h.wav
 LOG=tools/calib/results/tones_stats_1h.jsonl

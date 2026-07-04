@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // fakeCluster implements Cluster for tests.

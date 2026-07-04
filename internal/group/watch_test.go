@@ -3,7 +3,7 @@ package group
 import (
 	"testing"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 // The engine is a pure PRODUCER now: reconcile drives no subscriber/sink/clock.

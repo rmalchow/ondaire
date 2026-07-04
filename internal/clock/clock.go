@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // nowFunc returns monotonic-derived nanoseconds. Production uses monoNow; tests

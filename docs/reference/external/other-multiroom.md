@@ -2,9 +2,9 @@
 
 A survey of systems that don't ship a single self-contained protocol spec we
 could archive verbatim, focused on **how they move audio and keep rooms in
-sync**. This is background/design reference for ensemble — none of it is part of
+sync**. This is background/design reference for ondaire — none of it is part of
 the product. Each entry lists what's actually pinned down vs. reverse-engineered,
-and a short note on what's relevant to ensemble's own wire protocol.
+and a short note on what's relevant to ondaire's own wire protocol.
 
 For the ones that *do* have downloadable specs, see the sibling folders:
 `snapcast/`, `slimproto/`, `airplay/`, plus `rtp/` (Roc) and `cast/` (Google Cast).
@@ -25,8 +25,8 @@ loss recovery. Several projects assemble these differently.
   extensions for latency reporting/tuning.
 - Receiver runs a **jitter buffer**, **FEC recovery**, and a **frequency
   estimator + resampler** to compensate sender/receiver clock drift. This is
-  the same three-part recipe ensemble uses (buffer + recover + rate-servo).
-- **Relevance:** the closest published design to ensemble's transport layer.
+  the same three-part recipe ondaire uses (buffer + recover + rate-servo).
+- **Relevance:** the closest published design to ondaire's transport layer.
   Worth reading their FEC scheme trade-offs before tuning our XOR/parity FEC.
   Their choice to make FEC *optional* (to preserve plain-RTP interop) is a
   deliberate interop-vs-robustness lever we also have.
@@ -37,7 +37,7 @@ loss recovery. Several projects assemble these differently.
   their own clock, so multi-receiver sync drifts. Fine for one-way "whole-house
   from one box" on a wired LAN; not lip-sync-tight.
 - **Relevance:** the canonical example of *what you get without a clock servo* —
-  a useful baseline for why ensemble bothers with a master-anchored clock.
+  a useful baseline for why ondaire bothers with a master-anchored clock.
 
 ### PipeWire RTP / AES67 (`libpipewire-module-rtp-sink` / `-rtp-session`)
 - PipeWire's successor modules. Can speak **AES67** (the broadcast-industry RTP
@@ -47,7 +47,7 @@ loss recovery. Several projects assemble these differently.
   the robust combo is PulseAudio/PipeWire sender + **GStreamer receiver**, or a
   dedicated AES67 daemon.
 - **Relevance:** AES67 shows the pro-audio answer — push the sync problem entirely
-  onto PTP and a shared grandmaster clock. ensemble instead carries timing in-band
+  onto PTP and a shared grandmaster clock. ondaire instead carries timing in-band
   so it works on a dumb LAN with no PTP infrastructure.
 
 ### AES67 / Dante / Ravenna (pro audio, mostly closed for Dante)
@@ -64,8 +64,8 @@ Covered in its own folder. Summary for comparison: **server-pushed** TCP binary
 protocol (port 1704), JSON-RPC control (1705); server timestamps PCM/codec chunks,
 clients run a buffer + own time-sync handshake (`Time` messages estimate one-way
 offset) and resample to a configurable end-to-end latency. Codecs: PCM, FLAC,
-Opus, Vorbis. **Closest architectural cousin to ensemble** — centralized source,
-dumb-ish synced clients — except ensemble has no fixed server (any node sources)
+Opus, Vorbis. **Closest architectural cousin to ondaire** — centralized source,
+dumb-ish synced clients — except ondaire has no fixed server (any node sources)
 and discovers peers itself.
 
 ## SlimProto / Squeezelite / Lyrion (LMS)  →  see `slimproto/`
@@ -76,7 +76,7 @@ own HTTP(S) connection** to fetch the audio stream, then steers playback with
 server-driven (it nudges each player's output rate from the `stat` reports).
 - **Relevance:** the "control plane and data plane are separate" idea — control
   over a small command socket, bulk audio over a separate HTTP fetch — is an
-  alternative to ensemble's single framed stream. Note their explicit warning
+  alternative to ondaire's single framed stream. Note their explicit warning
   that the wiki spec drifts from the Perl source: a caution about doc/impl drift.
 
 ## AirPlay / RAOP  →  see `airplay/`
@@ -94,8 +94,8 @@ AirPlay 2 moves timing to **PTP** via the `nqptp` helper. Closed/reverse-enginee
   followers time to buffer. The actual media path and sync math are **not public**
   (described mainly in Google's patents, e.g. US 10,587,908 / 11,051,066).
 - **Relevance:** leader/follower election + timestamped buffers + estimated
-  per-follower offset is conceptually very close to ensemble's master-anchored
-  clock. Difference: ensemble's election/membership is gossip-driven and serverless.
+  per-follower offset is conceptually very close to ondaire's master-anchored
+  clock. Difference: ondaire's election/membership is gossip-driven and serverless.
 
 ---
 
@@ -107,7 +107,7 @@ AirPlay 2 moves timing to **PTP** via the `nqptp` helper. Closed/reverse-enginee
 - Sync quality is inherited from whatever output protocol it's driving (it relies
   on AirPlay/Cast timing).
 - **Relevance:** an integration/aggregation pattern — be a good citizen of
-  existing protocols rather than define one. Orthogonal to ensemble's approach.
+  existing protocols rather than define one. Orthogonal to ondaire's approach.
 
 ## Music Assistant
 - Like OwnTone, an **orchestrator**: it drives Snapcast, Squeezelite/SlimProto,
@@ -124,7 +124,7 @@ AirPlay 2 moves timing to **PTP** via the `nqptp` helper. Closed/reverse-enginee
   senders/receivers. Slaving methods: **skew** (default — correct when drift
   exceeds a threshold) and **resample** (linear regression on observations).
 - **Relevance:** their "slave a local clock to a remote master, then either skew
-  or resample" is exactly ensemble's clock-servo problem stated in library terms.
+  or resample" is exactly ondaire's clock-servo problem stated in library terms.
   Good vocabulary and a reference implementation to compare our servo against.
   See also Centricular/Sebastian Dröge's GStreamer-Conf 2015 talk on synchronized
   multi-room playback.
@@ -132,7 +132,7 @@ AirPlay 2 moves timing to **PTP** via the `nqptp` helper. Closed/reverse-enginee
 ## Sonos (closed, for context only)
 - Proprietary. Discovery via **SSDP/UPnP**, control via **UPnP/SOAP** (and a newer
   local API), audio sync over their own scheme on a self-formed mesh (historically
-  SonosNet). No spec; listed only to map the commercial baseline ensemble competes
+  SonosNet). No spec; listed only to map the commercial baseline ondaire competes
   with on the "it just works, zero-config" axis.
 
 ## MPD satellite / Mopidy
@@ -145,9 +145,9 @@ AirPlay 2 moves timing to **PTP** via the `nqptp` helper. Closed/reverse-enginee
 
 ---
 
-## How these map onto ensemble's design axes
+## How these map onto ondaire's design axes
 
-| Axis | Ensemble | Snapcast | SlimProto | AirPlay 2 | Roc | Google Cast | AES67 |
+| Axis | Ondaire | Snapcast | SlimProto | AirPlay 2 | Roc | Google Cast | AES67 |
 |------|----------|----------|-----------|-----------|-----|-------------|-------|
 | Topology | serverless, any node sources | central server | central server (LMS) | source → receivers | sender → receiver | leader/follower group | many↔many |
 | Discovery | mDNS + gossip | static / mDNS | static / mDNS (port 3483) | mDNS (Bonjour) | manual / SDP | mDNS | SAP/SDP |
@@ -158,18 +158,18 @@ AirPlay 2 moves timing to **PTP** via the `nqptp` helper. Closed/reverse-enginee
 | Codecs | Opus / PCM (+flac/mp3 src) | PCM/FLAC/Opus/Vorbis | PCM/FLAC/MP3/… | ALAC/AAC | PCM/Opus | private | L16/L24 PCM |
 | Infra needed | none (dumb LAN) | server host | server host (LMS) | none / PTP | none | Google account/cloud | PTP master |
 
-**Takeaways for ensemble:**
+**Takeaways for ondaire:**
 - Everyone solves sync as **shared clock + buffer + rate correction**; the only
   real differences are *where the clock lives* (central server, PTP grandmaster,
-  elected leader, or — ensemble — a gossip-elected master) and *whether timing
-  rides in-band or out-of-band*. ensemble's in-band, infra-free choice is the
+  elected leader, or — ondaire — a gossip-elected master) and *whether timing
+  rides in-band or out-of-band*. ondaire's in-band, infra-free choice is the
   distinctive bet.
 - **FEC is rare** in the consumer multiroom world (most lean on TCP or just a fat
-  buffer); Roc is the one to study for doing it properly. Validates ensemble's
+  buffer); Roc is the one to study for doing it properly. Validates ondaire's
   FEC-or-TCP toggle as a differentiator on lossy Wi-Fi.
 - The **serverless / zero-config** angle is genuinely uncommon — Snapcast, LMS,
   and OwnTone all need a designated server host; Cast/AirPlay need vendor infra.
-  That's ensemble's clearest structural difference.
+  That's ondaire's clearest structural difference.
 
 ---
 

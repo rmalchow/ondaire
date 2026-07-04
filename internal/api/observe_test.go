@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 func TestObserveOnProxiedRequest(t *testing.T) {

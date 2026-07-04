@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 func TestEncodeDecodeRequestRoundTrip(t *testing.T) {

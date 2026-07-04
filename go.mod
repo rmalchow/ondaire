@@ -1,4 +1,4 @@
-module ensemble
+module ondaire
 
 go 1.26
 

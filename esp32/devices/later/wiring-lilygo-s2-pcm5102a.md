@@ -1,6 +1,6 @@
 # Wiring — LilyGo T8 ESP32-S2 → PCM5102A I2S DAC
 
-Default wiring for the ensemble playback node on the **LilyGo T8 ESP32-S2**
+Default wiring for the ondaire playback node on the **LilyGo T8 ESP32-S2**
 driving the purple **GY-PCM5102** (PCM5102A) DAC. These are the firmware's
 power-on defaults (`boards/board_esp32s2.h`); every pin is re-provisionable over
 USB, so if you wire it differently just set the matching pins in the flasher's

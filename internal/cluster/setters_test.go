@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // newTestCluster builds a Cluster via New without starting memberlist. Its queue

@@ -1,13 +1,13 @@
 """Standalone self-check for the HA-independent model logic.
 
-Not shipped (lives outside custom_components/ensemble). Run: `python3 selfcheck.py`.
+Not shipped (lives outside custom_components/ondaire). Run: `python3 selfcheck.py`.
 Exercises the contracts.go -> dataclass mapping and the Snapshot helpers the
 coordinator/entity/config-flow all depend on. No Home Assistant needed.
 """
 
 import sys
 
-sys.path.insert(0, "custom_components/ensemble")
+sys.path.insert(0, "custom_components/ondaire")
 
 from models import Snapshot  # noqa: E402
 

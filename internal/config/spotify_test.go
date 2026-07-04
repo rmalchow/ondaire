@@ -3,8 +3,8 @@ package config
 import (
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 func TestSetSpotifyEndpointsNormalizesAndPersists(t *testing.T) {

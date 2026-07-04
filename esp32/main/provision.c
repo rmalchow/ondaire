@@ -102,12 +102,12 @@ static void urldecode(char *s) {
 }
 
 // Self-contained page (no external fonts/CSS/JS — the portal has no internet).
-// Dark theme + mint accent (#35e3b3) matching the ensemble brand; the wordmark uses
+// Dark theme + mint accent (#35e3b3) matching the ondaire brand; the wordmark uses
 // a serif fallback since Fraunces can't be loaded offline. The speaker name is
 // spliced in between HEAD and TAIL at the value="…" attribute.
 static const char PAGE_HEAD[] =
     "<!doctype html><meta name=viewport content=\"width=device-width,initial-scale=1\">"
-    "<title>ensemble setup</title><style>"
+    "<title>ondaire setup</title><style>"
     ":root{--bg:#11151a;--fg:#e6edf3;--muted:#8b97a7;--accent:#35e3b3;--ink:#03130d;--card:#171c22;--line:#2a323b}"
     "*{box-sizing:border-box}"
     "body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.1em;"
@@ -129,7 +129,7 @@ static const char PAGE_HEAD[] =
     "background:var(--accent);border:0;border-radius:9px;box-shadow:0 0 22px -6px color-mix(in srgb,var(--accent) 45%,transparent)}"
     ".save:active{transform:translateY(1px)}"
     "</style><div class=card>"
-    "<div class=brand><span class=wm>ensemble</span><span class=dot></span></div>"
+    "<div class=brand><span class=wm>ondaire</span><span class=dot></span></div>"
     "<div class=sub>speaker Wi-Fi setup</div>"
     "<form method=POST action=/save>"
     "<label>Wi-Fi network</label>"
@@ -169,7 +169,7 @@ static const char PAGE_TAIL[] =
 // portal — self-contained, no external assets.
 static const char SAVED_PAGE[] =
     "<!doctype html><meta name=viewport content=\"width=device-width,initial-scale=1\">"
-    "<title>ensemble</title><style>"
+    "<title>ondaire</title><style>"
     "body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;"
     "gap:1.1em;text-align:center;padding:1em;background:#11151a;color:#e6edf3;"
     "font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}"
@@ -183,7 +183,7 @@ static const char SAVED_PAGE[] =
     "@keyframes eq{0%,100%{transform:scaleY(.22)}50%{transform:scaleY(1)}}"
     "h3{margin:0;font-weight:600}p{margin:0;color:#8b97a7;font-size:.9em;max-width:18em}"
     "</style>"
-    "<div class=wm>ensemble</div>"
+    "<div class=wm>ondaire</div>"
     "<div class=bars><i></i><i></i><i></i><i></i><i></i></div>"
     "<h3>Saved</h3><p>connecting to your network\xe2\x80\xa6 the speaker is rebooting.</p>";
 
@@ -337,7 +337,7 @@ void provision_start(bool wifi_started) {
 
     char idhex[33]; config_node_id_hex(idhex);
     wifi_config_t ap = { 0 };
-    int slen = snprintf((char *)ap.ap.ssid, sizeof ap.ap.ssid, "ensemble-%.4s", idhex);
+    int slen = snprintf((char *)ap.ap.ssid, sizeof ap.ap.ssid, "ondaire-%.4s", idhex);
     ap.ap.ssid_len = slen;
     ap.ap.channel = 1;
     ap.ap.max_connection = 4;
@@ -359,5 +359,5 @@ void provision_start(bool wifi_started) {
     const esp_timer_create_args_t ta = { .callback = provision_stop, .name = "prov-life" };
     ESP_ERROR_CHECK(esp_timer_create(&ta, &s_life));
     ESP_ERROR_CHECK(esp_timer_start_once(s_life,
-        (uint64_t)CONFIG_ENSEMBLE_PORTAL_TIMEOUT_MS * 1000));
+        (uint64_t)CONFIG_ONDAIRE_PORTAL_TIMEOUT_MS * 1000));
 }

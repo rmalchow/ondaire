@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
-	"ensemble/internal/api"
-	"ensemble/internal/audio"
+	"ondaire/internal/api"
+	"ondaire/internal/audio"
 )
 
 // selectCols is the column list shared by List and Search, in MediaFile order.

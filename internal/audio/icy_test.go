@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/stream"
 )
 
 func TestParseStreamTitle(t *testing.T) {

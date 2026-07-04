@@ -44,7 +44,7 @@
 // broken-out pads so config validation passes — provision real pins over USB if
 // you solder an encoder on.
 #pragma once
-#define BOARD_NAME      "ensemble-amped-s3"
+#define BOARD_NAME      "ondaire-amped-s3"
 
 #define DEF_I2S_BCLK    14   // -> PCM5122 BCK
 #define DEF_I2S_LRCK    15   // -> PCM5122 LRCK

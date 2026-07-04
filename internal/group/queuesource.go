@@ -4,8 +4,8 @@ import (
 	"io"
 	"sync"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/stream"
 )
 
 // queueSource plays an ordered list of media URIs as ONE continuous session

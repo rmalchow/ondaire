@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // This file wires a fixed set of FAKE backend kinds into the package-global

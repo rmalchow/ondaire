@@ -6,8 +6,8 @@ import (
 	"sync"
 	"unsafe"
 
-	"ensemble/internal/dl"
-	"ensemble/internal/stream"
+	"ondaire/internal/dl"
+	"ondaire/internal/stream"
 )
 
 // Opus session constants — tied to canonical PCM (§8.1) and the 20 ms frame.

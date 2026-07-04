@@ -3,7 +3,7 @@ package exec
 import (
 	"log/slog"
 
-	"ensemble/internal/sink/device"
+	"ondaire/internal/sink/device"
 )
 
 // init wires the exec adapter into the device registry. No enumerator: exec has
@@ -15,10 +15,10 @@ func init() {
 }
 
 // factory builds an exec sink from the spec arg (the part after the colon in
-// ENSEMBLE_OUTPUT). The arg selects between the two operating modes:
+// ONDAIRE_OUTPUT). The arg selects between the two operating modes:
 //
 //	arg == ""         STANDALONE: auto-pick the first player on $PATH and self-heal
-//	                  on write failure by respawning (ENSEMBLE_OUTPUT=exec / auto).
+//	                  on write failure by respawning (ONDAIRE_OUTPUT=exec / auto).
 //	arg == "<tool>"   FAILOVER-CANDIDATE: pin that specific tool with NO internal
 //	                  respawn — the resilient chain owns retry, so a player death
 //	                  surfaces as a write error and the chain rotates outputs.

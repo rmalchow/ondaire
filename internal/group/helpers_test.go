@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // testRig bundles an Engine with all its fakes for easy assertion.

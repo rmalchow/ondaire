@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // ErrBusy is returned by TestTone when a session is active or a tone is

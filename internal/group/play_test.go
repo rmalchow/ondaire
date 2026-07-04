@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/dl"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/dl"
+	"ondaire/internal/id"
 )
 
 // waitFor polls cond up to d, failing the test on timeout.

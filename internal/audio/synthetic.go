@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strconv"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // SchemeCalib is an INTERNAL media scheme for the by-ear alignment helper — it is

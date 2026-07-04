@@ -4,9 +4,9 @@ import (
 	"net/netip"
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
+	"ondaire/internal/stream"
 )
 
 type fakeStore struct {

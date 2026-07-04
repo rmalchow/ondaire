@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
+	"ondaire/internal/stream"
 )
 
 // endReason distinguishes a natural pull-source EOF from an explicit stop.

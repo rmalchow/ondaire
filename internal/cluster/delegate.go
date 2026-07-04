@@ -6,7 +6,7 @@ import (
 
 	"github.com/hashicorp/memberlist"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 // delegate implements memberlist.Delegate and memberlist.EventDelegate. All
@@ -214,7 +214,7 @@ func addrFromNode(n *memberlist.Node) (netip.Addr, bool) {
 	return a.Unmap(), true
 }
 
-// peerID extracts the ensemble id from a memberlist node: Name (id.String()) is
+// peerID extracts the ondaire id from a memberlist node: Name (id.String()) is
 // authoritative; Meta (16 raw bytes) is the robust backup.
 func peerID(n *memberlist.Node) (id.ID, bool) {
 	if pid, err := id.Parse(n.Name); err == nil {

@@ -3,7 +3,7 @@ package cluster
 import (
 	"fmt"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 // ForgetNode deletes an OFFLINE node from the cluster. It writes a tombstone (so

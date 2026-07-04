@@ -3,7 +3,7 @@ package sink
 import (
 	"encoding/binary"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // resampler is a PULL-based 4-tap Catmull-Rom resampler (PLAN-dac-pull-phase-lock).

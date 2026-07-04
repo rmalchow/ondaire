@@ -1,6 +1,6 @@
 #!/bin/bash
 set -u
-cd /home/rm/Git/gitlab.rand0m.me/share/ensemble
+cd /home/rm/Git/gitlab.rand0m.me/share/ondaire
 M=http://192.168.71.63:8080
 LOG=tools/calib/results/diag.jsonl
 : > "$LOG"

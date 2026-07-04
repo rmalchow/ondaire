@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 // TestStatusRespJSONGolden pins the D19 envelope key names exactly.

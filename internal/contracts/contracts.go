@@ -8,7 +8,7 @@ package contracts
 import (
 	"context"
 
-	"ensemble/internal/id"
+	"ondaire/internal/id"
 )
 
 // ---- Output devices (the device port + adapters live in internal/sink/device) --
@@ -159,8 +159,8 @@ type NodeView struct {
 }
 
 // SpotifyEndpoint is a saved Spotify Connect preset on a node (D57): a named
-// extra Connect device ("ensemble <node>: <name>") that, when played to, groups
-// the listed players and plays to them. The first/default endpoint ("ensemble
+// extra Connect device ("ondaire <node>: <name>") that, when played to, groups
+// the listed players and plays to them. The first/default endpoint ("ondaire
 // <node>") is implicit (current behavior) and not stored here.
 type SpotifyEndpoint struct {
 	ID      string  `json:"id"`      // stable per-node slug; carried in the spotify:<id> URI

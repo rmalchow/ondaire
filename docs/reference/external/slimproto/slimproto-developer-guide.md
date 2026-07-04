@@ -1,4 +1,4 @@
-<!-- Archived from https://wiki.lyrion.org/index.php/SlimProtoDeveloperGuide.html (Lyrion / SqueezeboxWiki, CC-licensed community docs). Reference material for ensemble design; not part of the product. -->
+<!-- Archived from https://wiki.lyrion.org/index.php/SlimProtoDeveloperGuide.html (Lyrion / SqueezeboxWiki, CC-licensed community docs). Reference material for ondaire design; not part of the product. -->
 
 # SlimProtoDeveloperGuide
 

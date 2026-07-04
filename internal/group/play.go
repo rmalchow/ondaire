@@ -4,10 +4,10 @@ import (
 	"errors"
 	"strings"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/dl"
-	"ensemble/internal/id"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/dl"
+	"ondaire/internal/id"
+	"ondaire/internal/stream"
 )
 
 // Play starts playback of uri on this node's group (§6/§8.2). Master-only.

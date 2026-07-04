@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // These tests cover the PULL resampler (PLAN-dac-pull-phase-lock): the caller

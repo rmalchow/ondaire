@@ -6,7 +6,7 @@
 ## What this is, and why
 
 A **Raspberry Pi wired to active speakers** (or a small amp), tucked behind the
-kitchen counter, on a bathroom shelf, or in a kid's room. The Pi runs ensemble as a
+kitchen counter, on a bathroom shelf, or in a kid's room. The Pi runs ondaire as a
 **playback node**: it joins the cluster, shows up in the UI, and plays whatever
 group it's in — no screen, no keyboard, no interaction at the device itself.
 
@@ -41,7 +41,7 @@ can follow *any* master, including a [desktop](desktop.md).
 
 ## Install
 
-Ensemble is a **single static binary** — no runtime to install, pure Go, same build
+Ondaire is a **single static binary** — no runtime to install, pure Go, same build
 for every Pi from the Zero 2 up.
 
 1. **Get the binary** — `linux/arm64`, running **Raspberry Pi OS 64-bit** (Pi 3 / 4 /
@@ -50,14 +50,14 @@ for every Pi from the Zero 2 up.
    [build it](../../../README.md#build) and copy it over:
 
    ```sh
-   scp bin/ensemble-linux-arm64  pi@kitchen.local:~/ensemble
+   scp bin/ondaire-linux-arm64  pi@kitchen.local:~/ondaire
    ```
 
 2. **Run it as a player:**
 
    ```sh
    ssh pi@kitchen.local
-   ./ensemble --role playback --name kitchen
+   ./ondaire --role playback --name kitchen
    ```
 
    `--role playback` keeps it a pure speaker (no library, never a master) — see
@@ -75,14 +75,14 @@ for every Pi from the Zero 2 up.
 So the Pi is a speaker the moment it powers up, install a tiny systemd service:
 
 ```ini
-# /etc/systemd/system/ensemble.service
+# /etc/systemd/system/ondaire.service
 [Unit]
-Description=ensemble player
+Description=ondaire player
 After=network-online.target sound.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/home/pi/ensemble --role playback --name kitchen
+ExecStart=/home/pi/ondaire --role playback --name kitchen
 Restart=always
 User=pi
 WorkingDirectory=/home/pi
@@ -92,8 +92,8 @@ WantedBy=multi-user.target
 ```
 
 ```sh
-sudo systemctl enable --now ensemble
-journalctl -u ensemble -f      # watch the startup banner / logs
+sudo systemctl enable --now ondaire
+journalctl -u ondaire -f      # watch the startup banner / logs
 ```
 
 Because the node persists its `following` field, it **auto-rejoins its last room**
@@ -108,7 +108,7 @@ after a reboot.
   **♪ test tone** button to confirm sound is coming out of the speaker you think it
   is. (See the [UI Reference](../ui-reference.md#the-nodes-page--gear).)
 - **Crackling or dropouts on Wi-Fi?** Two dials, in order:
-  1. Raise the Pi's ALSA buffer: start it with `ENSEMBLE_ALSA_LATENCY_MS=400`.
+  1. Raise the Pi's ALSA buffer: start it with `ONDAIRE_ALSA_LATENCY_MS=400`.
   2. Raise the **group's buffer** in the room's Advanced settings, and keep the
      codec on **opus** (small packets + FEC ride out Wi-Fi loss).
 
@@ -133,7 +133,7 @@ after a reboot.
 > **Spotify on a Pi?** A playback Pi doesn't need go-librespot — it just plays
 > whatever its group's master is sourcing, including a Spotify session started on
 > the NAS or a desktop. If you *want* the Pi itself to advertise a Spotify device,
-> install the separate `go-librespot` binary next to its `ensemble` binary — full
+> install the separate `go-librespot` binary next to its `ondaire` binary — full
 > steps and release links in **[Spotify Connect](../spotify.md#native-install-go-librespot)**.
 > (The native binary does **not** bundle it; only the Docker master image does.)
 
@@ -141,7 +141,7 @@ after a reboot.
 
 ## Verify it works
 
-1. The service is running (`systemctl status ensemble`) and the banner shows the
+1. The service is running (`systemctl status ondaire`) and the banner shows the
    bound ports and the chosen audio backend (`alsa`).
 2. The Pi appears as a node in the UI within seconds of boot.
 3. **♪ test tone** plays out of the intended speaker.

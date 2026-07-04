@@ -1,4 +1,4 @@
-# ensemble — marketing site
+# ondaire — marketing site
 
 A tiny, **zero-dependency** static site. `build.mjs` renders `./dist/` — plain
 HTML/CSS/woff2/PNG with **relative paths** — which you can drop on any static web
@@ -28,8 +28,8 @@ Deploy: copy the contents of `./dist/` to your web root. That's it.
 A `Dockerfile` builds the site and serves it with nginx:
 
 ```sh
-docker build -t ensemble-site -f site/Dockerfile site
-docker run --rm -p 8080:80 ensemble-site     # → http://localhost:8080
+docker build -t ondaire-site -f site/Dockerfile site
+docker run --rm -p 8080:80 ondaire-site     # → http://localhost:8080
 ```
 
 CI builds and pushes a multi-arch image (`docker-site` job) on the default branch

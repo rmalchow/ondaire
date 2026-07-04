@@ -42,9 +42,9 @@ import (
 	"time"
 	"unsafe"
 
-	"ensemble/internal/dl"
-	"ensemble/internal/sink/device"
-	"ensemble/internal/stream"
+	"ondaire/internal/dl"
+	"ondaire/internal/sink/device"
+	"ondaire/internal/stream"
 )
 
 // ALSA simple-API constants (D34).
@@ -56,7 +56,7 @@ const (
 	defaultLatencyMs       = 40 // ~2 frames: scheduling slack + something for the blocking
 	//                              write to block on. NOT the jitter budget — that lives in
 	//                              the INPUT jitter buffer (the device buffer can't absorb
-	//                              network jitter). Tunable up via ENSEMBLE_ALSA_LATENCY_MS.
+	//                              network jitter). Tunable up via ONDAIRE_ALSA_LATENCY_MS.
 	minLatencyMs = 20
 	maxLatencyMs = 500
 )
@@ -176,7 +176,7 @@ func newSink(dev string, log *slog.Logger) (*sink, error) {
 	// jitter buffer (the device buffer is downstream of the resampler and cannot help
 	// with it); this buffer only covers OUR scheduling jitter (the playout goroutine
 	// being late to feed the DAC). ~40 ms (2 frames) is enough on Pi-class hardware;
-	// rough hosts can raise it via ENSEMBLE_ALSA_LATENCY_MS (20..500). A constant
+	// rough hosts can raise it via ONDAIRE_ALSA_LATENCY_MS (20..500). A constant
 	// inter-device difference is what the per-node outputDelayMs calibration is for
 	// (D36). The playout regulates the play head against the master clock and folds THIS
 	// value in as a constant offset, so its exact size does not affect loop stability.
@@ -191,10 +191,10 @@ func newSink(dev string, log *slog.Logger) (*sink, error) {
 	return &sink{f: bound, pcm: pcm, latencyMs: latencyMs, log: log}, nil
 }
 
-// configuredLatencyMs reads ENSEMBLE_ALSA_LATENCY_MS (clamped to 20..500),
+// configuredLatencyMs reads ONDAIRE_ALSA_LATENCY_MS (clamped to 20..500),
 // defaulting to defaultLatencyMs (~40ms / 2 frames).
 func configuredLatencyMs() int {
-	if v := os.Getenv("ENSEMBLE_ALSA_LATENCY_MS"); v != "" {
+	if v := os.Getenv("ONDAIRE_ALSA_LATENCY_MS"); v != "" {
 		if ms, err := strconv.Atoi(v); err == nil && ms >= minLatencyMs && ms <= maxLatencyMs {
 			return ms
 		}
@@ -248,7 +248,7 @@ func (s *sink) recoverAndRetry(pcm, buf uintptr, n int) error {
 	s.writeErrs++
 	if now := time.Now(); now.Sub(s.lastXrunLog) > time.Second {
 		s.lastXrunLog = now
-		s.log.Warn("alsa xrun (device underrun) — audible glitch; consider a larger ENSEMBLE_ALSA_LATENCY_MS",
+		s.log.Warn("alsa xrun (device underrun) — audible glitch; consider a larger ONDAIRE_ALSA_LATENCY_MS",
 			"err", n, "xruns", s.xruns)
 	}
 	s.mu.Unlock()

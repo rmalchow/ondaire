@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 func TestHeartbeatRefreshesPositionAndSource(t *testing.T) {

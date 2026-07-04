@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# ensemble installer — "for the lazy people".
+# ondaire installer — "for the lazy people".
 #
-#   curl -fsSL https://ensemble.rand0m.me/get.sh | sudo bash
+#   curl -fsSL https://ondaire.rand0m.me/get.sh | sudo bash
 #
-# Detects the OS/arch, downloads the matching ensemble build, and then asks
+# Detects the OS/arch, downloads the matching ondaire build, and then asks
 # (interactively, even when piped from curl — it reads /dev/tty) whether to install
 # Spotify support (go-librespot) and a boot-time systemd service. Binaries land in
-# /usr/local/lib/ensemble (symlinked into /usr/local/bin).
+# /usr/local/lib/ondaire (symlinked into /usr/local/bin).
 #
-# Override the download host with ENSEMBLE_BASE=... (e.g. for a local mirror).
+# Override the download host with ONDAIRE_BASE=... (e.g. for a local mirror).
 set -euo pipefail
 
-BASE="${ENSEMBLE_BASE:-https://ensemble.rand0m.me}"
-LIBDIR="/usr/local/lib/ensemble"
+BASE="${ONDAIRE_BASE:-https://ondaire.rand0m.me}"
+LIBDIR="/usr/local/lib/ondaire"
 BINDIR="/usr/local/bin"
-DATADIR="/var/lib/ensemble"
-UNIT="/etc/systemd/system/ensemble.service"
+DATADIR="/var/lib/ondaire"
+UNIT="/etc/systemd/system/ondaire.service"
 GLR_REPO="devgianlu/go-librespot"
 
 c_info=$'\033[36m'; c_ok=$'\033[32m'; c_err=$'\033[31m'; c_off=$'\033[0m'
@@ -69,7 +69,7 @@ disable_unit() { systemctl disable --now "$1" >/dev/null 2>&1 || true; }
 # harden_appliance trims a desktop Raspberry Pi OS image down to a headless audio
 # node: boot to console (no GUI — frees the audio card from the desktop's
 # PipeWire), drop services a speaker never needs, send logs to RAM, and disable
-# swap (both reduce SD-card writes / power-loss corruption). ensemble runs its own
+# swap (both reduce SD-card writes / power-loss corruption). ondaire runs its own
 # mDNS, so avahi is removed too — reach the node by IP afterwards, not <name>.local.
 harden_appliance() {
   say "Hardening as a headless appliance…"
@@ -96,8 +96,8 @@ harden_appliance() {
 
   # Logs to RAM (no steady /var/log writes) via a journald drop-in.
   install -d /etc/systemd/journald.conf.d
-  cat >/etc/systemd/journald.conf.d/ensemble.conf <<'JCONF'
-# Installed by the ensemble installer (--harden): keep logs in RAM to spare the
+  cat >/etc/systemd/journald.conf.d/ondaire.conf <<'JCONF'
+# Installed by the ondaire installer (--harden): keep logs in RAM to spare the
 # SD card and avoid power-loss corruption. Logs do not survive a reboot.
 [Journal]
 Storage=volatile
@@ -115,12 +115,12 @@ JCONF
   say "  Not automated (edit by hand if you want them):"
   say "    · 'noatime' on the root mount in /etc/fstab (fewer writes)"
   say "    · read-only root + overlayfs — but then bind-mount $DATADIR to a"
-  say "      writable partition, or ensemble loses node.json and mints a NEW id"
+  say "      writable partition, or ondaire loses node.json and mints a NEW id"
   say "      every boot (the duplicate-node trap)."
 }
 
 [ "$(id -u)" = 0 ] || err "run as root:  curl -fsSL $BASE/get.sh | sudo bash"
-[ "$(uname -s)" = Linux ] || err "ensemble ships Linux binaries only (got $(uname -s))"
+[ "$(uname -s)" = Linux ] || err "ondaire ships Linux binaries only (got $(uname -s))"
 command -v tar >/dev/null 2>&1 || err "need tar"
 
 # --- detect arch -------------------------------------------------------------
@@ -135,16 +135,16 @@ say "Detected linux/$ARCH"
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 
-# --- ensemble ----------------------------------------------------------------
-url="$BASE/assets/downloads/ensemble-linux-$ARCH.tar.gz"
-say "Downloading ensemble — $url"
-fetch "$url" "$tmp/ensemble.tar.gz" || err "download failed: $url"
-tar -xzf "$tmp/ensemble.tar.gz" -C "$tmp"
-[ -f "$tmp/ensemble" ] || err "archive did not contain an 'ensemble' binary"
+# --- ondaire ----------------------------------------------------------------
+url="$BASE/assets/downloads/ondaire-linux-$ARCH.tar.gz"
+say "Downloading ondaire — $url"
+fetch "$url" "$tmp/ondaire.tar.gz" || err "download failed: $url"
+tar -xzf "$tmp/ondaire.tar.gz" -C "$tmp"
+[ -f "$tmp/ondaire" ] || err "archive did not contain an 'ondaire' binary"
 install -d "$LIBDIR" "$DATADIR"
-install -m 0755 "$tmp/ensemble" "$LIBDIR/ensemble"
-ln -sf "$LIBDIR/ensemble" "$BINDIR/ensemble"
-ok "installed $LIBDIR/ensemble  (→ $BINDIR/ensemble)"
+install -m 0755 "$tmp/ondaire" "$LIBDIR/ondaire"
+ln -sf "$LIBDIR/ondaire" "$BINDIR/ondaire"
+ok "installed $LIBDIR/ondaire  (→ $BINDIR/ondaire)"
 
 # --- role: master (web UI) or playback-only ----------------------------------
 # Asked first because it gates the rest: a master serves the web UI, gossips, owns
@@ -196,18 +196,18 @@ fi
 # Already running ⇒ assume yes (the operator installed it before); just refresh
 # the unit + binary. Otherwise ask.
 if command -v systemctl >/dev/null 2>&1; then
-  if systemctl is-active --quiet ensemble.service 2>/dev/null; then
-    say "ensemble.service is already running — refreshing it."
+  if systemctl is-active --quiet ondaire.service 2>/dev/null; then
+    say "ondaire.service is already running — refreshing it."
     want_service=y
-  elif ask "Start ensemble at boot (systemd service)?"; then
+  elif ask "Start ondaire at boot (systemd service)?"; then
     want_service=y
   fi
 fi
 if [ "${want_service:-}" = y ]; then
   # Stop a previous instance first so the new unit + binary take over cleanly.
-  if systemctl is-active --quiet ensemble.service 2>/dev/null; then
-    say "Stopping the running ensemble.service…"
-    systemctl stop ensemble.service
+  if systemctl is-active --quiet ondaire.service 2>/dev/null; then
+    say "Stopping the running ondaire.service…"
+    systemctl stop ondaire.service
   fi
 
   # Node name: shown in the UI. Mandatory (re-asks until non-empty); defaults to
@@ -217,12 +217,12 @@ if [ "${want_service:-}" = y ]; then
   say "Role: $ROLE   ·   Name: $NAME"
   cat >"$UNIT" <<UNITEOF
 [Unit]
-Description=ensemble — synchronized multiroom audio
+Description=ondaire — synchronized multiroom audio
 After=network-online.target sound.target
 Wants=network-online.target
 
 [Service]
-ExecStart=$LIBDIR/ensemble --data $DATADIR --role $ROLE --name "$NAME"
+ExecStart=$LIBDIR/ondaire --data $DATADIR --role $ROLE --name "$NAME"
 WorkingDirectory=$LIBDIR
 # Under a system service there is no login session: give go-librespot and any
 # audio-player subprocess a writable HOME so they can locate their config.
@@ -237,10 +237,10 @@ RestartSec=2
 WantedBy=multi-user.target
 UNITEOF
   systemctl daemon-reload
-  systemctl enable --now ensemble.service   # enable at boot + start now (fresh binary)
-  ok "ensemble.service enabled + started   ·   logs:  journalctl -u ensemble -f"
+  systemctl enable --now ondaire.service   # enable at boot + start now (fresh binary)
+  ok "ondaire.service enabled + started   ·   logs:  journalctl -u ondaire -f"
 else
-  say "No service installed. Run it yourself:  ensemble"
+  say "No service installed. Run it yourself:  ondaire"
 fi
 
 # --- headless-appliance hardening (optional) ---------------------------------
@@ -252,4 +252,4 @@ if command -v systemctl >/dev/null 2>&1 &&
   harden_appliance
 fi
 
-printf '\n%s ✓%s ensemble is ready — open the web UI at  http://<this-host>:8080\n' "$c_ok" "$c_off"
+printf '\n%s ✓%s ondaire is ready — open the web UI at  http://<this-host>:8080\n' "$c_ok" "$c_off"

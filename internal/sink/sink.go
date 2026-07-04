@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ensemble/internal/clock"
-	"ensemble/internal/contracts"
-	"ensemble/internal/sink/device"
-	"ensemble/internal/stream"
+	"ondaire/internal/clock"
+	"ondaire/internal/contracts"
+	"ondaire/internal/sink/device"
+	"ondaire/internal/stream"
 )
 
 // monotoNow returns the local monotonic clock in nanoseconds — clock.MonoNow,

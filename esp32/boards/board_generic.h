@@ -2,7 +2,7 @@
 // over USB. APLL servo left off (unknown silicon); the node advertises queue=0
 // and accepts crystal drift (skip/silence floor) until told otherwise.
 #pragma once
-#define BOARD_NAME      "ensemble"
+#define BOARD_NAME      "ondaire"
 
 #define DEF_I2S_BCLK    5
 #define DEF_I2S_LRCK    6

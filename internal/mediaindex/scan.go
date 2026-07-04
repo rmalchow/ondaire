@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"ensemble/internal/audio"
+	"ondaire/internal/audio"
 )
 
 type fileEntry struct {

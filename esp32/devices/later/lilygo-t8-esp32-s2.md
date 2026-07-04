@@ -16,7 +16,7 @@ module (silkscreen "ESP32-S2-WROOM", 2020 date code). This variant has:
 
 > The reference image above is the module-level **ESP32-S2-WROOM** pinout (with
 > the matching LilyGo T8-S2 board photos top-right). It is the authoritative
-> map because the ensemble firmware addresses GPIOs **by number** — pins are
+> map because the ondaire firmware addresses GPIOs **by number** — pins are
 > re-provisionable, and the GPIO↔function mapping is fixed by the
 > ESP32-S2-WROOM module, *independent of the LilyGo carrier's physical header
 > order*. Wire by the GPIO number printed on the header silkscreen.
@@ -101,7 +101,7 @@ They connect/disconnect the **shared pins** — the USB data lines
 functions. They do **not** renumber GPIOs, and they do **not** touch the pins
 this firmware uses (I2S GPIO35/36/37, encoder GPIO4/5/6).
 
-**Correct setting for an ensemble node** (flashed + provisioned over native USB-C):
+**Correct setting for an ondaire node** (flashed + provisioned over native USB-C):
 
 | Function | Set to | Why |
 |----------|--------|-----|

@@ -79,12 +79,12 @@ hasn't ruled on them and they shape Phases 2–3.
   encode/decode (`AttachPayload`, `StatusPayload`, the 2-byte setters) per
   player-protocol.md §6; update the package comment to v2. **Unit tests** for round-trips.
 - `internal/config`: a `Role` set (`master`,`playback`; default **both**), env
-  `ENSEMBLE_ROLE`. Reserve/probe a `CONTROL_PORT` (default 9300) via `internal/netx`
+  `ONDAIRE_ROLE`. Reserve/probe a `CONTROL_PORT` (default 9300) via `internal/netx`
   when the playback role is on. Role is runtime config, **not** a replicated field;
   the *advertised* role goes in mDNS TXT.
 
 ### Phase 1 — the Player seam (unify local playback) ✅ DONE (standalone wiring deferred → Phase 3)
-*Landed: `internal/playback` — `Player` + `localPlayer` (engine refactored to drive it, gate green) and the `Listener` control plane (ATTACH/DETACH/SETVOL/SETDELAY/SETCAP + STATUS, soft-state dedup), tested. Standalone playback-only `cmd/ensemble` bring-up folded into Phase 3 (needs discover+drive to be useful).*
+*Landed: `internal/playback` — `Player` + `localPlayer` (engine refactored to drive it, gate green) and the `Listener` control plane (ATTACH/DETACH/SETVOL/SETDELAY/SETCAP + STATUS, soft-state dedup), tested. Standalone playback-only `cmd/ondaire` bring-up folded into Phase 3 (needs discover+drive to be useful).*
 
 - New `internal/playback`: a `Player` with the verb interface
   `Attach(src,clk netip.AddrPort, codec,transport, bufferMs)`, `Detach()`,
@@ -100,7 +100,7 @@ hasn't ruled on them and they shape Phases 2–3.
   the existing member e2e green before touching discovery.
 
 ### Phase 2 — playback announcement + capabilities (mDNS) ✅ DONE
-*Landed: role-aware `discovery` (Peer/Caps/Config, `txtRecords` master-XOR-playback, role-aware `parseEntry`, `Peer.PlaybackOnly()`); `cluster.tryJoin` skips non-gossiping peers; `cmd/ensemble` advertises its role. Tested. The playback-only node actually announcing (binding CONTROL_PORT, real caps) lands with the Phase 3 bring-up.*
+*Landed: role-aware `discovery` (Peer/Caps/Config, `txtRecords` master-XOR-playback, role-aware `parseEntry`, `Peer.PlaybackOnly()`); `cluster.tryJoin` skips non-gossiping peers; `cmd/ondaire` advertises its role. Tested. The playback-only node actually announcing (binding CONTROL_PORT, real caps) lands with the Phase 3 bring-up.*
 
 - `internal/discovery`: `Config` gains `Role`, `ControlPort`, and a caps struct;
   `txtRecords` emits `role`, `control`, `codecs`, `rate`, `hwvol`, `delayms`, `queue`,
@@ -112,7 +112,7 @@ hasn't ruled on them and they shape Phases 2–3.
 
 ### Phase 3 — master side: discover → represent → assign → drive  🚧 IN PROGRESS
 *Done & tested: **Slice A** (cluster represents discovered playback nodes — `NodeRecord`/`NodeView` `PlaybackNode`+`ControlPort`, content-gated `UpsertPlaybackNode`, local-only proxy); **Slice B** (`DeriveGroups` attaches assigned playback nodes, never solo/master; mDNS-freshness liveness; codec-negotiation exclusion in `membersLackingCodec`); **Slice C.1** (STATUS ingest in `source.Server`, `Statuses()`); **C.2** (`playback.remotePlayer` — wire-driving Player); **C.3** (`playback.Driver` — drives assigned playback members of the group it masters: ATTACH+SETVOL+SETDELAY while playing, DETACH idle/unassigned).
-Remaining — **Slice C.4 (integration + e2e, needs real binary runs):** ✅ cluster assignment setter `AssignPlaybackNode(node,target)` (write-side, tested). TODO: a master-side API endpoint calling it (assignment is master-local — `handlePatchNode` is self-only, so this is a new route, not a proxied patch); `cmd/ensemble --role playback` bring-up (bind CONTROL_PORT + audio/clock sockets, construct clock follower + stream client + sink + `localPlayer` + `Listener`, playback-only mDNS advert with real caps, NO cluster/source/api/group); wire `playback.Driver` + a control-send socket into the master bring-up in `run()`; end-to-end test (master discovers → assigns → drives a Go playback-only node in sync, verified by running the binary).*
+Remaining — **Slice C.4 (integration + e2e, needs real binary runs):** ✅ cluster assignment setter `AssignPlaybackNode(node,target)` (write-side, tested). TODO: a master-side API endpoint calling it (assignment is master-local — `handlePatchNode` is self-only, so this is a new route, not a proxied patch); `cmd/ondaire --role playback` bring-up (bind CONTROL_PORT + audio/clock sockets, construct clock follower + stream client + sink + `localPlayer` + `Listener`, playback-only mDNS advert with real caps, NO cluster/source/api/group); wire `playback.Driver` + a control-send socket into the master bring-up in `run()`; end-to-end test (master discovers → assigns → drives a Go playback-only node in sync, verified by running the binary).*
 
 - `internal/cluster`: `NodeRecord` gains `Role`, `Gossips bool`, `ControlPort`, and the
   announced `Caps`. New ingest: a master injects/updates a non-gossiping record for each

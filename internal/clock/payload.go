@@ -3,7 +3,7 @@ package clock
 import (
 	"encoding/binary"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 // clockPayloadSize is the fixed clock payload: t1|t2|t3, three big-endian int64.

@@ -1,7 +1,7 @@
 // provision.h — Tasmota-style Wi-Fi captive portal. Brought up at boot when the
 // node is unprovisioned OR its stored credentials fail to get an IP: an open AP
-// (`ensemble-<hex4>`) + a captive portal that scans nearby networks and writes new
-// creds + a speaker name to NVS. The portal lives CONFIG_ENSEMBLE_PORTAL_TIMEOUT_MS
+// (`ondaire-<hex4>`) + a captive portal that scans nearby networks and writes new
+// creds + a speaker name to NVS. The portal lives CONFIG_ONDAIRE_PORTAL_TIMEOUT_MS
 // then tears itself down and the node goes inert until power-cycled (the USB console
 // stays available the whole time). See docs/developer/esp32.md §6.5.
 #pragma once

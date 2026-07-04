@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/stream"
 )
 
 func TestIsPlaylist(t *testing.T) {

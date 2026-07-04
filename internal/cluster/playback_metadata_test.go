@@ -3,7 +3,7 @@ package cluster
 import (
 	"testing"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 // Metadata (D57 now-playing) survives the contracts.Playback ↔ PlaybackRecord

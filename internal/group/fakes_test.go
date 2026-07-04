@@ -6,9 +6,9 @@ import (
 	"net/netip"
 	"sync"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
-	"ensemble/internal/stream"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
+	"ondaire/internal/stream"
 )
 
 // --- fakeCluster -------------------------------------------------------------

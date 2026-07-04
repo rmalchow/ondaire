@@ -1,6 +1,6 @@
-# ensemble documentation
+# ondaire documentation
 
-**ensemble** is a self-organizing multiroom audio system. Every node runs the same
+**ondaire** is a self-organizing multiroom audio system. Every node runs the same
 single binary; nodes find each other automatically (mDNS + gossip), organize into
 **groups**, and play audio in sync. One binary, four ports, no external services, no
 database — state is replicated by gossip and everything heals itself.
@@ -10,11 +10,11 @@ doing.
 
 ## 📖 [User guide](user/) — set it up and use it
 
-For people running ensemble. Installation, configuration, the web UI, troubleshooting,
+For people running ondaire. Installation, configuration, the web UI, troubleshooting,
 and step-by-step scenarios.
 
 - [User guide home](user/README.md) — the mental model + pick-your-setup
-- [Running ensemble](user/running.md) · [Configuration reference](user/config-reference.md)
+- [Running ondaire](user/running.md) · [Configuration reference](user/config-reference.md)
 - [UI reference](user/ui-reference.md) · [Debugging](user/debugging.md) · [Spotify Connect](user/spotify.md)
 - Scenarios: [desktop](user/scenarios/desktop.md) · [Raspberry Pi](user/scenarios/raspberry-pi.md) · [NAS / server master](user/scenarios/nas-master.md) · [ESP32 node](user/scenarios/esp32.md)
 

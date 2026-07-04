@@ -1,11 +1,11 @@
-# Running ensemble
+# Running ondaire
 
-> **You are here:** [User Guide](README.md) › **Running ensemble**
+> **You are here:** [User Guide](README.md) › **Running ondaire**
 > How to *start* a node and keep it running. What to put in `--name`, `--role`,
 > and friends is in the [Configuration Reference](config-reference.md); which kind
 > of node to run where is in the [scenarios](README.md#pick-your-setup).
 
-Ensemble is a single process. Every method below runs the **same** binary (or
+Ondaire is a single process. Every method below runs the **same** binary (or
 image) with the **same** flags — they differ only in how the process is supervised
 and how long it lives. Pick by how permanent you need it:
 
@@ -25,20 +25,20 @@ In a hurry on a Linux box? The installer detects your OS/CPU, downloads the
 matching build, and asks what you want:
 
 ```sh
-curl -fsSL https://ensemble.rand0m.me/get.sh | sudo bash
+curl -fsSL https://ondaire.rand0m.me/get.sh | sudo bash
 ```
 
 It runs as root and:
 
-1. **Detects** your architecture (`amd64` or `arm64`) and downloads that `ensemble`
+1. **Detects** your architecture (`amd64` or `arm64`) and downloads that `ondaire`
    build. (32-bit ARM is no longer supported — use Raspberry Pi OS 64-bit.)
-2. Installs it to **`/usr/local/lib/ensemble/ensemble`**, symlinked into
-   `/usr/local/bin` so `ensemble` is on your `PATH`.
+2. Installs it to **`/usr/local/lib/ondaire/ondaire`**, symlinked into
+   `/usr/local/bin` so `ondaire` is on your `PATH`.
 3. Asks **"Install Spotify Connect support?"** — if yes, downloads the latest
    [`go-librespot`](https://github.com/devgianlu/go-librespot) for your arch
    alongside it.
-4. Asks **"Start ensemble at boot?"** — if yes, writes an `ensemble.service`
-   systemd unit (data in `/var/lib/ensemble`), reloads systemd, and enables +
+4. Asks **"Start ondaire at boot?"** — if yes, writes an `ondaire.service`
+   systemd unit (data in `/var/lib/ondaire`), reloads systemd, and enables +
    starts it. Re-running the script stops the old service first, so it upgrades
    cleanly in place.
 
@@ -46,7 +46,7 @@ The prompts work even through the `curl … | bash` pipe (it reads your terminal
 directly); a non-interactive run just answers "no" to both. Prefer to do it by
 hand, or not use systemd? The methods below are exactly what the script wraps.
 
-> Override the download host (e.g. a mirror) with `ENSEMBLE_BASE=…` before running.
+> Override the download host (e.g. a mirror) with `ONDAIRE_BASE=…` before running.
 
 ---
 
@@ -55,7 +55,7 @@ hand, or not use systemd? The methods below are exactly what the script wraps.
 The simplest way — run it in your terminal:
 
 ```sh
-./ensemble
+./ondaire
 ```
 
 It prints a startup banner (bound ports, audio backend, whether go-librespot was
@@ -71,14 +71,14 @@ To leave it running after you close the terminal or log out, without setting up 
 service:
 
 ```sh
-nohup ./ensemble --name kitchen > ensemble.log 2>&1 &
+nohup ./ondaire --name kitchen > ondaire.log 2>&1 &
 ```
 
-- `nohup … &` detaches it from the shell; `> ensemble.log 2>&1` captures its output.
-- Find it later with `pgrep -af ensemble`; stop it with `kill <pid>` (or
-  `pkill -f '/ensemble'`).
+- `nohup … &` detaches it from the shell; `> ondaire.log 2>&1` captures its output.
+- Find it later with `pgrep -af ondaire`; stop it with `kill <pid>` (or
+  `pkill -f '/ondaire'`).
 
-> **Caveat:** `nohup` does **not** restart ensemble after a crash or a reboot. For
+> **Caveat:** `nohup` does **not** restart ondaire after a crash or a reboot. For
 > anything you want to "just always be there," use a systemd service or Docker with
 > a restart policy instead.
 
@@ -93,15 +93,15 @@ logs to the journal.
 Install the binary and a data dir, then drop in a unit:
 
 ```sh
-sudo install -Dm755 ensemble /opt/ensemble/ensemble
-sudo mkdir -p /var/lib/ensemble
+sudo install -Dm755 ondaire /opt/ondaire/ondaire
+sudo mkdir -p /var/lib/ondaire
 ```
 
-`/etc/systemd/system/ensemble.service`:
+`/etc/systemd/system/ondaire.service`:
 
 ```ini
 [Unit]
-Description=ensemble multiroom audio node
+Description=ondaire multiroom audio node
 After=network-online.target sound.target
 Wants=network-online.target
 
@@ -109,13 +109,13 @@ Wants=network-online.target
 Type=simple
 # A user with access to the sound card. On Raspberry Pi OS, `pi` is in `audio`
 # already; otherwise create a dedicated user and add it to the audio group:
-#   sudo useradd --system --home /var/lib/ensemble --groups audio ensemble
+#   sudo useradd --system --home /var/lib/ondaire --groups audio ondaire
 User=pi
 SupplementaryGroups=audio
-WorkingDirectory=/opt/ensemble
-Environment=ENSEMBLE_DATA_DIR=/var/lib/ensemble
+WorkingDirectory=/opt/ondaire
+Environment=ONDAIRE_DATA_DIR=/var/lib/ondaire
 # Default name = the machine's hostname; replace with --name kitchen if you like.
-ExecStart=/opt/ensemble/ensemble --role playback --name %H
+ExecStart=/opt/ondaire/ondaire --role playback --name %H
 Restart=on-failure
 RestartSec=2
 
@@ -127,17 +127,17 @@ Enable and manage it:
 
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl enable --now ensemble      # start now + on every boot
-systemctl status ensemble                 # is it up?
-journalctl -u ensemble -f                 # follow its logs / banner
-sudo systemctl restart ensemble           # after editing the unit / upgrading
-sudo systemctl disable --now ensemble     # stop + don't start on boot
+sudo systemctl enable --now ondaire      # start now + on every boot
+systemctl status ondaire                 # is it up?
+journalctl -u ondaire -f                 # follow its logs / banner
+sudo systemctl restart ondaire           # after editing the unit / upgrading
+sudo systemctl disable --now ondaire     # stop + don't start on boot
 ```
 
 Notes:
 - Drop `--role playback` if this box should also host a library / be a master
   (see [roles](config-reference.md#3-roles)).
-- The unit pins `ENSEMBLE_DATA_DIR` so the node's identity lives at a stable path
+- The unit pins `ONDAIRE_DATA_DIR` so the node's identity lives at a stable path
   regardless of the working directory. To use **Spotify** on a system service, put
   the `go-librespot` binary in `WorkingDirectory` (or on `$PATH`) —
   [details](spotify.md#native-install-go-librespot).
@@ -155,18 +155,18 @@ The right choice on a **desktop/laptop** whose audio goes through **PipeWire or
 PulseAudio**: a user service inherits your audio session automatically — no
 `audio`-group fiddling, no backend surprises.
 
-`~/.config/systemd/user/ensemble.service`:
+`~/.config/systemd/user/ondaire.service`:
 
 ```ini
 [Unit]
-Description=ensemble multiroom audio node (user)
+Description=ondaire multiroom audio node (user)
 After=default.target
 
 [Service]
 Type=simple
 # Runs from your home dir; ./data and ./go-librespot resolve there.
-WorkingDirectory=%h/ensemble
-ExecStart=%h/ensemble/ensemble --name %u-desktop
+WorkingDirectory=%h/ondaire
+ExecStart=%h/ondaire/ondaire --name %u-desktop
 Restart=on-failure
 RestartSec=2
 
@@ -178,12 +178,12 @@ Enable and manage it (note: **`--user`**, and no `sudo`):
 
 ```sh
 mkdir -p ~/.config/systemd/user
-# (save the unit above, with your ensemble binary at ~/ensemble/ensemble)
+# (save the unit above, with your ondaire binary at ~/ondaire/ondaire)
 systemctl --user daemon-reload
-systemctl --user enable --now ensemble
-systemctl --user status ensemble
-journalctl --user -u ensemble -f
-systemctl --user restart ensemble
+systemctl --user enable --now ondaire
+systemctl --user status ondaire
+journalctl --user -u ondaire -f
+systemctl --user restart ondaire
 ```
 
 To keep it running **after you log out / before you log in** (e.g. a headless
@@ -202,12 +202,12 @@ mini-PC, or server (full rationale in the
 [NAS / server guide](scenarios/nas-master.md)):
 
 ```sh
-docker run -d --name ensemble-master \
+docker run -d --name ondaire-master \
   --network host \
   -v /srv/music:/media:ro \
-  -v ensemble-data:/data \
+  -v ondaire-data:/data \
   --restart unless-stopped \
-  harbor.rand0m.me/public/ensemble:latest --name living-room
+  harbor.rand0m.me/public/ondaire:latest --name living-room
 ```
 
 - `--network host` is **required** — playback nodes find the master over mDNS and
@@ -218,9 +218,9 @@ docker run -d --name ensemble-master \
 Manage it:
 
 ```sh
-docker logs -f ensemble-master
-docker restart ensemble-master
-docker stop ensemble-master && docker rm ensemble-master
+docker logs -f ondaire-master
+docker restart ondaire-master
+docker stop ondaire-master && docker rm ondaire-master
 ```
 
 ---
@@ -232,21 +232,21 @@ The same thing, declarative. A ready-to-use file ships at
 
 ```yaml
 services:
-  ensemble:
-    image: harbor.rand0m.me/public/ensemble:latest
-    container_name: ensemble-master
+  ondaire:
+    image: harbor.rand0m.me/public/ondaire:latest
+    container_name: ondaire-master
     network_mode: host          # required — see above
     restart: unless-stopped
     environment:
-      ENSEMBLE_ROLE: master      # this image is master-only
-      ENSEMBLE_MEDIA_DIR: /media
-      ENSEMBLE_DATA_DIR: /data
+      ONDAIRE_ROLE: master      # this image is master-only
+      ONDAIRE_MEDIA_DIR: /media
+      ONDAIRE_DATA_DIR: /data
     command: ["--name", "living-room"]
     volumes:
       - /srv/music:/media:ro     # your library — READ-ONLY
-      - ensemble-data:/data      # node identity, cluster state, Spotify creds
+      - ondaire-data:/data      # node identity, cluster state, Spotify creds
 volumes:
-  ensemble-data:
+  ondaire-data:
 ```
 
 ```sh

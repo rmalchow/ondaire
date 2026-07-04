@@ -7,7 +7,7 @@ import (
 	"io"
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 func TestMonoDuplicated(t *testing.T) {

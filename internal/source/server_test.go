@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"ensemble/internal/id"
-	"ensemble/internal/stream"
+	"ondaire/internal/id"
+	"ondaire/internal/stream"
 )
 
 // newTestServer builds a Server bound to loopback SOURCE_PORT sockets and runs

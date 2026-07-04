@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 func TestOpenSchemeDispatch(t *testing.T) {

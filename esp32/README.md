@@ -1,6 +1,6 @@
-# ensemble playback-node firmware (ESP32)
+# ondaire playback-node firmware (ESP32)
 
-A receive-only **ensemble playback node** on an ESP32 + an I2S DAC: it is
+A receive-only **ondaire playback node** on an ESP32 + an I2S DAC: it is
 discovered over mDNS, driven by a master over the v2 control plane, and plays a
 group's audio in lock-step like any other room. It implements the full wire
 protocol in [`../docs/developer/player-protocol.md`](../docs/developer/player-protocol.md) (the Go reference
@@ -60,7 +60,7 @@ TAS5805M/5825M, 3 = MA12070P).
 ESP-IDF **5.4+** (developed against 6.1). With a local IDF:
 
 ```sh
-./build.sh esp32s3            # → build-esp32s3/ensemble-fw-esp32s3.bin (merged image)
+./build.sh esp32s3            # → build-esp32s3/ondaire-fw-esp32s3.bin (merged image)
 ./build.sh esp32s3 flash      # build + flash an attached board
 ./build.sh esp32s3 monitor    # build + flash + serial monitor
 ```
@@ -118,7 +118,7 @@ USB). Scriptable without the web page:
    `DEF_DAC_I2C_ADDR`, and — if the part has a hard-enable — `DEF_DAC_EN` (plus
    `DEF_MA_MUTE` for the MA12070P). A new I2C part needs a small driver next to
    `pcm5122.c` / `tas58xx.c` / `ma12070p.c` and a case in `player.c`'s DAC switch.
-2. Add a `CONFIG_ENSEMBLE_BOARD_<CHIP>` choice in `main/Kconfig.projbuild` and a
+2. Add a `CONFIG_ONDAIRE_BOARD_<CHIP>` choice in `main/Kconfig.projbuild` and a
    `board.h` include.
 3. Add `sdkconfig.defaults.<chip>` (target, flash size, PSRAM mode, console).
 4. Add the board to `build.sh`, the CI `firmware` matrix, and the flasher

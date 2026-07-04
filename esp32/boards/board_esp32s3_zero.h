@@ -24,7 +24,7 @@
 // value listed is exposed and conflict-free on the S3-Zero too, so one wiring
 // fits all three. Only the status LED moves (GPIO48 -> GPIO21).
 #pragma once
-#define BOARD_NAME      "ensemble-s3zero"
+#define BOARD_NAME      "ondaire-s3zero"
 
 #define DEF_I2S_BCLK    5    // -> PCM5102A BCK
 #define DEF_I2S_LRCK    6    // -> PCM5102A LCK

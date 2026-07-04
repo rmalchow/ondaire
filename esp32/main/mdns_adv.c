@@ -27,7 +27,7 @@ static void reannounce_task(void *arg) {
     (void)arg;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(MDNS_REANNOUNCE_MS));
-        mdns_service_port_set("_ensemble", "_tcp", s_control_port);
+        mdns_service_port_set("_ondaire", "_tcp", s_control_port);
     }
 }
 
@@ -38,9 +38,9 @@ bool mdns_adv_start(void) {
     char idhex[33];
     config_node_id_hex(idhex);
 
-    // Hostname: ensemble-<first 4 hex of id> → unique on the LAN.
+    // Hostname: ondaire-<first 4 hex of id> → unique on the LAN.
     char host[32];
-    snprintf(host, sizeof host, "ensemble-%c%c%c%c", idhex[0], idhex[1], idhex[2], idhex[3]);
+    snprintf(host, sizeof host, "ondaire-%c%c%c%c", idhex[0], idhex[1], idhex[2], idhex[3]);
     mdns_hostname_set(host);
 
     // The mDNS INSTANCE NAME must be the node id (32 hex), exactly like the Go
@@ -70,10 +70,10 @@ bool mdns_adv_start(void) {
         { "queue",   cfg->has_apll ? "0" : "0" },   // v1: 0 until the servo actuates
         { "input",   "0" },
     };
-    esp_err_t err = mdns_service_add(idhex, "_ensemble", "_tcp",
+    esp_err_t err = mdns_service_add(idhex, "_ondaire", "_tcp",
                                      cfg->control_port, txt, sizeof txt / sizeof txt[0]);
     if (err != ESP_OK) { ESP_LOGE(TAG, "service_add failed: %s", esp_err_to_name(err)); return false; }
-    ESP_LOGI(TAG, "advertising _ensemble._tcp host=%s.local control=%u id=%s name=%s",
+    ESP_LOGI(TAG, "advertising _ondaire._tcp host=%s.local control=%u id=%s name=%s",
              host, (unsigned)cfg->control_port, idhex, cfg->name);
 
     // Periodic re-announce so a master that (re)starts after us still finds us.

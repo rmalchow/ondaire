@@ -6,8 +6,8 @@ import (
 	"math"
 	"testing"
 
-	"ensemble/internal/dl"
-	"ensemble/internal/stream"
+	"ondaire/internal/dl"
+	"ondaire/internal/stream"
 )
 
 // canonSineFrame builds one canonical frame (3840 B) of a stereo sine at freq.

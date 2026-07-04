@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"ensemble/internal/stream"
+	"ondaire/internal/stream"
 )
 
 type capturingWriter struct {

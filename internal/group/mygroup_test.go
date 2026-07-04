@@ -3,7 +3,7 @@ package group
 import (
 	"testing"
 
-	"ensemble/internal/contracts"
+	"ondaire/internal/contracts"
 )
 
 // A node always masters its own group; following itself targets its own group.

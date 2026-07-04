@@ -7,8 +7,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"ensemble/internal/contracts"
-	"ensemble/internal/id"
+	"ondaire/internal/contracts"
+	"ondaire/internal/id"
 )
 
 // dialWS upgrades to the server's /api/ws endpoint.

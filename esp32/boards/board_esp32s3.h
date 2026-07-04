@@ -1,7 +1,7 @@
 // ESP32-S3-WROOM-1 / DevKitC-1 defaults.
 // Pins avoid: USB-Serial-JTAG (19/20), strapping (0/3/45/46), SPI flash (26-32).
 #pragma once
-#define BOARD_NAME      "ensemble-s3"
+#define BOARD_NAME      "ondaire-s3"
 
 #define DEF_I2S_BCLK    5    // -> PCM5102A BCK
 #define DEF_I2S_LRCK    6    // -> PCM5102A LCK

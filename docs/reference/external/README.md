@@ -1,17 +1,17 @@
 # External reference: multiroom & network-audio protocols
 
 Archived documentation for other open-source (and a few closed) multiroom audio
-systems, gathered as **design reference** for ensemble's own wire protocol. The
+systems, gathered as **design reference** for ondaire's own wire protocol. The
 emphasis is on *protocols*: discovery, transport, clock synchronization, loss
 recovery, codec negotiation, and control APIs.
 
-**None of this is part of the ensemble product.** It is third-party material,
+**None of this is part of the ondaire product.** It is third-party material,
 each under its own upstream license, kept here so we don't have to re-find it and
 so design decisions can cite a concrete prior art. Files were fetched on
 2026-06-09; upstream may have moved on — every file carries a provenance comment
 or a `## Sources` section with the original URL.
 
-For ensemble's *own* protocol, see the [player protocol](../../developer/player-protocol.md)
+For ondaire's *own* protocol, see the [player protocol](../../developer/player-protocol.md)
 and the [architecture docs](../../architecture/) — in particular
 [wire-protocol](../../architecture/wire-protocol.md),
 [clock-sync](../../architecture/clock-sync.md),
@@ -33,7 +33,7 @@ and the [architecture docs](../../architecture/) — in particular
 | `rtp/roc-network-protocols.md` | Roc Toolkit's RFC stack (RTP/AVPF, FECFRAME, RTCP XR) | yes (HTML→md) | Roc Streaming (MPL-2.0) |
 | `rtp/roc-fec.md` | Roc FEC schemes — Reed-Solomon & LDPC-Staircase | yes (HTML→md) | Roc Streaming (MPL-2.0) |
 | `cast/gcast-protocol.md` | Reverse-engineered Google Cast (CASTV2) protocol | yes | dylanmckay/gcast |
-| `other-multiroom.md` | Survey of everything without a single spec to archive: PulseAudio/PipeWire RTP, AES67/Dante, Google Cast multizone, OwnTone, Music Assistant, GStreamer net-clock, Sonos, MPD/Mopidy — plus a comparison matrix vs. ensemble | written | — |
+| `other-multiroom.md` | Survey of everything without a single spec to archive: PulseAudio/PipeWire RTP, AES67/Dante, Google Cast multizone, OwnTone, Music Assistant, GStreamer net-clock, Sonos, MPD/Mopidy — plus a comparison matrix vs. ondaire | written | — |
 
 "Verbatim (HTML→md)" means the upstream page was HTML; it was converted with
 `html2text` and the site nav/footer chrome trimmed, but the body text is intact.
@@ -46,20 +46,20 @@ the clock lives* and *whether timing rides in-band or out-of-band*:
 
 - **Snapcast** — central server pushes timestamped chunks over a TCP binary
   protocol; clients run their own offset handshake. The closest cousin to
-  ensemble, minus the serverless/gossip part.
+  ondaire, minus the serverless/gossip part.
 - **SlimProto (Squeezelite/LMS)** — separates control (tiny binary command
   socket, port 3483) from data (player fetches audio over its own HTTP);
   server nudges each player's rate from buffer reports.
 - **AirPlay / RAOP** — RTSP/RTP with a source-specified ~2 s latency; AirPlay 2
   offloads timing to **PTP** via the `nqptp` helper.
 - **Roc** — pure RFC composition (RTP/AVPF + FECFRAME); the reference for doing
-  **FEC** and clock-drift resampling properly. Closest to ensemble's transport.
+  **FEC** and clock-drift resampling properly. Closest to ondaire's transport.
 - **Google Cast** — leader/follower groups, timestamped buffers, estimated
   per-follower clock offset; transport itself is private.
 - **AES67/PipeWire/PulseAudio RTP** — push sync entirely onto a **PTP
   grandmaster** (AES67) or skip it and free-run (PulseAudio multicast).
 
-ensemble's distinctive bet: **serverless** (any node sources, peers found via
+ondaire's distinctive bet: **serverless** (any node sources, peers found via
 mDNS + gossip), **infra-free** (timing in-band, no PTP grandmaster required),
 with a **FEC-or-TCP** toggle for lossy Wi-Fi. The detailed axis-by-axis matrix is
 in [`other-multiroom.md`](other-multiroom.md).

@@ -1,4 +1,4 @@
-<!-- Archived from https://roc-streaming.org/toolkit/docs/internals/network_protocols.html (Roc Toolkit docs, Sphinx). Reference material for ensemble design; not part of the product. -->
+<!-- Archived from https://roc-streaming.org/toolkit/docs/internals/network_protocols.html (Roc Toolkit docs, Sphinx). Reference material for ondaire design; not part of the product. -->
 
 # Network protocols
 

@@ -1,0 +1,79 @@
+# 4 ondaire masters, host networking, one per room.
+#
+# All four share the host network, so each is pinned to its own port block
+# via ONDAIRE_*_PORT — with network_mode: host, unset ports bind-or-increment
+# from the shared defaults and would collide across instances.
+#
+#   docker compose -f docker/docker-compose.4rooms.yml up -d
+#
+# UI per room:
+#   xh          http://<nas-ip>:21080
+#   rm          http://<nas-ip>:22080
+#   kitchen     http://<nas-ip>:23080
+#   livingroom  http://<nas-ip>:24080
+
+x-ondaire: &ondaire
+  image: harbor.rand0m.me/public/ondaire:latest
+  restart: unless-stopped
+  network_mode: host
+  environment: &ondaire-env
+    ONDAIRE_ROLE: master
+    ONDAIRE_MEDIA_DIR: /media
+    ONDAIRE_DATA_DIR: /data
+
+services:
+  xh:
+    <<: *ondaire
+    container_name: ondaire-xh
+    command: ["--name", "xh"]
+    environment:
+      <<: *ondaire-env
+      ONDAIRE_HTTP_PORT: 21080
+      ONDAIRE_STREAM_PORT: 21090
+      ONDAIRE_SOURCE_PORT: 21200
+      ONDAIRE_GOSSIP_PORT: 21946
+    volumes:
+      - /ZRAID/media/music:/media:ro
+      - ./data/xh:/data
+
+  rm:
+    <<: *ondaire
+    container_name: ondaire-rm
+    command: ["--name", "rm"]
+    environment:
+      <<: *ondaire-env
+      ONDAIRE_HTTP_PORT: 22080
+      ONDAIRE_STREAM_PORT: 22090
+      ONDAIRE_SOURCE_PORT: 22200
+      ONDAIRE_GOSSIP_PORT: 22946
+    volumes:
+      - /ZRAID/media/music:/media:ro
+      - ./data/rm:/data
+
+  kitchen:
+    <<: *ondaire
+    container_name: ondaire-kitchen
+    command: ["--name", "kitchen"]
+    environment:
+      <<: *ondaire-env
+      ONDAIRE_HTTP_PORT: 23080
+      ONDAIRE_STREAM_PORT: 23090
+      ONDAIRE_SOURCE_PORT: 23200
+      ONDAIRE_GOSSIP_PORT: 23946
+    volumes:
+      - /ZRAID/media/music:/media:ro
+      - ./data/kitchen:/data
+
+  livingroom:
+    <<: *ondaire
+    container_name: ondaire-livingroom
+    command: ["--name", "livingroom"]
+    environment:
+      <<: *ondaire-env
+      ONDAIRE_HTTP_PORT: 24080
+      ONDAIRE_STREAM_PORT: 24090
+      ONDAIRE_SOURCE_PORT: 24200
+      ONDAIRE_GOSSIP_PORT: 24946
+    volumes:
+      - /ZRAID/media/music:/media:ro
+      - ./data/livingroom:/data

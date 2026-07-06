@@ -224,6 +224,13 @@ export const content = {
           "Turn a PSRAM-equipped ESP32 + an I2S DAC into a real ondaire player: it shows up in the cluster, joins any group, and plays in lock-step like every other room — flashed straight from your browser, no toolchain. Tested on the ESP32-S3 Super Mini and Waveshare ESP32-S3-Zero with a PCM5102A DAC.",
         cta: { label: "Open the browser flasher", href: "flash.html" },
       },
+      {
+        tag: "smart home",
+        title: "Home Assistant",
+        body:
+          "Already run Home Assistant? Add the ondaire integration: every room shows up as a media_player, and a custom Lovelace card mirrors the ondaire app — players, media, streams and the queue. Unzip into custom_components, restart, and you're in.",
+        cta: { label: "Home Assistant integration", href: "home-assistant.html" },
+      },
     ],
     // Closing links on install.html, mirroring the download-page link rows.
     links: [
@@ -444,6 +451,44 @@ export const content = {
     secondary: { label: "Read the guide", href: GUIDE },
   },
 
+  // The dedicated Home Assistant integration page (home-assistant.html):
+  // screenshots (desktop + mobile), what it does, and the install steps with a
+  // restart callout. Linked from the download card and the install page.
+  homeAssistant: {
+    eyebrow: "Home Assistant",
+    title: "Every room, right in Home Assistant.",
+    intro:
+      "The ondaire integration turns each room into a Home Assistant media_player — play/pause, volume, and speaker grouping — and ships a custom Lovelace card that mirrors the ondaire app: players, the media library, stream presets, and the shared queue. Every request is proxied through Home Assistant, so your dashboard talks only to HA.",
+    shots: [
+      {
+        src: "assets/img/home_assistant.png",
+        alt: "Ondaire room cards on a Home Assistant dashboard",
+        cap: "One card per room on a desktop dashboard.",
+      },
+      {
+        src: "assets/img/home_assistant_mobile.png",
+        alt: "An ondaire room card in the Home Assistant companion app",
+        cap: "The same card in the companion app.",
+      },
+    ],
+    features: [
+      "Each room is a media_player: transport, group volume, and join/unjoin.",
+      "A tabbed Lovelace card — Players, Media, Streams, Queue.",
+      "Toggle any speaker into a room; per-speaker and proportional group volume.",
+      "Browse and search your library, queue tracks or whole folders, play stream presets.",
+    ],
+    steps: [
+      "Download the integration zip and unzip it into your Home Assistant <code>config</code> folder so the files land in <code>&lt;config&gt;/custom_components/ondaire/</code>.",
+      "Restart Home Assistant.",
+      "Add a room under <em>Settings → Devices &amp; services</em> — ondaire masters are auto-discovered over mDNS, or enter a host and port.",
+      "Hard-refresh your browser once, then add an <code>ondaire-card</code> to a dashboard (one per room).",
+    ],
+    important:
+      "A full <strong>restart</strong> of Home Assistant is required after copying the files — a reload of the integration alone won't pick up a brand-new component. When you <em>update</em> the integration later, restart again and hard-refresh the browser (in the companion app, pull down to refresh or clear the app's cache) so the new card loads.",
+    download: { label: "Download the integration", href: "download.html" },
+    readme: { label: "Full README", href: `${REPO}/-/tree/main/integrations/homeassistant` },
+  },
+
   // The separate download page (download.html). Each option's `file` is resolved
   // at build time: build.mjs hashes the staged binary (src/assets/downloads/) and
   // fills in its SHA-256 + size. `docker` options carry a pull command instead.
@@ -558,6 +603,16 @@ echo "ready — open the web UI at  http://<this-host>:8080"`,
         // The one genuine gotcha, kept as a callout.
         note:
           "<strong><code>--network host</code> is required.</strong> Players discover the master over mDNS and go-librespot advertises Spotify Connect over zeroconf — multicast doesn't cross Docker's bridge network (and ports bind-or-increment, so there's nothing to publish).",
+      },
+      {
+        name: "Home Assistant",
+        rec: "Control every room from Home Assistant: each room becomes a media_player, plus a custom Lovelace card with tabs for players, media, streams and the queue.",
+        arch: "custom integration",
+        logos: ["homeassistant"],
+        file: "assets/downloads/ondaire-hacs.zip",
+        note:
+          "Unzip into <code>&lt;config&gt;/custom_components/ondaire/</code> and restart Home Assistant. " +
+          '<a href="home-assistant.html">Setup, screenshots &amp; details →</a>',
       },
     ],
     // Common config flags — rendered as its own block UNDER the download cards.

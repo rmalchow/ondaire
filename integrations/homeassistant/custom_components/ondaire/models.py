@@ -186,7 +186,13 @@ class Snapshot:
         return None
 
     def group_of(self, node_id: str) -> GroupView | None:
-        """Return the group whose members include node_id (crosswise model)."""
+        """Return the node's group: the one it masters, else the one it's a
+        member of. The daemon does NOT list a group's master in `members`
+        (observed v0.31.1), so matching members alone misses self-mastered
+        groups entirely — a playing room would read as idle."""
+        for g in self.groups:
+            if g.master == node_id:
+                return g
         for g in self.groups:
             if node_id in g.members:
                 return g

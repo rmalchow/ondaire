@@ -50,6 +50,7 @@ class OndaireCoordinator(DataUpdateCoordinator[Snapshot]):
             update_interval=None,  # pushed, never polled
         )
         self.client = client
+        self._configured_origin = client.origin  # what the user typed; always retried
         self.ws_connected = False
         self.position_ts = dt_util.utcnow()
         # node_id -> [http origins], rebuilt from every snapshot for failover.
@@ -148,23 +149,31 @@ class OndaireCoordinator(DataUpdateCoordinator[Snapshot]):
             self._apply_snapshot(Snapshot.from_json(msg["data"]))
 
     async def _failover(self) -> None:
-        """Rotate to another master's origin (playback nodes have no HTTP) and
-        re-resolve self_id. Mirrors the JS roster failover."""
-        candidates = [
+        """Re-resolve a working origin: the configured one first, then the
+        roster (same-host origins before the rest — cluster addrs routinely
+        include interfaces unroutable from HA, e.g. docker bridges). Probes are
+        short-timeout, and on total failure the client is parked back on the
+        configured origin rather than whatever dead candidate came last."""
+        conf_host = self._configured_origin.split("://", 1)[-1].rsplit(":", 1)[0]
+        roster_origins = dict.fromkeys(  # ordered dedup
             o for origins in self.roster.values() for o in origins
-        ]
-        for origin in candidates:
-            if origin == self.client.origin:
-                continue
+        )
+        candidates = [self._configured_origin]
+        candidates += [o for o in roster_origins if f"://{conf_host}:" in o]
+        candidates += [o for o in roster_origins if f"://{conf_host}:" not in o]
+
+        for origin in dict.fromkeys(candidates):
             self.client.origin = origin
             try:
-                status = await self.client.get_status()
+                status = await self.client.get_status(timeout_s=3.0)
                 self.client.self_id = status.get("id", "")
                 self._apply_snapshot(Snapshot.from_json(await self.client.get_cluster()))
-                _LOGGER.debug("ondaire failed over to %s", origin)
+                if origin != self._configured_origin:
+                    _LOGGER.debug("ondaire failed over to %s", origin)
                 return
             except OndaireApiError:
-                continue  # try the next origin, else retry current on next loop
+                continue
+        self.client.origin = self._configured_origin  # retry it on the next loop
 
 
 def _build_roster(snap: Snapshot) -> dict[str, list[str]]:
@@ -180,7 +189,8 @@ def _build_roster(snap: Snapshot) -> dict[str, list[str]]:
         origins: list[str] = []
         for cidr in node.addrs:
             ip = str(cidr).split("/", 1)[0].strip()
-            if not ip:
+            # Link-local addresses are never dialable from HA (v6 needs a zone).
+            if not ip or ip.startswith("169.254.") or ip.lower().startswith("fe8"):
                 continue
             host = f"[{ip}]" if ":" in ip else ip
             origins.append(f"http://{host}:{node.http_port}")

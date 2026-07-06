@@ -26,6 +26,13 @@ for bin in "$repo"/bin/ondaire-linux-*; do
   rm -rf "$tmp"
 done
 
+# Zip the Home Assistant custom integration for the download page (mirrors the
+# CI `homeassistant` job). Same layout: custom_components/ondaire + hacs.json.
+rm -f "$dl/ondaire-hacs.zip"
+( cd "$repo/integrations/homeassistant" &&
+  zip -qr "$dl/ondaire-hacs.zip" custom_components/ondaire hacs.json README.md \
+    -x '*/__pycache__/*' )
+
 # Stage any ESP32 firmware images already built locally (esp32/build-<board>/) so
 # the flasher in ./dist actually works — mirrors the CI docker-site job, which
 # stages fw/ondaire-fw-*.bin the same way. Build an image first with, e.g.,

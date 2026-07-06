@@ -75,10 +75,21 @@ class OndaireClient:
                 raise OndaireApiError(resp.status)
             return await resp.read(), resp.content_type
 
-    async def _request(self, method: str, path: str, body: dict | None = None):
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict | None = None,
+        timeout_s: float = 10.0,
+    ):
+        # Always bounded: cluster addrs can include unroutable interfaces
+        # (docker bridges, link-local) where a bare connect hangs for minutes.
         url = f"{self.origin}{path}"
+        timeout = aiohttp.ClientTimeout(total=timeout_s)
         try:
-            async with self._session.request(method, url, json=body) as resp:
+            async with self._session.request(
+                method, url, json=body, timeout=timeout
+            ) as resp:
                 text = await resp.text()
                 data = None
                 if text:
@@ -93,12 +104,14 @@ class OndaireClient:
                         hint = data.get("hint", "")
                     raise OndaireApiError(resp.status, code, hint)
                 return data
+        except TimeoutError as err:
+            raise OndaireApiError(0, "timeout", f"no answer from {self.origin}") from err
         except aiohttp.ClientError as err:
             raise OndaireApiError(0, "network_error", str(err)) from err
 
     # --- reads ---------------------------------------------------------------
-    async def get_status(self) -> dict:
-        return await self._request("GET", f"{API_PATH}/status")
+    async def get_status(self, timeout_s: float = 10.0) -> dict:
+        return await self._request("GET", f"{API_PATH}/status", timeout_s=timeout_s)
 
     async def get_cluster(self) -> dict:
         return await self._request("GET", f"{API_PATH}/cluster")
@@ -124,6 +137,21 @@ class OndaireClient:
 
     async def enqueue(self, node: str, uris: list[str]) -> None:
         await self._request("POST", f"{self.base(node)}/queue", {"uris": uris})
+
+    # --- queue (§ upcoming tracks; not gossiped — pulled on demand) ----------
+    async def get_queue(self, node: str) -> list[dict]:
+        data = await self._request("GET", f"{self.base(node)}/queue")
+        return data or []
+
+    async def queue_remove(self, node: str, index: int, uri: str = "") -> None:
+        await self._request(
+            "POST", f"{self.base(node)}/queue/remove", {"index": index, "uri": uri}
+        )
+
+    async def queue_play(self, node: str, index: int, uri: str = "") -> None:
+        await self._request(
+            "POST", f"{self.base(node)}/queue/play", {"index": index, "uri": uri}
+        )
 
     async def pause(self, node: str) -> None:
         await self._request("POST", f"{self.base(node)}/pause")

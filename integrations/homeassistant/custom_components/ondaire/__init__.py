@@ -10,6 +10,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import OndaireClient
 from .const import PLATFORMS
 from .coordinator import OndaireCoordinator
+from .frontend import async_register_frontend
+from .websocket import async_register_websocket
 
 type OndaireConfigEntry = ConfigEntry[OndaireCoordinator]
 
@@ -23,6 +25,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: OndaireConfigEntry) -> b
     await coordinator.async_setup()  # raises ConfigEntryNotReady if unreachable
 
     entry.runtime_data = coordinator
+    await async_register_frontend(hass)
+    async_register_websocket(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

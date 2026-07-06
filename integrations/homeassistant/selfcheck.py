@@ -53,6 +53,17 @@ def main() -> None:
     md = grp.playback.metadata
     assert md and md.title == "T" and md.has_art and md.duration_sec == 200
 
+    # a master finds its own group even though the daemon does NOT list the
+    # master in `members` (observed v0.31.1) — regression guard: a playing
+    # room read as idle when group_of matched membership only
+    solo = Snapshot.from_json({
+        "nodes": [{"id": "d" * 32, "name": "Solo", "alive": True}],
+        "groups": [{"id": "d" * 32, "master": "d" * 32, "members": [],
+                    "playback": {"state": "playing", "uri": "file:z.mp3"}}],
+    })
+    grp = solo.group_of("d" * 32)
+    assert grp and grp.playback.state == "playing", "master must find its own group"
+
     # masters() excludes the playback-only node; dedup key is the lowest id
     master_ids = {n.id for n in snap.masters()}
     assert master_ids == {"a" * 32, "b" * 32}, master_ids

@@ -8,6 +8,9 @@ from homeassistant.const import Platform
 DOMAIN = "ondaire"
 PLATFORMS = [Platform.MEDIA_PLAYER]
 
+# Bump on any ondaire-card.js change so the companion app's WebView cache busts.
+CARD_VERSION = "5"
+
 DEFAULT_PORT = 8080
 
 API_PATH = "/api"

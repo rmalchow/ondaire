@@ -149,13 +149,12 @@ class OndaireMediaPlayer(CoordinatorEntity[OndaireCoordinator], MediaPlayerEntit
 
     @property
     def available(self) -> bool:
+        # `stale` is deliberately NOT part of this: it's a "not updated
+        # recently" UI hint (contracts.go), and in a multi-master cluster peer
+        # masters are routinely stale on whichever master we're connected to.
+        # The web UI treats alive nodes as live regardless; mirror that.
         node = self._node
-        return bool(
-            self.coordinator.ws_connected
-            and node
-            and node.alive
-            and not node.stale
-        )
+        return bool(self.coordinator.ws_connected and node and node.alive)
 
     # --- state ---------------------------------------------------------------
     @property
@@ -250,6 +249,14 @@ class OndaireMediaPlayer(CoordinatorEntity[OndaireCoordinator], MediaPlayerEntit
             return await self.coordinator.client.fetch_image(url)
         except OndaireApiError:
             return None, None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        # `ondaire_playback` lets the Lovelace card tell speakers (playback
+        # nodes) from rooms (masters) without a device-registry round-trip — the
+        # group section lists only playback nodes.
+        node = self._node
+        return {"ondaire_playback": bool(node.playback_node) if node else False}
 
     @property
     def group_members(self) -> list[str] | None:
@@ -357,6 +364,69 @@ class OndaireMediaPlayer(CoordinatorEntity[OndaireCoordinator], MediaPlayerEntit
             await self._call(self.coordinator.client.enqueue(target, [uri]))
         else:
             await self._call(self.coordinator.client.play(target, uri))
+
+    # --- queue (driven by the card's Queue tab via websocket) ----------------
+    async def async_queue_list(self) -> list[dict]:
+        """Upcoming tracks for this room's group, flattened for the frontend."""
+        items = await self.coordinator.client.get_queue(self._target)
+        out: list[dict] = []
+        for it in items:
+            md = it.get("metadata") if isinstance(it, dict) else None
+            md = md if isinstance(md, dict) else {}
+            out.append(
+                {
+                    "uri": it.get("uri", "") if isinstance(it, dict) else "",
+                    "title": md.get("title", ""),
+                    "artist": md.get("artist", ""),
+                    "album": md.get("album", ""),
+                }
+            )
+        return out
+
+    async def async_queue_remove(self, index: int, uri: str = "") -> None:
+        await self._call(self.coordinator.client.queue_remove(self._target, index, uri))
+
+    async def async_queue_play(self, index: int, uri: str = "") -> None:
+        await self._call(self.coordinator.client.queue_play(self._target, index, uri))
+
+    async def async_enqueue_dir(self, content_id: str) -> int:
+        """Append every file under a library directory to the queue (recursive).
+
+        content_id is the card's browse id: "library" (whole library) or
+        "dir:<rel>/". The library is a flat path list, so a prefix match gives
+        the full recursive set. Returns the count enqueued."""
+        if content_id.startswith("dir:"):
+            prefix = content_id[len("dir:") :]
+            if prefix and not prefix.endswith("/"):
+                prefix += "/"
+        else:  # "library" / "root" / anything → whole library
+            prefix = ""
+        files = await self.coordinator.async_get_media(self._target)
+        uris = [f"file:{f.path}" for f in files if f.path.startswith(prefix)]
+        if uris:
+            await self._call(self.coordinator.client.enqueue(self._target, uris))
+        return len(uris)
+
+    async def async_search_list(self, query: str) -> list[dict]:
+        """Search this room's library, returning playable items for the card."""
+        files = await self.coordinator.client.search_media(
+            self._target, query, limit=100
+        )
+        out: list[dict] = []
+        for f in files:
+            path = f.get("path")
+            if not path:
+                continue
+            title = f.get("title") or f.get("name") or path
+            artist = f.get("artist")
+            out.append(
+                {
+                    "media_content_id": f"file:{path}",
+                    "media_content_type": "music",
+                    "title": f"{artist} — {title}" if artist else title,
+                }
+            )
+        return out
 
     # --- helpers -------------------------------------------------------------
     def _node_for_entity(self, entity_id: str) -> NodeView | None:

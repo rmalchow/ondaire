@@ -441,6 +441,59 @@ ${footer()}
 `;
 }
 
+// ── Home Assistant integration page (home-assistant.html) ───────────────
+// Screenshots (desktop + mobile), what it does, and the install steps with a
+// restart callout. Linked from the download card and the install page.
+function homeAssistantPage() {
+  const H = C.homeAssistant;
+  const shots = H.shots
+    .map(
+      (s) => `
+        <figure class="ha-shot">
+          <img src="${esc(s.src)}" alt="${esc(s.alt)}" loading="lazy" decoding="async" />
+          <figcaption>${esc(s.cap)}</figcaption>
+        </figure>`,
+    )
+    .join("");
+  const features = H.features.map((f) => `<li>${esc(f)}</li>`).join("");
+  // steps + important are trusted author HTML (they carry <code>/<em>/<strong>).
+  const steps = H.steps.map((s) => `<li>${s}</li>`).join("");
+  return `<!doctype html>
+<html lang="en">
+<head>${head(`Home Assistant — ${C.meta.title}`, "Control every ondaire room from Home Assistant: each room is a media_player, plus a custom Lovelace card for players, media, streams and the queue.", "assets/img/home_assistant.png")}
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+${navHeader("index.html", GET_IT_CTA, "home-assistant.html")}
+<main id="top">
+  <section class="sub-page ha-page">
+    <header class="sec-head">
+      <span class="eyebrow">${eq(6)}${esc(H.eyebrow)}</span>
+      <h1>${esc(H.title)}</h1>
+      <p class="sec-intro">${esc(H.intro)}</p>
+    </header>
+
+    <div class="ha-shots">${shots}</div>
+
+    <ul class="ha-features">${features}</ul>
+
+    <div class="ha-install">
+      <h2>Install</h2>
+      <ol class="ha-steps">${steps}</ol>
+      <p class="dl-note ha-important"><strong>Important —</strong> ${H.important}</p>
+      <div class="ha-cta">
+        <a class="btn btn-solid" href="${esc(H.download.href)}">${esc(H.download.label)}<span class="arrow">↓</span></a>
+        <a class="btn btn-ghost" href="${esc(H.readme.href)}" rel="noopener">${esc(H.readme.label)}<span class="arrow">→</span></a>
+      </div>
+    </div>
+  </section>
+</main>
+${footer()}
+</body>
+</html>
+`;
+}
+
 // ── UI tour page (ui.html) ──────────────────────────────────────────────
 // Reuses screens.items grouped by page (rooms / nodes) in the alternating
 // screenshot layout, then the themes carousel. The lightbox holds the screens.
@@ -634,6 +687,9 @@ const LOGOS = {
   </svg>`,
   manjaro: `<svg class="dl-logo" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="Manjaro" fill="#35BF5C">
     <rect x="4" y="4" width="5" height="16" rx="1"/><rect x="10.5" y="9.5" width="5" height="10.5" rx="1"/><rect x="17" y="4" width="3" height="16" rx="1"/>
+  </svg>`,
+  homeassistant: `<svg class="dl-logo" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="Home Assistant" fill="#18BCF2">
+    <path d="M22.939 10.627 13.061.749a1.505 1.505 0 0 0-2.121 0l-9.879 9.878C.478 11.21 0 12.363 0 13.187v9c0 .826.675 1.5 1.5 1.5h9.227l-4.063-4.062a2.034 2.034 0 0 1-.664.113c-1.13 0-2.05-.92-2.05-2.05s.92-2.05 2.05-2.05 2.05.92 2.05 2.05c0 .233-.041.456-.113.665l3.163 3.163V9.928a2.05 2.05 0 0 1-1.15-1.84c0-1.13.92-2.05 2.05-2.05s2.05.92 2.05 2.05a2.05 2.05 0 0 1-1.15 1.84v8.127l3.146-3.146A2.051 2.051 0 0 1 18 12.239c1.13 0 2.05.92 2.05 2.05s-.92 2.05-2.05 2.05c-.25 0-.488-.047-.709-.13L12.9 20.602v3.088h9.6c.825 0 1.5-.675 1.5-1.5v-9c0-.825-.477-1.977-1.061-2.561z"/>
   </svg>`,
 };
 
@@ -1502,6 +1558,7 @@ async function main() {
 
   // The three home blocks each link to a dedicated topic page.
   await fs.writeFile(path.join(OUT, "install.html"), installPage());
+  await fs.writeFile(path.join(OUT, "home-assistant.html"), homeAssistantPage());
   await fs.writeFile(path.join(OUT, "ui.html"), uiPage());
   await fs.writeFile(path.join(OUT, "tech.html"), techPage());
 

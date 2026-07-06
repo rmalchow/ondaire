@@ -55,6 +55,24 @@ HACS pulls from a GitHub repository, so use the GitHub mirror
 > Future: this may be submitted to Home Assistant core, at which point it would
 > ship built in and this custom install would no longer be needed.
 
+## Lovelace card
+
+Installing the integration also registers an **`ondaire-card`** Lovelace card —
+no manual "Add resource" step needed. It renders one room in ondaire's own
+idiom (art, progress bar, transport, volume, grouping, library/preset browsing)
+instead of the stock media-control card, and every action is a normal HA
+service call or the `media_player/browse_media` websocket command: the browser
+only ever talks to Home Assistant, which proxies to the ondaire master.
+
+After first install (or an update to this component), **hard-refresh** your
+browser once so it picks up the new frontend module. Then add one card per
+room:
+
+```yaml
+type: custom:ondaire-card
+entity: media_player.xh
+```
+
 ## Configuration
 
 The integration is set up from the UI (`config_flow`), no YAML.

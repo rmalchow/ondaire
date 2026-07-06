@@ -281,6 +281,9 @@ docker-site:
     - job: firmware-release
       optional: true
       artifacts: true
+    - job: homeassistant
+      optional: true
+      artifacts: true
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -305,6 +308,9 @@ docker-site:
         rm -rf "$tmp"
       done
       cp scripts/get.sh site/get.sh
+    # Stage the Home Assistant integration zip (from the homeassistant job) for
+    # the download page; absent on non-tag pipelines → the card shows "not staged".
+    - cp ondaire-hacs.zip site/src/assets/downloads/ 2>/dev/null || true
     # Stage the ESP32 firmware images where build.mjs hashes them into the
     # flasher page + ESP Web Tools manifest (absent if no firmware job ran).
     - |
@@ -334,12 +340,16 @@ homeassistant:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
   script:
     - apk add --no-cache zip
-    - cd integrations/homeassistant
-    - zip -r "$CI_PROJECT_DIR/ondaire-hacs.zip" custom_components/ondaire hacs.json README.md
+    - ( cd integrations/homeassistant && zip -r "$CI_PROJECT_DIR/ondaire-hacs.zip" custom_components/ondaire hacs.json README.md -x '*/__pycache__/*' )
+    # Hand this job's id to the release stage (dotenv) so the Release asset link
+    # addresses the EXACT job — the by-ref artifacts endpoint resolves refs, not SHAs.
+    - echo "HACS_JOB_ID=$CI_JOB_ID" > hacs.env
   artifacts:
     name: "ondaire-hacs-${CI_COMMIT_TAG}"
     paths: [ondaire-hacs.zip]
     expire_in: never
+    reports:
+      dotenv: hacs.env
   tags:
     - shared
 
@@ -397,10 +407,10 @@ release:
   # Firmware is NOT a release dependency yet (allow_failure, bring-up): the release
   # ships the linux binaries only, so a failing esp32 build never blocks shipping.
   # Re-add firmware-release to needs + an asset link when the firmware is ready.
-  needs: [build-release, changelog, test]
+  needs: [build-release, changelog, test, homeassistant]
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
-  script: [ 'echo "Releasing $CI_COMMIT_TAG (amd64 $BUILD_JOB_ID_AMD64, arm64 $BUILD_JOB_ID_ARM64)"' ]
+  script: [ 'echo "Releasing $CI_COMMIT_TAG (amd64 $BUILD_JOB_ID_AMD64, arm64 $BUILD_JOB_ID_ARM64, hacs $HACS_JOB_ID)"' ]
   release:
     tag_name: "$CI_COMMIT_TAG"
     name: "Ondaire $CI_COMMIT_TAG"
@@ -411,6 +421,9 @@ release:
           url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_AMD64/artifacts/raw/bin/ondaire-linux-amd64"
         - name: "ondaire-linux-arm64 ($CI_COMMIT_TAG)"
           url: "$CI_PROJECT_URL/-/jobs/$BUILD_JOB_ID_ARM64/artifacts/raw/bin/ondaire-linux-arm64"
+        - name: "Home Assistant integration ($CI_COMMIT_TAG)"
+          url: "$CI_PROJECT_URL/-/jobs/$HACS_JOB_ID/artifacts/raw/ondaire-hacs.zip"
+          link_type: package
   tags:
     - shared
 

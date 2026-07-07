@@ -9,7 +9,6 @@
     nodeSetChannel,
     setOutputDevice,
     setDisabled,
-    testTone,
     forgetNode,
   } from "../lib/api.js";
   import EditableText from "./EditableText.svelte";
@@ -357,25 +356,25 @@
       </div>
     {/if}
 
-    <div class="row wrap">
-      {#if outputBackend}
-        <span class="small muted sink" title="the sink backend actually playing audio on this node">
-          sink <strong>{outputBackend}</strong>
-        </span>
-      {/if}
-      {#if outputDevices.length > 0}
-        <label class="row small muted device">
-          output device
-          <select value={outputDevice} onchange={onDeviceChange}>
-            {#each outputDevices as d (d.id)}
-              <option value={d.id}>{d.desc} ({d.id})</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
-      <button class="btn small" title="play a 1s test tone on this node's output"
-        onclick={() => testTone(node.id)}>♪ test tone</button>
-    </div>
+    {#if outputBackend || outputDevices.length > 0}
+      <div class="row wrap">
+        {#if outputBackend}
+          <span class="small muted sink" title="the sink backend actually playing audio on this node">
+            sink <strong>{outputBackend}</strong>
+          </span>
+        {/if}
+        {#if outputDevices.length > 0}
+          <label class="row small muted device">
+            output device
+            <select value={outputDevice} onchange={onDeviceChange}>
+              {#each outputDevices as d (d.id)}
+                <option value={d.id}>{d.desc} ({d.id})</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+      </div>
+    {/if}
   </section>
 </div>
 

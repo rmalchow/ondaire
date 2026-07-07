@@ -9,7 +9,7 @@ DOMAIN = "ondaire"
 PLATFORMS = [Platform.MEDIA_PLAYER]
 
 # Bump on any ondaire-card.js change so the companion app's WebView cache busts.
-CARD_VERSION = "6"
+CARD_VERSION = "7"
 
 DEFAULT_PORT = 8080
 

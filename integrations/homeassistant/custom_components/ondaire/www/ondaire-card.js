@@ -154,10 +154,31 @@ class OndaireCard extends HTMLElement {
 
   // --- change detection ----------------------------------------------------
   _relevantSig(hass) {
-    // last_updated bumps on any state OR attribute change (e.g. volume), so a
-    // per-entity timestamp string is a cheap, correct change signal.
+    // Signature of ONLY the fields that affect what we render — deliberately
+    // NOT last_updated, which bumps on every heartbeat because media_position /
+    // media_position_updated_at change each frame. Position is handled by
+    // _tick() (targeted DOM write, no re-render), so folding it in here would
+    // rebuild the DOM every few seconds and drop clicks mid-interaction.
     const ids = [this._config.entity, ...this._playbackIds(hass)];
-    return ids.map((id) => `${id}@${hass.states[id]?.last_updated || "∅"}`).join("|");
+    return ids.map((id) => this._entSig(hass.states[id])).join("|");
+  }
+
+  _entSig(s) {
+    if (!s) return "∅";
+    const a = s.attributes;
+    return [
+      s.state,
+      a.volume_level,
+      a.is_volume_muted,
+      a.media_title,
+      a.media_artist,
+      a.media_album_name,
+      a.media_content_id,
+      a.media_duration,
+      a.entity_picture,
+      a.ondaire_playback,
+      (a.group_members || []).join(","),
+    ].join("~");
   }
 
   _playbackIds(hass) {

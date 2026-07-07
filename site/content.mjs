@@ -464,6 +464,7 @@ export const content = {
         src: "assets/img/home_assistant.png",
         alt: "Ondaire room cards on a Home Assistant dashboard",
         cap: "One card per room on a desktop dashboard.",
+        wide: true, // landscape shot — use the roomier lightbox slide
       },
       {
         src: "assets/img/home_assistant_mobile.png",

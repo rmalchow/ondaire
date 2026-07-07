@@ -446,11 +446,12 @@ ${footer()}
 // restart callout. Linked from the download card and the install page.
 function homeAssistantPage() {
   const H = C.homeAssistant;
+  const lbImgs = H.shots.map((s) => ({ src: s.src, alt: s.alt, cap: s.cap, wide: s.wide }));
   const shots = H.shots
     .map(
-      (s) => `
+      (s, i) => `
         <figure class="ha-shot">
-          <img src="${esc(s.src)}" alt="${esc(s.alt)}" loading="lazy" decoding="async" />
+          <img class="lb-thumb" data-lb="${i}" role="button" tabindex="0" aria-label="Enlarge “${esc(s.cap)}”" src="${esc(s.src)}" alt="${esc(s.alt)}" loading="lazy" decoding="async" />
           <figcaption>${esc(s.cap)}</figcaption>
         </figure>`,
     )
@@ -489,6 +490,8 @@ ${navHeader("index.html", GET_IT_CTA, "home-assistant.html")}
   </section>
 </main>
 ${footer()}
+${lightbox(lbImgs)}
+<script>${LIGHTBOX_SCRIPT}</script>
 </body>
 </html>
 `;

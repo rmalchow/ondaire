@@ -64,14 +64,20 @@ type managed struct {
 // NewManager builds the manager (no processes yet — call Start). bin is the
 // resolved go-librespot path; dataDir is the node data dir (the default endpoint's
 // go-librespot auth lives directly under it, presets under dataDir/spotify/<id>).
-func NewManager(bin, dataDir, nodeName string, engine Engine, cluster Cluster, log *slog.Logger) *Manager {
+// apiBase is the go-librespot localhost API base port (each endpoint takes the
+// next free port from here); <= 0 falls back to DefaultAPIPort. Co-located nodes
+// must be given non-overlapping bases (ONDAIRE_SPOTIFY_PORT / --spotify-port).
+func NewManager(bin, dataDir, nodeName string, apiBase int, engine Engine, cluster Cluster, log *slog.Logger) *Manager {
 	if log == nil {
 		log = slog.Default()
+	}
+	if apiBase <= 0 {
+		apiBase = DefaultAPIPort
 	}
 	return &Manager{
 		bin:       bin,
 		dataDir:   dataDir,
-		apiBase:   DefaultAPIPort,
+		apiBase:   apiBase,
 		engine:    engine,
 		cluster:   cluster,
 		log:       log.With("comp", "spotify-mgr"),

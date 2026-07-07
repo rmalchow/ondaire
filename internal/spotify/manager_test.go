@@ -60,7 +60,7 @@ func (f *fakeCl) AssignPlaybackNode(node, target id.ID) bool {
 func mkID(n byte) id.ID { var x id.ID; x[15] = n; return x }
 
 func newTestMgr(eng *fakeEngine, cl *fakeCl) *Manager {
-	m := NewManager("/bin/true", t1Dir, "lr", eng, cl, nil)
+	m := NewManager("/bin/true", t1Dir, "lr", 0, eng, cl, nil)
 	m.started = true
 	return m
 }

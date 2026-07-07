@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -57,10 +58,11 @@ import (
 // resolved by config.Load (A); options only carries the K-owned knobs (--host,
 // ONDAIRE_OUTPUT, ONDAIRE_LOG) plus the raw flag args forwarded to config.Load.
 type options struct {
-	Host     string   // --host bind address; "" => all interfaces, "127.0.0.1" in dev/e2e
-	Output   string   // --output / ONDAIRE_OUTPUT (D2): "" => auto | null | file:<p> | name
-	LogLevel string   // ONDAIRE_LOG (debug|info|warn|error), default info
-	cfgArgs  []string // flag args forwarded to config.Load (--host stripped)
+	Host        string   // --host bind address; "" => all interfaces, "127.0.0.1" in dev/e2e
+	Output      string   // --output / ONDAIRE_OUTPUT (D2): "" => auto | null | file:<p> | name
+	LogLevel    string   // ONDAIRE_LOG (debug|info|warn|error), default info
+	SpotifyPort int      // --spotify-port / ONDAIRE_SPOTIFY_PORT: go-librespot API base port (default 3678). Set distinct per co-located node.
+	cfgArgs     []string // flag args forwarded to config.Load (--host stripped)
 }
 
 // version is stamped by the build (scripts/build.sh / CI: -X main.version=…).
@@ -105,9 +107,10 @@ func parseOptions(args []string, env func(string) string) (options, error) {
 		opt.LogLevel = "info"
 	}
 
-	// Pull --host / --output (and the =v forms) out of args; everything else
-	// goes to config.Load. "" means the flag was absent → fall back to env below.
-	var host, output string
+	// Pull --host / --output / --spotify-port (and the =v forms) out of args;
+	// everything else goes to config.Load. "" means the flag was absent → fall
+	// back to env below.
+	var host, output, spotifyPort string
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -138,6 +141,16 @@ func parseOptions(args []string, env func(string) string) (options, error) {
 			output = strings.TrimPrefix(a, "--output=")
 		case strings.HasPrefix(a, "-output="):
 			output = strings.TrimPrefix(a, "-output=")
+		case a == "--spotify-port" || a == "-spotify-port":
+			if i+1 >= len(args) {
+				return opt, errors.New("flag needs an argument: --spotify-port")
+			}
+			spotifyPort = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--spotify-port="):
+			spotifyPort = strings.TrimPrefix(a, "--spotify-port=")
+		case strings.HasPrefix(a, "-spotify-port="):
+			spotifyPort = strings.TrimPrefix(a, "-spotify-port=")
 		default:
 			rest = append(rest, a)
 		}
@@ -148,9 +161,24 @@ func parseOptions(args []string, env func(string) string) (options, error) {
 	if output == "" {
 		output = env("ONDAIRE_OUTPUT")
 	}
+	if spotifyPort == "" {
+		spotifyPort = env("ONDAIRE_SPOTIFY_PORT")
+	}
 	opt.Host = host
 	opt.Output = output
 	opt.cfgArgs = rest
+
+	// go-librespot API base port (flag > env > default 3678). Each go-librespot
+	// endpoint on a node takes the next free port from here, so co-located nodes
+	// must be given non-overlapping bases to avoid a 127.0.0.1 port clash.
+	opt.SpotifyPort = spotify.DefaultAPIPort
+	if spotifyPort != "" {
+		p, err := strconv.Atoi(spotifyPort)
+		if err != nil || p < 1 || p > 65535 {
+			return opt, fmt.Errorf("invalid --spotify-port / ONDAIRE_SPOTIFY_PORT %q: want 1-65535", spotifyPort)
+		}
+		opt.SpotifyPort = p
+	}
 
 	// Validate the config flags up front (no panic on a bad port etc.) without
 	// committing to side effects: a dry parse via the same FlagSet config uses.
@@ -766,7 +794,7 @@ func runCombined(ctx context.Context, opt options, cfg *config.Config, base *slo
 	// go-librespot binary is present.
 	var spotMgr *spotify.Manager
 	if bin := audio.FindSpotifyBinary(); bin != "" {
-		spotMgr = spotify.NewManager(bin, cfg.DataDir, cfg.NodeName, engine, cl, base)
+		spotMgr = spotify.NewManager(bin, cfg.DataDir, cfg.NodeName, opt.SpotifyPort, engine, cl, base)
 	}
 	var spotifyCtl api.Spotify
 	if spotMgr != nil {

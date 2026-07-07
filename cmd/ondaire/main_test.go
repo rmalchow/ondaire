@@ -10,6 +10,7 @@ import (
 	"ondaire/internal/api"
 	"ondaire/internal/contracts"
 	"ondaire/internal/group"
+	"ondaire/internal/spotify"
 	"ondaire/internal/stream"
 )
 
@@ -30,6 +31,65 @@ func TestParseOptionsDefaults(t *testing.T) {
 	}
 	if opt.Host != "" {
 		t.Errorf("Host = %q, want empty", opt.Host)
+	}
+	if opt.SpotifyPort != spotify.DefaultAPIPort {
+		t.Errorf("SpotifyPort = %d, want %d (default)", opt.SpotifyPort, spotify.DefaultAPIPort)
+	}
+}
+
+func TestParseOptionsSpotifyPortFlag(t *testing.T) {
+	for _, args := range [][]string{
+		{"--spotify-port", "3700"},
+		{"--spotify-port=3700"},
+	} {
+		opt, err := parseOptions(args, env(nil))
+		if err != nil {
+			t.Fatalf("args %v: %v", args, err)
+		}
+		if opt.SpotifyPort != 3700 {
+			t.Errorf("args %v: SpotifyPort = %d, want 3700", args, opt.SpotifyPort)
+		}
+		// --spotify-port must be stripped from the args forwarded to config.Load.
+		for _, a := range opt.cfgArgs {
+			if a == "--spotify-port" || a == "3700" || a == "--spotify-port=3700" {
+				t.Errorf("args %v: --spotify-port leaked into cfgArgs: %v", args, opt.cfgArgs)
+			}
+		}
+	}
+}
+
+func TestParseOptionsSpotifyPortEnv(t *testing.T) {
+	opt, err := parseOptions(nil, env(map[string]string{"ONDAIRE_SPOTIFY_PORT": "3800"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opt.SpotifyPort != 3800 {
+		t.Errorf("SpotifyPort = %d, want 3800", opt.SpotifyPort)
+	}
+}
+
+// flag > env > default.
+func TestParseOptionsSpotifyPortFlagBeatsEnv(t *testing.T) {
+	opt, err := parseOptions([]string{"--spotify-port", "3700"}, env(map[string]string{"ONDAIRE_SPOTIFY_PORT": "3800"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opt.SpotifyPort != 3700 {
+		t.Errorf("SpotifyPort = %d, want 3700 (flag beats env)", opt.SpotifyPort)
+	}
+}
+
+func TestParseOptionsSpotifyPortInvalid(t *testing.T) {
+	for _, bad := range []string{"notanumber", "0", "70000", "-1"} {
+		if _, err := parseOptions([]string{"--spotify-port", bad}, env(nil)); err == nil {
+			t.Errorf("expected error for --spotify-port %q", bad)
+		}
+	}
+}
+
+func TestParseOptionsSpotifyPortMissingArg(t *testing.T) {
+	if _, err := parseOptions([]string{"--spotify-port"}, env(nil)); err == nil {
+		t.Fatal("expected error for --spotify-port without value")
 	}
 }
 

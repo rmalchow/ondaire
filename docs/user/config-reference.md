@@ -227,6 +227,20 @@ else works normally. Where to get the binary and how to deploy it per setup is i
 The official Docker image **bakes go-librespot in**, so Spotify works there with no
 extra steps.
 
+**API base port.** Each Spotify endpoint (the default Connect device plus one per
+preset) runs its own go-librespot process with a **localhost event-API port**,
+allocated sequentially from a base:
+
+| Flag | Env | Default | What it does |
+|------|-----|---------|--------------|
+| `--spotify-port <n>` | `ONDAIRE_SPOTIFY_PORT` | `3678` | Base for go-librespot's localhost API port (bound on `127.0.0.1`). The default endpoint takes this port, each preset the next free one. |
+
+You only need to change this when running **multiple ondaire nodes on the same
+host** — otherwise every node starts at `3678` and only the first can bind it, so
+the others' Spotify bridges fail to start (*"spotify endpoint disabled"* in the
+log). Give each co-located node a non-overlapping base with headroom for its
+presets, e.g. `--spotify-port 3678` and `--spotify-port 3700`.
+
 ---
 
 ## Quick recipes
@@ -239,8 +253,9 @@ ONDAIRE_ROLE=master ONDAIRE_MEDIA_DIR=/srv/music ONDAIRE_LOG=debug ./ondaire --n
 ONDAIRE_ALSA_LATENCY_MS=400 ./ondaire --role playback --name bathroom
 
 # Two throwaway nodes on one laptop to try grouping (null audio, auto-incrementing ports):
-ONDAIRE_OUTPUT=null ./ondaire --data /tmp/n1 --name a &
-ONDAIRE_OUTPUT=null ./ondaire --data /tmp/n2 --name b &
+# distinct --spotify-port so both go-librespot API servers can bind on 127.0.0.1.
+ONDAIRE_OUTPUT=null ./ondaire --data /tmp/n1 --name a --spotify-port 3678 &
+ONDAIRE_OUTPUT=null ./ondaire --data /tmp/n2 --name b --spotify-port 3700 &
 ```
 
 ---

@@ -554,13 +554,24 @@ class OndaireCard extends HTMLElement {
       const items = m.results || [];
       body.innerHTML = `<div class="list">${
         items
-          .map(
-            (c) => `<div class="row">
+          .map((c) => {
+            const cid = esc(c.media_content_id);
+            const ct = esc(c.media_content_type);
+            if (c.can_expand) {
+              // Album/folder hit: open it, or add the whole thing to the queue.
+              return `<div class="row">
+                <button class="row" style="flex:1;padding:0" data-expand-search="${cid}" data-type="${ct}">
+                  <span>${ICON_FOLDER}</span><span class="label">${esc(c.title)}</span>
+                </button>
+                <button class="icon-btn small" data-enqdir="${cid}" title="Add folder to queue">${ICON_PLUS}</button>
+              </div>`;
+            }
+            return `<div class="row">
               <span>${ICON_NOTE_SMALL}</span><span class="label">${esc(c.title)}</span>
-              <button class="icon-btn small" data-play="${esc(c.media_content_id)}" data-type="${esc(c.media_content_type)}" title="Play now">${ICON_PLAY}</button>
-              <button class="icon-btn small" data-enq="${esc(c.media_content_id)}" data-type="${esc(c.media_content_type)}" title="Add to queue">${ICON_PLUS}</button>
-            </div>`,
-          )
+              <button class="icon-btn small" data-play="${cid}" data-type="${ct}" title="Play now">${ICON_PLAY}</button>
+              <button class="icon-btn small" data-enq="${cid}" data-type="${ct}" title="Add to queue">${ICON_PLUS}</button>
+            </div>`;
+          })
           .join("") || `<div class="muted">No matches</div>`
       }</div>`;
       this._wireMediaItemButtons(body);
@@ -613,16 +624,6 @@ class OndaireCard extends HTMLElement {
         this._browseMedia(b.dataset.expand, b.dataset.type, m.stack.slice());
       }),
     );
-    body.querySelectorAll("[data-enqdir]").forEach((b) =>
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this._hass.connection.sendMessagePromise({
-          type: "ondaire/enqueue_dir",
-          entity_id: this._config.entity,
-          content_id: b.dataset.enqdir,
-        });
-      }),
-    );
     this._wireMediaItemButtons(body);
   }
 
@@ -643,6 +644,33 @@ class OndaireCard extends HTMLElement {
         });
       }),
     );
+    scope.querySelectorAll("[data-enqdir]").forEach((b) =>
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._hass.connection.sendMessagePromise({
+          type: "ondaire/enqueue_dir",
+          entity_id: this._config.entity,
+          content_id: b.dataset.enqdir,
+        });
+      }),
+    );
+    // Search-result folder → jump into it in browse mode (clears the search).
+    scope.querySelectorAll("[data-expand-search]").forEach((b) =>
+      b.addEventListener("click", () =>
+        this._openSearchFolder(b.dataset.expandSearch, b.dataset.type),
+      ),
+    );
+  }
+
+  _openSearchFolder(contentId, contentType) {
+    const m = this._media;
+    m.query = "";
+    m.results = null;
+    m.stack = [{ id: "library", type: "library" }]; // Back → library root
+    m.cur = null;
+    m.loading = true; // suppresses the auto-"library" browse in render
+    this._renderActiveTab(); // reset the (now empty) search box
+    this._browseMedia(contentId, contentType, m.stack.slice());
   }
 
   async _browseMedia(contentId, contentType, stack) {

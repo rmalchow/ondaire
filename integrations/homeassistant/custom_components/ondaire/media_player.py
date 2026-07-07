@@ -408,11 +408,39 @@ class OndaireMediaPlayer(CoordinatorEntity[OndaireCoordinator], MediaPlayerEntit
         return len(uris)
 
     async def async_search_list(self, query: str) -> list[dict]:
-        """Search this room's library, returning playable items for the card."""
+        """Search this room's library for the card: matching folders first
+        (derived from the flat path list — the server search is file-only), then
+        tag-aware file hits. Folders are expandable and enqueue-able."""
+        q = query.strip().lower()
+        out: list[dict] = []
+
+        # Folders: any directory whose leaf name contains the query. Built from
+        # the (cached) full library, so it's independent of the tag index.
+        all_files = await self.coordinator.async_get_media(self._target)
+        dir_leaf: dict[str, str] = {}
+        for f in all_files:
+            parts = f.path.split("/")
+            for i in range(1, len(parts)):  # every ancestor directory
+                dir_leaf["/".join(parts[:i])] = parts[i - 1]
+        matched_dirs = sorted(
+            (p for p, leaf in dir_leaf.items() if q in leaf.lower()),
+            key=str.lower,
+        )
+        for prefix in matched_dirs[:50]:
+            out.append(
+                {
+                    "media_content_id": f"dir:{prefix}/",
+                    "media_content_type": "directory",
+                    "title": dir_leaf[prefix],
+                    "can_expand": True,
+                    "can_play": False,
+                }
+            )
+
+        # Files: the server's tag-aware search (name/path + metadata).
         files = await self.coordinator.client.search_media(
             self._target, query, limit=100
         )
-        out: list[dict] = []
         for f in files:
             path = f.get("path")
             if not path:
@@ -424,6 +452,8 @@ class OndaireMediaPlayer(CoordinatorEntity[OndaireCoordinator], MediaPlayerEntit
                     "media_content_id": f"file:{path}",
                     "media_content_type": "music",
                     "title": f"{artist} — {title}" if artist else title,
+                    "can_expand": False,
+                    "can_play": True,
                 }
             )
         return out

@@ -21,10 +21,14 @@ const ICON_PREV = '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="c
 const ICON_VOLUME = '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 10v4h4l5 5V5L7 10zm13.5 2a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>';
 const ICON_MUTE = '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 10v4h4l5 5V5L7 10zm14.7-2.3l-1.4-1.4L14 8.6 11.7 6.3l-1.4 1.4L12.6 10 10.3 12.3l1.4 1.4L14 11.4l2.3 2.3 1.4-1.4L15.4 10z"/></svg>';
 const ICON_NOTE = '<svg viewBox="0 0 24 24" width="32" height="32"><path fill="currentColor" d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg>';
+const ICON_CHEVRON_RIGHT = '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M9 6l6 6-6 6z"/></svg>';
+const ICON_CHEVRON_DOWN = '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 9l6 6 6-6z"/></svg>';
 const ICON_NOTE_SMALL = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg>';
 const ICON_FOLDER = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M10 4H2v16h20V6H12z"/></svg>';
 const ICON_PLUS = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>';
 const ICON_TRASH = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M6 7h12l-1 14H7zM9 4h6l1 2H8z"/></svg>';
+const ICON_SEARCH = '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14"/></svg>';
+const ICON_CLOSE = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
 
 const TABS = [
   ["players", "Players"],
@@ -51,11 +55,14 @@ const STYLE = `
   ha-card { padding: 16px; }
   .error { color: var(--error-color, #db4437); }
   .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  .name { font-size: 1.1em; font-weight: 500; color: var(--primary-text-color); }
+  .name-toggle { display: flex; align-items: center; gap: 6px; min-width: 0; background: none; border: none; padding: 0; margin: 0; cursor: pointer; color: inherit; font: inherit; text-align: left; }
+  .name-toggle:hover .name { color: var(--primary-color); }
+  .caret { flex: 0 0 auto; display: flex; color: var(--secondary-text-color); }
+  .name { font-size: 1.1em; font-weight: 500; color: var(--primary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pill { font-size: 0.7em; text-transform: uppercase; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; color: var(--secondary-text-color); background: var(--divider-color); }
   .pill.playing { color: #1c1304; background: var(--ondaire-accent); }
+  .content.unavailable { opacity: 0.5; pointer-events: none; }
   .body { display: flex; gap: 14px; }
-  .body.unavailable { opacity: 0.5; pointer-events: none; }
   .art { flex: 0 0 72px; width: 72px; height: 72px; border-radius: 8px; background-color: var(--divider-color); background-size: cover; background-position: center; display: flex; align-items: center; justify-content: center; color: var(--secondary-text-color); }
   .meta { flex: 1; min-width: 0; }
   .title { font-weight: 500; color: var(--primary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -63,15 +70,21 @@ const STYLE = `
   .progress-track { height: 4px; border-radius: 2px; background: var(--divider-color); cursor: pointer; }
   .progress-fill { height: 100%; border-radius: 2px; background: var(--ondaire-accent); }
   .times { display: flex; justify-content: space-between; font-size: 0.75em; color: var(--secondary-text-color); margin-top: 3px; }
-  .transport { display: flex; align-items: center; gap: 4px; margin-top: 8px; }
+  .transport { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; }
   .icon-btn { border: none; background: none; cursor: pointer; color: var(--primary-text-color); padding: 6px; border-radius: 50%; display: flex; }
   .icon-btn:hover { background: var(--divider-color); }
   .icon-btn:disabled { color: var(--disabled-text-color); cursor: default; }
   .icon-btn:disabled:hover { background: none; }
   .icon-btn.play { color: var(--primary-color); }
   .icon-btn.small { padding: 4px; }
+  .transport .icon-btn { padding: 10px; }
+  .transport .icon-btn svg { width: 26px; height: 26px; }
   .volume-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
   .volume { flex: 1; accent-color: var(--primary-color); }
+  /* collapsed shows the joined-only mini list; expanded shows tabs instead */
+  .mini { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--divider-color); }
+  .root.expanded .mini { display: none; }
+  .root.collapsed .tabbar, .root.collapsed .tabcontent { display: none; }
   /* tabs */
   .tabbar { display: flex; gap: 2px; margin-top: 14px; border-bottom: 1px solid var(--divider-color); }
   .tab { flex: 1; text-align: center; padding: 8px 4px; font-size: 0.85em; cursor: pointer; color: var(--secondary-text-color); border-bottom: 2px solid transparent; margin-bottom: -1px; user-select: none; }
@@ -81,6 +94,15 @@ const STYLE = `
   .list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; }
   .muted { color: var(--secondary-text-color); font-size: 0.85em; padding: 8px 2px; }
   .crumb { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .search-wrap { flex: 1; display: flex; align-items: center; gap: 8px; padding: 7px 10px 7px 12px; border-radius: 8px; background: transparent; border: 1px solid var(--divider-color); transition: border-color .15s, box-shadow .15s; }
+  .search-wrap:focus-within { border-color: var(--ondaire-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ondaire-accent) 30%, transparent); }
+  .search-icon { flex: 0 0 auto; display: flex; color: var(--secondary-text-color); }
+  .search { flex: 1; min-width: 0; border: none; background: none; outline: none; padding: 0; color: var(--primary-text-color); font: inherit; font-size: 0.9em; }
+  .search::placeholder { color: var(--secondary-text-color); }
+  .search::-webkit-search-cancel-button, .search::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
+  .search-clear { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; border: none; background: none; padding: 2px; border-radius: 50%; cursor: pointer; color: var(--secondary-text-color); transition: color .15s, background .15s; }
+  .search-clear:hover:not(:disabled) { color: var(--primary-text-color); background: var(--divider-color); }
+  .search-clear:disabled { opacity: 0.35; cursor: default; }
   .row { display: flex; align-items: center; gap: 8px; padding: 6px 2px; color: var(--primary-text-color); font-size: 0.9em; min-width: 0; }
   .row .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   button.row { border: none; background: none; text-align: left; cursor: pointer; width: 100%; font: inherit; }
@@ -118,6 +140,7 @@ class OndaireCard extends HTMLElement {
       throw new Error("ondaire-card: 'entity' is required");
     }
     this._config = config;
+    this._expanded = this._loadExpanded();
     this._tab = "players";
     this._media = {
       stack: [], cur: null, loading: false, error: "",
@@ -141,7 +164,7 @@ class OndaireCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 6;
+    return this._expanded ? 6 : 3;
   }
 
   connectedCallback() {
@@ -159,7 +182,7 @@ class OndaireCard extends HTMLElement {
     // media_position_updated_at change each frame. Position is handled by
     // _tick() (targeted DOM write, no re-render), so folding it in here would
     // rebuild the DOM every few seconds and drop clicks mid-interaction.
-    const ids = [this._config.entity, ...this._playbackIds(hass)];
+    const ids = [...new Set([this._config.entity, ...this._playbackIds(hass)])];
     return ids.map((id) => this._entSig(hass.states[id])).join("|");
   }
 
@@ -188,12 +211,10 @@ class OndaireCard extends HTMLElement {
         if (!id.startsWith("media_player.")) return false;
         if (entities[id].platform !== "ondaire") return false;
         const s = hass.states[id];
-        return (
-          s &&
-          s.state !== "unavailable" &&
-          s.attributes.ondaire_playback === true &&
-          id !== this._config.entity
-        );
+        // Every ondaire node with an active playback component — including the
+        // card's own entity when it's also a speaker. Nodes that are ONLY rooms
+        // (no playback component) report ondaire_playback=false and drop out here.
+        return s && s.state !== "unavailable" && s.attributes.ondaire_playback === true;
       })
       .sort();
   }
@@ -240,8 +261,9 @@ class OndaireCard extends HTMLElement {
   // box. The Players tab is the exception — it mirrors live speaker state.
   _buildSkeleton() {
     this.attachShadow({ mode: "open" });
-    this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card><div class="root">
+    this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card><div class="root ${this._expanded ? "expanded" : "collapsed"}">
       <div class="top"></div>
+      <div class="mini"></div>
       <div class="tabbar">${TABS.map(([id, label]) =>
         `<div class="tab" data-tab="${id}">${label}</div>`,
       ).join("")}</div>
@@ -277,28 +299,33 @@ class OndaireCard extends HTMLElement {
 
     top.innerHTML = `
       <div class="header">
-        <div class="name">${esc(a.friendly_name || this._config.entity)}</div>
+        <button class="name-toggle" data-action="expand" aria-expanded="${this._expanded}" title="${this._expanded ? "Collapse" : "Expand"}">
+          <span class="caret">${this._expanded ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT}</span>
+          <span class="name">${esc(a.friendly_name || this._config.entity)}</span>
+        </button>
         <div class="pill ${playing ? "playing" : ""}">${esc(stateObj.state)}</div>
       </div>
-      <div class="body ${unavailable ? "unavailable" : ""}">
-        <div class="art">${ICON_NOTE}</div>
-        <div class="meta">
-          <div class="title">${esc(a.media_title || "Nothing playing")}</div>
-          <div class="sub">${esc([a.media_artist, a.media_album_name].filter(Boolean).join(" — "))}</div>
-          <div class="progress">
-            <div class="progress-track"><div class="progress-fill" style="width:${duration ? (position / duration) * 100 : 0}%"></div></div>
-            <div class="times"><span class="elapsed">${fmtTime(position)}</span><span class="duration">${fmtTime(duration)}</span></div>
+      <div class="content ${unavailable ? "unavailable" : ""}">
+        <div class="body">
+          <div class="art">${ICON_NOTE}</div>
+          <div class="meta">
+            <div class="title">${esc(a.media_title || "Nothing playing")}</div>
+            <div class="sub">${esc([a.media_artist, a.media_album_name].filter(Boolean).join(" — "))}</div>
+            <div class="progress">
+              <div class="progress-track"><div class="progress-fill" style="width:${duration ? (position / duration) * 100 : 0}%"></div></div>
+              <div class="times"><span class="elapsed">${fmtTime(position)}</span><span class="duration">${fmtTime(duration)}</span></div>
+            </div>
           </div>
-          <div class="transport">
-            <button class="icon-btn" data-action="prev" disabled title="Not supported by ondaire">${ICON_PREV}</button>
-            <button class="icon-btn play" data-action="playpause">${playing ? ICON_PAUSE : ICON_PLAY}</button>
-            <button class="icon-btn" data-action="stop">${ICON_STOP}</button>
-            <button class="icon-btn" data-action="next">${ICON_NEXT}</button>
-          </div>
-          <div class="volume-row" title="${noGroup ? "Join a speaker to set group volume" : "Group volume — scales all joined speakers"}">
-            <button class="icon-btn small" data-action="groupmute" ${noGroup ? "disabled" : ""}>${groupMuted ? ICON_MUTE : ICON_VOLUME}</button>
-            <input type="range" class="volume" min="0" max="1" step="0.01" value="${groupVol}" ${noGroup ? "disabled" : ""}>
-          </div>
+        </div>
+        <div class="transport">
+          <button class="icon-btn" data-action="prev" disabled title="Not supported by ondaire">${ICON_PREV}</button>
+          <button class="icon-btn play" data-action="playpause">${playing ? ICON_PAUSE : ICON_PLAY}</button>
+          <button class="icon-btn" data-action="stop">${ICON_STOP}</button>
+          <button class="icon-btn" data-action="next">${ICON_NEXT}</button>
+        </div>
+        <div class="volume-row" title="${noGroup ? "Join a speaker to set group volume" : "Group volume — scales all joined speakers"}">
+          <button class="icon-btn small" data-action="groupmute" ${noGroup ? "disabled" : ""}>${groupMuted ? ICON_MUTE : ICON_VOLUME}</button>
+          <input type="range" class="volume" min="0" max="1" step="0.01" value="${groupVol}" ${noGroup ? "disabled" : ""}>
         </div>
       </div>`;
 
@@ -313,12 +340,19 @@ class OndaireCard extends HTMLElement {
     this.shadowRoot.querySelectorAll(".tab[data-tab]").forEach((el) =>
       el.classList.toggle("active", el.dataset.tab === this._tab),
     );
-    // Render tab content on first paint, and refresh only the live Players tab
-    // on subsequent state changes (others persist until the user acts).
-    if (first || this._tab === "players") this._renderActiveTab();
+    // Refresh the currently-visible region on each relevant state change: the
+    // compact joined-only list when collapsed, or the live Players tab when
+    // expanded (other tabs persist until the user acts — scroll/focus safe).
+    // The skeleton already stamps the initial .root region class.
+    if (!this._expanded) {
+      this._renderMini();
+    } else if (first || this._tab === "players") {
+      this._renderActiveTab();
+    }
   }
 
   _wireTop(root, stateObj) {
+    root.querySelector('[data-action="expand"]')?.addEventListener("click", () => this._toggleExpanded());
     root.querySelector('[data-action="playpause"]')?.addEventListener("click", () =>
       this._call(stateObj.state === "playing" ? "media_pause" : "media_play"),
     );
@@ -381,6 +415,47 @@ class OndaireCard extends HTMLElement {
     if (this._tab === "queue") return this._renderQueue(el);
   }
 
+  // --- expand / collapse ---------------------------------------------------
+  // Persist per-entity so each room card remembers its state across reloads.
+  // localStorage can throw (private mode, disabled storage) — fail soft.
+  _storageKey() {
+    return `ondaire-card:expanded:${this._config.entity}`;
+  }
+
+  _loadExpanded() {
+    try {
+      return window.localStorage.getItem(this._storageKey()) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  _toggleExpanded() {
+    this._expanded = !this._expanded;
+    try {
+      window.localStorage.setItem(this._storageKey(), this._expanded ? "1" : "0");
+    } catch {
+      /* storage unavailable — state still applies for this session */
+    }
+    this._applyExpanded();
+  }
+
+  // Reflect `_expanded` in the DOM: swap the region classes on `.root`, flip
+  // the header caret, and render whichever region just became visible (the
+  // compact joined-only list, or the full tab content).
+  _applyExpanded() {
+    const root = this.shadowRoot?.querySelector(".root");
+    if (!root) return;
+    root.classList.toggle("expanded", this._expanded);
+    root.classList.toggle("collapsed", !this._expanded);
+    const toggle = root.querySelector('[data-action="expand"]');
+    if (toggle) toggle.setAttribute("aria-expanded", String(this._expanded));
+    const caret = toggle?.querySelector(".caret");
+    if (caret) caret.innerHTML = this._expanded ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT;
+    if (this._expanded) this._renderActiveTab();
+    else this._renderMini();
+  }
+
   // --- Players tab ---------------------------------------------------------
   _isJoined(speakerState) {
     const members = speakerState.attributes.group_members;
@@ -414,9 +489,56 @@ class OndaireCard extends HTMLElement {
     }
   }
 
+  // Full roster (expanded Players tab): every playback node, toggle anyone in/out.
   _renderPlayers(el) {
-    const joinedIds = new Set(this._joinedSpeakers().map((s) => s.entity_id));
     const speakers = this._playbackIds(this._hass).map((id) => this._hass.states[id]);
+    this._renderSpeakerList(el, speakers, `<div class="muted">No speakers found on the network</div>`);
+  }
+
+  // Compact list (collapsed state): only the speakers joined to this room.
+  _renderMini() {
+    const el = this.shadowRoot?.querySelector(".mini");
+    if (!el) return;
+    this._renderSpeakerList(
+      el,
+      this._joinedSpeakers(),
+      `<div class="muted">No speakers joined — tap the title to add</div>`,
+    );
+  }
+
+  // Repaint whichever speaker list is currently visible (Players tab when
+  // expanded, the mini list when collapsed) after an optimistic toggle.
+  _repaintSpeakers() {
+    if (this._expanded) {
+      if (this._tab === "players") this._renderActiveTab();
+    } else {
+      this._renderMini();
+    }
+  }
+
+  _speakerRowHTML(s, joinedIds) {
+    const id = s.entity_id;
+    const busy = id in this._pending;
+    // Optimistic: reflect the desired state instantly while in flight.
+    const on = busy ? this._pending[id] : joinedIds.has(id);
+    const name = s.attributes.friendly_name || id;
+    const vol = s.attributes.volume_level != null ? s.attributes.volume_level : 0;
+    // Handle only when this speaker is actually joined and settled; otherwise
+    // just show its level as a static track (no draggable thumb).
+    const interactive = on && !busy;
+    const volCtl = interactive
+      ? `<input type="range" class="spk-vol" data-vol="${esc(id)}" min="0" max="1" step="0.01" value="${vol}">`
+      : `<div class="spk-track" aria-hidden="true"><div class="spk-track-fill" style="width:${Math.round(vol * 100)}%"></div></div>`;
+    return `
+      <div class="spk ${on ? "on" : "off"}">
+        <div class="sw ${on ? "on" : ""} ${busy ? "busy" : ""}" data-toggle="${esc(id)}" role="switch" aria-checked="${on}"></div>
+        <div class="spk-name">${esc(name)}</div>
+        ${volCtl}
+      </div>`;
+  }
+
+  _renderSpeakerList(el, speakers, emptyHtml) {
+    const joinedIds = new Set(this._joinedSpeakers().map((s) => s.entity_id));
 
     // Reconcile optimistic toggles: once real state matches the desired state,
     // the pending flag (and its "busy" lock) is cleared and the toggle re-enables.
@@ -425,30 +547,11 @@ class OndaireCard extends HTMLElement {
     }
 
     if (!speakers.length) {
-      el.innerHTML = `<div class="muted">No speakers found on the network</div>`;
+      el.innerHTML = emptyHtml;
       return;
     }
     el.innerHTML = `<div class="list">${speakers
-      .map((s) => {
-        const id = s.entity_id;
-        const busy = id in this._pending;
-        // Optimistic: reflect the desired state instantly while in flight.
-        const on = busy ? this._pending[id] : joinedIds.has(id);
-        const name = s.attributes.friendly_name || id;
-        const vol = s.attributes.volume_level != null ? s.attributes.volume_level : 0;
-        // Handle only when this speaker is actually joined and settled; otherwise
-        // just show its level as a static track (no draggable thumb).
-        const interactive = on && !busy;
-        const volCtl = interactive
-          ? `<input type="range" class="spk-vol" data-vol="${esc(id)}" min="0" max="1" step="0.01" value="${vol}">`
-          : `<div class="spk-track" aria-hidden="true"><div class="spk-track-fill" style="width:${Math.round(vol * 100)}%"></div></div>`;
-        return `
-          <div class="spk ${on ? "on" : "off"}">
-            <div class="sw ${on ? "on" : ""} ${busy ? "busy" : ""}" data-toggle="${esc(id)}" role="switch" aria-checked="${on}"></div>
-            <div class="spk-name">${esc(name)}</div>
-            ${volCtl}
-          </div>`;
-      })
+      .map((s) => this._speakerRowHTML(s, joinedIds))
       .join("")}</div>`;
 
     el.querySelectorAll(".sw[data-toggle]").forEach((sw) => {
@@ -460,14 +563,14 @@ class OndaireCard extends HTMLElement {
         // Safety net: clear the lock even if no state update arrives.
         this._pendingTimers[id] = window.setTimeout(() => {
           this._clearPending(id);
-          if (this._tab === "players") this._renderActiveTab();
+          this._repaintSpeakers();
         }, 6000);
-        this._renderActiveTab(); // repaint: optimistic state + busy lock
+        this._repaintSpeakers(); // repaint: optimistic state + busy lock
 
         const done = () => {
           // Let the reconcile-on-render clear it when real state lands; if the
           // call failed, a repaint reverts to the true (unchanged) state.
-          if (this._tab === "players") this._renderActiveTab();
+          this._repaintSpeakers();
         };
         const call = desired
           ? this._hass.callService("media_player", "join", {
@@ -505,8 +608,11 @@ class OndaireCard extends HTMLElement {
     // input (keeps focus while typing / results while scrolling).
     el.innerHTML = `
       <div class="crumb">
-        <input class="search" type="search" placeholder="Search library…" value="${esc(this._media.query)}">
-        ${this._media.query ? `<button class="text-btn" data-media-clear>Clear</button>` : ""}
+        <div class="search-wrap">
+          <span class="search-icon">${ICON_SEARCH}</span>
+          <input class="search" type="search" placeholder="Search library…" value="${esc(this._media.query)}">
+          <button class="search-clear" data-media-clear title="Clear" aria-label="Clear search" ${this._media.query ? "" : "disabled"}>${ICON_CLOSE}</button>
+        </div>
       </div>
       <div class="media-body"></div>`;
 
@@ -532,6 +638,10 @@ class OndaireCard extends HTMLElement {
 
   _onSearchInput(value) {
     this._media.query = value;
+    // Live-toggle the embedded clear button — the input itself isn't rebuilt
+    // per keystroke (keeps focus/caret), so flip its enabled state here.
+    const clear = this.shadowRoot?.querySelector("[data-media-clear]");
+    if (clear) clear.disabled = value.length === 0;
     window.clearTimeout(this._searchTimer);
     if (!value.trim()) {
       this._media.results = null;

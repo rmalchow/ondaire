@@ -252,11 +252,17 @@ class OndaireMediaPlayer(CoordinatorEntity[OndaireCoordinator], MediaPlayerEntit
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        # `ondaire_playback` lets the Lovelace card tell speakers (playback
-        # nodes) from rooms (masters) without a device-registry round-trip — the
-        # group section lists only playback nodes.
+        # `ondaire_playback` lets the Lovelace card list the nodes that are
+        # speakers (its roster). A node qualifies if it is a wire-driven
+        # playback node (D50 satellite — the master holds no probed caps for it,
+        # so capabilities.playback reads false) OR it has playback capability
+        # (a normal/dual-role node that can output audio, e.g. "study"). The
+        # union restores joined satellites while still excluding room-only
+        # masters (both false). Mirrors the web UI's roster, which lists group
+        # members unconditionally and uses capabilities only for addable nodes.
         node = self._node
-        return {"ondaire_playback": bool(node.playback_node) if node else False}
+        is_player = bool(node) and (node.playback_node or node.playback_capable)
+        return {"ondaire_playback": is_player}
 
     @property
     def group_members(self) -> list[str] | None:

@@ -75,6 +75,11 @@ class NodeView:
     addrs: tuple[str, ...] = ()
     http_port: int = 0
     playback_node: bool = False
+    # capabilities.playback — whether the node can actually output audio. A
+    # `--role master` (room-only) node has no player and reports False; a
+    # dual-role node (room that also plays) reports True. Distinct from
+    # `playback_node`, which flags a playback-ONLY satellite (no HTTP/WS API).
+    playback_capable: bool = False
     following: str = ""
     alive: bool = False
     stale: bool = False
@@ -91,6 +96,7 @@ class NodeView:
             addrs=tuple(d.get("addrs") or ()),
             http_port=int(d.get("httpPort", 0) or 0),
             playback_node=bool(d.get("playbackNode", False)),
+            playback_capable=bool((d.get("capabilities") or {}).get("playback", False)),
             following=d.get("following", ""),
             alive=bool(d.get("alive", False)),
             stale=bool(d.get("stale", False)),

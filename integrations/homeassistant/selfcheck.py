@@ -69,6 +69,27 @@ def main() -> None:
     assert master_ids == {"a" * 32, "b" * 32}, master_ids
     assert snap.smallest_master_id() == "a" * 32
 
+    # capabilities.playback -> playback_capable (independent of playback_node).
+    # A dual-role node (a master that also plays, e.g. "study") reports
+    # capabilities.playback=True while a room-only master reports False.
+    caps = Snapshot.from_json({
+        "nodes": [
+            {"id": "e" * 32, "name": "Study", "alive": True,
+             "capabilities": {"playback": True}},          # room + player
+            {"id": "f" * 32, "name": "Hallway", "alive": True,
+             "capabilities": {"playback": False}},          # room-only master
+            {"id": "g" * 32, "name": "Satellite", "alive": True,
+             "playbackNode": True, "capabilities": {"playback": True}},
+            {"id": "h" * 32, "name": "Legacy", "alive": True},  # no capabilities key
+        ],
+        "groups": [],
+    })
+    study, hallway, sat, legacy = (caps.node(c * 32) for c in "efgh")
+    assert study.playback_capable and not study.playback_node, "dual-role node is playback-capable"
+    assert not hallway.playback_capable, "room-only master is not playback-capable"
+    assert sat.playback_capable and sat.playback_node, "satellite is both"
+    assert not legacy.playback_capable, "missing capabilities defaults to False"
+
     # presets carry the secret-free auth signal only
     assert snap.stream_presets[0].has_auth and snap.stream_presets[0].auth_scheme == "basic"
 

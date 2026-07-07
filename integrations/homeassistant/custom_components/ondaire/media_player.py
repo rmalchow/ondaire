@@ -24,6 +24,7 @@ from .api import OndaireApiError
 from .browse_media import async_browse_media, resolve_play_uri, search_results
 from .const import DOMAIN, SIGNAL_ADD_ENTITIES
 from .coordinator import OndaireCoordinator
+from .images import scale_cover
 from .models import GroupView, NodeView
 
 # SEARCH_MEDIA + SearchMedia/SearchMediaQuery landed in recent HA cores. Import
@@ -246,9 +247,15 @@ class OndaireMediaPlayer(CoordinatorEntity[OndaireCoordinator], MediaPlayerEntit
         if not url:
             return None, None
         try:
-            return await self.coordinator.client.fetch_image(url)
+            raw, ctype = await self.coordinator.client.fetch_image(url)
         except OndaireApiError:
             return None, None
+        # Downscale to a small thumbnail before handing it on. Blocking (PIL
+        # decode) → run in the executor.
+        scaled = await self.hass.async_add_executor_job(scale_cover, raw)
+        if scaled is not None:
+            return scaled, "image/jpeg"
+        return raw, ctype  # unscalable (no Pillow / bad bytes): pass through
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

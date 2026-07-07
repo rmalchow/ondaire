@@ -50,6 +50,69 @@ function fmtTime(sec) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+// Smooth playback position from coarse, occasionally-stale authoritative updates.
+// media_position is integer-truncated and media_position_updated_at bumps on every
+// heartbeat (gossip + WS jitter), so re-anchoring to `pos + (now - updated_at)` each
+// tick makes the fill jump back and forth. Instead we run a LOCAL clock anchored to
+// the server value: free-run at 1x, gently slew toward each fresh sample, and
+// hard-snap only on a real discontinuity (track change, resume, or a large delta =
+// seek/replay). Ported from the node UI's lib/playclock.js — see the notes there.
+const CLOCK_SNAP = 3; // s — a server update beyond this is a seek/replay → snap
+const CLOCK_SLEW = 0.15; // fraction of the (behind-only) error corrected per update
+
+function createPlayClock() {
+  return {
+    anchorPos: 0, // s — authoritative position captured at the anchor
+    anchorAt: 0, // ms — nowMs when anchored
+    anchorUri: "", // track playing at the anchor
+    wasPlaying: false, // playing at the last reconcile (detects resume)
+    pos: 0, // s — last sampled display position
+  };
+}
+
+// reconcile folds one authoritative update into the clock. While paused/idle it
+// freezes at the reported value; while playing it snaps on a discontinuity, else
+// slews forward toward the reported value (never stepping backward in steady state).
+function reconcileClock(c, { positionSec, uri, playing, nowMs }) {
+  const sp = positionSec || 0;
+  const u = uri || "";
+  if (!playing) {
+    c.anchorPos = sp;
+    c.anchorAt = nowMs;
+    c.anchorUri = u;
+    c.wasPlaying = false;
+    c.pos = sp;
+    return c;
+  }
+  const est = c.anchorPos + (nowMs - c.anchorAt) / 1000;
+  const discontinuity =
+    u !== c.anchorUri || !c.wasPlaying || Math.abs(sp - est) > CLOCK_SNAP;
+  if (discontinuity) {
+    c.anchorPos = sp;
+    c.pos = sp;
+  } else {
+    // steady state: only catch up when behind (positive error); ignore being
+    // slightly ahead so the displayed number never stalls or steps back.
+    const err = sp - est;
+    c.anchorPos = err > 0 ? est + err * CLOCK_SLEW : est;
+  }
+  c.anchorAt = nowMs;
+  c.anchorUri = u;
+  c.wasPlaying = true;
+  return c;
+}
+
+// sampleClock reads the display position at nowMs, clamped to durationSec (0 =
+// unknown), and monotonic within a track (never steps back between snaps).
+function sampleClock(c, nowMs, durationSec = 0) {
+  if (!c.wasPlaying) return c.pos; // frozen (paused/idle)
+  let p = c.anchorPos + (nowMs - c.anchorAt) / 1000;
+  if (durationSec > 0 && p > durationSec) p = durationSec;
+  if (p < c.pos) p = c.pos; // monotonic safety
+  c.pos = p;
+  return p;
+}
+
 const STYLE = `
   :host { --ondaire-accent: #f7b733; }
   ha-card { padding: 16px; }
@@ -148,6 +211,7 @@ class OndaireCard extends HTMLElement {
     };
     this._streams = { items: null, loading: false, error: "" };
     this._queue = { items: null, loading: false, error: "", forUri: null };
+    this._clock = createPlayClock();
     this._dragging = false;
     // entity_id -> desired joined state while a join/unjoin is in flight.
     this._pending = {};
@@ -156,6 +220,7 @@ class OndaireCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._syncClock();
     const sig = this._relevantSig(hass);
     if (sig !== this._lastSig && !this._dragging) {
       this._lastSig = sig;
@@ -234,6 +299,27 @@ class OndaireCard extends HTMLElement {
     return { position: duration ? Math.min(position, duration) : position, duration };
   }
 
+  // Fold the current authoritative sample into the smoothing clock. Called on
+  // every hass update (position moves arrive as heartbeats that don't change the
+  // render signature, so this must run before the sig guard in `set hass`).
+  _syncClock() {
+    const stateObj = this._stateObj;
+    if (!stateObj) return;
+    const { position } = this._position(stateObj);
+    reconcileClock(this._clock, {
+      positionSec: position,
+      uri: stateObj.attributes.media_content_id || "",
+      playing: stateObj.state === "playing",
+      nowMs: performance.now(),
+    });
+  }
+
+  // Smoothed display position, free-running between heartbeats.
+  _smooth(stateObj) {
+    const duration = stateObj.attributes.media_duration || 0;
+    return { position: sampleClock(this._clock, performance.now(), duration), duration };
+  }
+
   _tick() {
     const stateObj = this._stateObj;
     const root = this.shadowRoot?.querySelector(".root");
@@ -241,7 +327,7 @@ class OndaireCard extends HTMLElement {
     const fill = root.querySelector(".progress-fill");
     const elapsedEl = root.querySelector(".elapsed");
     if (!fill) return;
-    const { position, duration } = this._position(stateObj);
+    const { position, duration } = this._smooth(stateObj);
     fill.style.width = `${duration ? Math.min(100, (position / duration) * 100) : 0}%`;
     if (elapsedEl) elapsedEl.textContent = fmtTime(position);
   }
@@ -290,7 +376,7 @@ class OndaireCard extends HTMLElement {
     const a = stateObj.attributes;
     const unavailable = stateObj.state === "unavailable";
     const playing = stateObj.state === "playing";
-    const { position, duration } = this._position(stateObj);
+    const { position, duration } = this._smooth(stateObj);
 
     const joined = this._joinedSpeakers();
     const groupVol = this._groupVolume(joined);

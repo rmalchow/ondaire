@@ -481,7 +481,7 @@ ${navHeader("index.html", GET_IT_CTA, "home-assistant.html")}
     <div class="ha-install">
       <h2>Install</h2>
       <ol class="ha-steps">${steps}</ol>
-      <p class="dl-note ha-important"><strong>Important —</strong> ${H.important}</p>
+      <div class="dl-warn" role="note"><span class="dl-warn-tag">Important</span><span>${H.important}</span></div>
       <div class="ha-cta">
         <a class="btn btn-solid" href="${esc(H.download.href)}">${esc(H.download.label)}<span class="arrow">↓</span></a>
         <a class="btn btn-ghost" href="${esc(H.readme.href)}" rel="noopener">${esc(H.readme.label)}<span class="arrow">→</span></a>
@@ -831,17 +831,17 @@ ${navHeader("index.html", HOME_CTA)}
   <section class="dl">
     <header class="sec-head">
       <span class="eyebrow">${eq(6)}${esc(C.download.eyebrow)}${VERSION ? " · " + esc(VERSION) : ""}</span>
-      <h1>${esc(C.download.title)}</h1>${
-        C.download.important
-          ? `\n      <p class="dl-note ha-important"><strong>Important —</strong> ${esc(C.download.important)}</p>`
-          : ""
-      }
+      <h1>${esc(C.download.title)}</h1>
       <p class="sec-intro">${esc(C.download.intro)}</p>${
         C.download.note
           ? `\n      <p class="sec-intro"><strong>Tip:</strong> ${esc(C.download.note)}</p>`
           : ""
       }
-    </header>
+    </header>${
+      C.download.important
+        ? `\n    <div class="dl-warn" role="note"><span class="dl-warn-tag">Important</span><span>${esc(C.download.important)}</span></div>`
+        : ""
+    }
     <div class="dl-list">${esp32}${installer}${cards}</div>
     ${flags}
     <div class="dl-links">${links}</div>

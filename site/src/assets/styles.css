@@ -916,6 +916,36 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
   letter-spacing: -0.02em;
   margin: 0 0 18px;
 }
+/* full-width banner for a fleet-wide caveat (e.g. Wi-Fi contention) — deliberately
+   louder than .dl-note so it isn't mistaken for a minor per-card tip */
+.dl-warn {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin: 0 0 40px;
+  padding: 18px 22px;
+  border-radius: 14px;
+  background: color-mix(in srgb, #e0a64a 12%, var(--bg));
+  border: 1px solid color-mix(in srgb, #e0a64a 55%, var(--line-2));
+  color: #f3dfb3;
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+/* pull up against the download page's tall .sec-head bottom margin */
+.sec-head + .dl-warn { margin-top: -20px; }
+.ha-steps + .dl-warn { margin-top: 18px; }
+.dl-warn-tag {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bg);
+  background: #e0a64a;
+  border-radius: 999px;
+  padding: 4px 10px;
+  margin-top: 3px;
+}
 .dl-list {
   display: flex;
   flex-direction: column;
@@ -1336,7 +1366,6 @@ section { padding: clamp(72px, 12vw, 140px) 0; }
 .ha-install h2 { margin: 0 0 8px; }
 .ha-steps { padding-left: 22px; display: grid; gap: 11px; margin: 14px 0; }
 .ha-steps code { color: var(--ink); }
-.ha-important { margin: 18px 0; font-size: 14px; }
 .ha-cta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 22px; }
 
 @media (max-width: 720px) {

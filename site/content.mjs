@@ -500,7 +500,7 @@ export const content = {
       "One small, static binary per device — pure Go, no runtime, no dependencies. Each archive is the build attached to the matching tagged release: verify its SHA-256, unpack it, and run ./ondaire. Prefer containers? Pull the master image with Spotify Connect built in.",
     // Prominent callout rendered above the intro: Wi-Fi contention is the #1 field issue.
     important:
-      "The number of devices on your Wi-Fi alone does matter — not just activity and throughput. For best results, have a separate Wi-Fi (on a different channel) for ondaire, with a single SSID — for ESP32, make it 2.4GHz only.",
+      "The number of devices on your Wi-Fi alone does matter — not just activity, throughput and signal strength. For best results, have a separate Wi-Fi (on a different channel) for ondaire, with a single SSID — for ESP32, make it 2.4GHz only.",
     // Caveat rendered as a tip under the page intro: a uniform fleet syncs best.
     note:
       "For the tightest sync, use the same TYPE of player throughout — e.g. all Raspberry Pi nodes, or all ESP32 nodes. Mixed fleets work (the master equalizes each node's output latency), but identical hardware shares the same latency and clock behaviour, so it lines up best.",

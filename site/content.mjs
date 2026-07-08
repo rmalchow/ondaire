@@ -459,6 +459,12 @@ export const content = {
     title: "Every room, right in Home Assistant.",
     intro:
       "The ondaire integration turns each room into a Home Assistant media_player — play/pause, volume, and speaker grouping — and ships a custom Lovelace card that mirrors the ondaire app: players, the media library, stream presets, and the shared queue. Every request is proxied through Home Assistant, so your dashboard talks only to HA.",
+    // Prose connecting the screenshots to the feature list: what an "ondaire
+    // node" actually maps to in HA terms, and how the integration stays live.
+    howItWorks: [
+      "Under the hood, the integration talks to a single room (master) node's HTTP API and mirrors live cluster state from that node's WebSocket feed — so adding one node to Home Assistant reaches the whole cluster, players included. Every ondaire node, whether it's a full room or a bare ESP32 speaker, shows up as its own <code>media_player</code> entity.",
+      "Grouping reuses Home Assistant's own join/unjoin model, the same convention Sonos and HEOS integrations use: join a room into another room's group and it starts following that group's playback; unjoin and it splits back off on its own. If the master your dashboard was talking to disappears — reboot, network hiccup, whatever — the integration fails over to another master automatically, so you don't lose control of the cluster over one node dropping out.",
+    ],
     shots: [
       {
         src: "assets/img/home_assistant.png",
@@ -472,12 +478,22 @@ export const content = {
         cap: "The same card in the companion app.",
       },
     ],
+    featuresIntro:
+      "That WebSocket feed is what makes the following feel instant rather than polled — volume, transport state, and now-playing metadata update the moment they change anywhere in the cluster:",
     features: [
       "Each room is a media_player: transport, group volume, and join/unjoin.",
       "A tabbed Lovelace card — Players, Media, Streams, Queue.",
       "Toggle any speaker into a room; per-speaker and proportional group volume.",
       "Browse and search your library, queue tracks or whole folders, play stream presets.",
     ],
+    // Closing paragraph after the feature list: the card's own request path,
+    // stated explicitly since it's the reason "just HA on the LAN" is enough.
+    cardNote:
+      "The card renders every one of those actions as a normal Home Assistant service call or a <code>media_player/browse_media</code> websocket command — nothing custom, and nothing the browser sends anywhere but Home Assistant itself. HA is the only thing that ever talks to an ondaire master directly.",
+    // Lead-in before the install steps: sets expectations (manual vs HACS,
+    // what "requirements" actually means here) before the numbered list.
+    installIntro:
+      "There's no App Store here — Home Assistant custom integrations install either by copying files by hand or through HACS, and ondaire supports both. The steps below are the manual path, which is the more predictable of the two for a self-hosted daemon you're already running somewhere on the LAN; if you'd rather have HACS track updates for you, add the GitHub mirror as a custom repository and install “ondaire” from there instead. Either way, the integration only needs a room node reachable on your network — there's no cloud account, no API key, and nothing else to install alongside it.",
     steps: [
       "Download the integration zip and unzip it into your Home Assistant <code>config</code> folder so the files land in <code>&lt;config&gt;/custom_components/ondaire/</code>.",
       "Restart Home Assistant.",

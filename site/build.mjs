@@ -456,6 +456,8 @@ function homeAssistantPage() {
         </figure>`,
     )
     .join("");
+  // howItWorks/cardNote/installIntro are trusted author HTML (they carry <code>).
+  const howItWorks = H.howItWorks.map((p) => `<p class="ha-body">${p}</p>`).join("\n      ");
   const features = H.features.map((f) => `<li>${esc(f)}</li>`).join("");
   // steps + important are trusted author HTML (they carry <code>/<em>/<strong>).
   const steps = H.steps.map((s) => `<li>${s}</li>`).join("");
@@ -476,10 +478,18 @@ ${navHeader("index.html", GET_IT_CTA, "home-assistant.html")}
 
     <div class="ha-shots">${shots}</div>
 
+    <div class="ha-prose">
+      <h2>How it works</h2>
+      ${howItWorks}
+    </div>
+
+    <p class="ha-body">${esc(H.featuresIntro)}</p>
     <ul class="ha-features">${features}</ul>
+    <p class="ha-body">${H.cardNote}</p>
 
     <div class="ha-install">
       <h2>Install</h2>
+      <p class="ha-body">${H.installIntro}</p>
       <ol class="ha-steps">${steps}</ol>
       <div class="dl-warn" role="note"><span class="dl-warn-tag">Important</span><span>${H.important}</span></div>
       <div class="ha-cta">

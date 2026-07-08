@@ -20,16 +20,23 @@
 
 static const char *TAG = "player";
 
-#define JITTER_SLOTS   32                 // ~640 ms at 20 ms/frame (covers bufferMs up to 300 with headroom)
+#define JITTER_SLOTS   128                // ~2560 ms at 20 ms/frame (covers the 2000 ms bufferMs cap with headroom)
+// No-PSRAM fallback: 128 full slots (~480 KB) won't fit internal SRAM, so the
+// bare bench board drops to this smaller count (~120 KB) — plenty for the
+// low-latency wired path where a deep buffer is pointless anyway.
+#define JITTER_SLOTS_MIN  32
 #define WATCHDOG_NS    ((int64_t)2 * 1000000000LL)
 #define PCM_SAMPLES    (WIRE_FRAME_SAMPLES * WIRE_CHANNELS)   // 1920 int16
 
-// Amp power gating (boards with an amp_en pin): drop the amp after this much
-// CONTINUOUS silence so an idle node isn't burning the class-D stage (and any
-// idle hiss goes away). Debounced well above a track gap because the TPA pops on
-// each power transition — we accept one pop at play-start / idle-stop, not one
-// per short gap. Detach cuts it immediately.
-#define AMP_IDLE_NS    ((int64_t)5 * 1000000000LL)   // 5 s
+// Amp power (boards with an amp_en pin): enabled once at boot and never
+// gated off. The TPA3110 datasheet (§9.3.3/9.4.1) documents an inherent pop on
+// every SD transition — its input DC-blocking caps recharge over a 14 ms
+// power-up ramp, and incomplete/mismatched charging on that ramp is what pops,
+// independent of whatever audio (or silence) is on the signal at the time. No
+// amount of digital muting around the transition avoids it, so the only real
+// fix is to not toggle SD at all after the first power-up (matches Sonocotta's
+// own ESPHome `ALWAYS_ON`) — one pop ever, at boot, instead of one per
+// idle/resume cycle.
 
 // Consecutive gap (silence) frames before we declare the jitter buffer drained
 // and re-anchor: drop has_next so the next arriving frame re-primes origin_seq to
@@ -71,6 +78,7 @@ static struct {
 } p;
 
 static slot_t  *s_slots;                  // jitter buffer (PSRAM; see player_init)
+static int      s_slots_n = JITTER_SLOTS; // live slot count (< JITTER_SLOTS on the no-PSRAM fallback)
 // One extra sample-pair of headroom so a servo INSERT (+1) frame fits in place.
 static int16_t s_pcm[(WIRE_FRAME_SAMPLES + 1) * WIRE_CHANNELS]; // audio-task scratch
 static uint8_t s_stage[SLOT_BYTES];       // audio-task staging (copied under lock)
@@ -78,28 +86,20 @@ static uint8_t s_stage[SLOT_BYTES];       // audio-task staging (copied under lo
 static inline void lock(void)   { xSemaphoreTakeRecursive(p.mu, portMAX_DELAY); }
 static inline void unlock(void) { xSemaphoreGiveRecursive(p.mu); }
 
-// --- onboard amp power gate (amp_en boards, e.g. Amped-ESP32-S3-Plus) --------
-// s_amp_pin is the GPIO or -1 (no amp). amp_set() drives it and is idempotent, so
-// the audio task can call it every frame cheaply. All amp writes go through here
-// and only from the audio task + detach, so s_amp_on needs no lock.
+// --- onboard amp power (amp_en boards, e.g. Amped-ESP32-S3-Plus) ------------
+// s_amp_pin is the GPIO or -1 (no amp). Enabled once in player_init() and never
+// toggled again — see the AMP_EN comment above for why.
 static int  s_amp_pin = -1;
-static bool s_amp_on  = false;
-static void amp_set(bool on) {
-    if (s_amp_pin < 0 || on == s_amp_on) return;
-    gpio_set_level((gpio_num_t)s_amp_pin, on ? 1 : 0);
-    s_amp_on = on;
-    ESP_LOGI(TAG, "amp %s", on ? "on" : "off (idle)");
-}
 
 // --- jitter buffer (linear-scan map; JITTER_SLOTS is small) -----------------
 static slot_t *find_slot(uint64_t seq) {
-    for (int i = 0; i < JITTER_SLOTS; i++)
+    for (int i = 0; i < s_slots_n; i++)
         if (s_slots[i].used && s_slots[i].seq == seq) return &s_slots[i];
     return NULL;
 }
 static slot_t *alloc_slot(uint64_t seq) {
     slot_t *victim = NULL;
-    for (int i = 0; i < JITTER_SLOTS; i++) {
+    for (int i = 0; i < s_slots_n; i++) {
         slot_t *s = &s_slots[i];
         if (!s->used) return s;
         if (s->seq < p.next_seq) return s;            // stale → reuse immediately
@@ -108,11 +108,11 @@ static slot_t *alloc_slot(uint64_t seq) {
     return victim;
 }
 static void clear_slots(void) {
-    for (int i = 0; i < JITTER_SLOTS; i++) s_slots[i].used = false;
+    for (int i = 0; i < s_slots_n; i++) s_slots[i].used = false;
 }
 static int count_slots(void) {
     int n = 0;
-    for (int i = 0; i < JITTER_SLOTS; i++) if (s_slots[i].used) n++;
+    for (int i = 0; i < s_slots_n; i++) if (s_slots[i].used) n++;
     return n;
 }
 
@@ -125,11 +125,17 @@ bool player_init(const ens_config_t *cfg) {
     p.codec = WIRE_CODEC_OPUS;
     p.buffer_ns = (int64_t)cfg->buffer_ms * 1000000;
 
-    // Jitter buffer in PSRAM (~120 KB at 32 slots — trivial in the S3FH4R2's
+    // Jitter buffer in PSRAM (~480 KB at 128 slots — trivial in the S3FH4R2's
     // 2 MB). Fall back to internal RAM so the bare no-PSRAM bench board still boots.
     s_slots = heap_caps_calloc(JITTER_SLOTS, sizeof(slot_t), MALLOC_CAP_SPIRAM);
-    if (!s_slots) s_slots = calloc(JITTER_SLOTS, sizeof(slot_t));
+    s_slots_n = JITTER_SLOTS;
+    if (!s_slots) {   // no PSRAM: fall back to a smaller buffer in internal SRAM
+        s_slots_n = JITTER_SLOTS_MIN;
+        s_slots = calloc(s_slots_n, sizeof(slot_t));
+    }
     if (!s_slots) { ESP_LOGE(TAG, "jitter buffer alloc failed"); return false; }
+    ESP_LOGI(TAG, "jitter buffer: %d slots (%d ms), %s",
+             s_slots_n, s_slots_n * 20, s_slots_n == JITTER_SLOTS ? "PSRAM" : "internal RAM");
 
     volume_init(cfg->vol);
     if (!opus_dec_init()) return false;
@@ -150,11 +156,11 @@ bool player_init(const ens_config_t *cfg) {
     }
 
     // Boards with an onboard class-D amp (e.g. Amped-ESP32-S3-Plus, TPA3110 on
-    // GPIO17) gate the speaker output behind an active-high un-mute pin. Configure
-    // it as an output and start LOW (amp off): the audio task powers it on when a
-    // stream is actually playing and drops it after AMP_IDLE_NS of silence, so an
-    // idle node draws no amp power. -1 = no such pin (all the PCM5102A boards). The
-    // PCM5122's own soft-mute is hardwired on this board (rev C "No DAC_EN").
+    // GPIO17) un-mute it behind an active-high enable pin. Configure it as an
+    // output and drive it HIGH once, here, and never touch it again — see the
+    // AMP_EN comment above for why toggling it later would pop. -1 = no such
+    // pin (all the PCM5102A boards). The PCM5122's own soft-mute is hardwired
+    // on this board (rev C "No DAC_EN").
     if (cfg->amp_en >= 0) {
         s_amp_pin = cfg->amp_en;
         gpio_config_t io = {
@@ -162,9 +168,8 @@ bool player_init(const ens_config_t *cfg) {
             .mode = GPIO_MODE_OUTPUT,
         };
         gpio_config(&io);
-        gpio_set_level((gpio_num_t)s_amp_pin, 0);   // start muted; play powers it on
-        ESP_LOGI(TAG, "amp gate on GPIO%d (idle-off after %llds)",
-                 s_amp_pin, (long long)(AMP_IDLE_NS / 1000000000LL));
+        gpio_set_level((gpio_num_t)s_amp_pin, 1);
+        ESP_LOGI(TAG, "amp on GPIO%d (always-on)", s_amp_pin);
     }
 
     // Audio task at high priority; generous stack for the opus decode path.
@@ -189,9 +194,9 @@ void player_arm(uint8_t codec, uint32_t gen, int buffer_ms) {
     if (codec != WIRE_CODEC_OPUS)
         ESP_LOGW(TAG, "group codec is PCM — fine on the wired/local path, but raw "
                       "PCM frames fragment over Wi-Fi (MTU); prefer opus for radio nodes.");
-    if (buffer_ms > JITTER_SLOTS * 20)
+    if (buffer_ms > s_slots_n * 20)
         ESP_LOGW(TAG, "bufferMs=%d exceeds jitter capacity (%d ms) — may drop frames",
-                 buffer_ms, JITTER_SLOTS * 20);
+                 buffer_ms, s_slots_n * 20);
 }
 
 void player_detach(void) {
@@ -201,7 +206,6 @@ void player_detach(void) {
     p.has_next = false;
     unlock();
     i2s_out_stop();
-    amp_set(false);   // left the room → cut the amp (no pop-inducing idle draw)
     ESP_LOGI(TAG, "detached (idle)");
 }
 
@@ -259,7 +263,6 @@ static void audio_task(void *arg) {
     (void)arg;
     const size_t frame_bytes = PCM_SAMPLES * sizeof(int16_t);
     int silence_run = 0;       // consecutive gap frames (for re-anchor)
-    int64_t last_present_ns = 0;   // last real (non-silence) frame, for amp gating
     for (;;) {
         lock();
         if (!p.attached || !p.has_next) {
@@ -341,11 +344,6 @@ static void audio_task(void *arg) {
                 continue;
             }
         }
-
-        // Power-gate the onboard amp (no-op if the board has no amp_en pin): on
-        // while real audio is flowing, off after AMP_IDLE_NS of continuous silence.
-        if (present) { last_present_ns = clock_now_ns(); amp_set(true); }
-        else if (last_present_ns && clock_now_ns() - last_present_ns > AMP_IDLE_NS) amp_set(false);
 
         // Phase telemetry = how late the emission landed vs the deadline.
         if (present) servo_update(clock_now_ns() - local);

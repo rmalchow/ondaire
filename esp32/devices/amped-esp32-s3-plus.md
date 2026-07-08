@@ -51,7 +51,7 @@ external DAC to wire. This is the `esp32s3-amped-plus` board profile
 | I2S DOUT | 16 | → PCM5122 DIN |
 | I2S MCLK | — | none; PCM5122 internal PLL |
 | I2C SDA / SCL | 18 / 8 | PCM5122 @ 0x4D (not used by firmware yet) |
-| **AMP_EN** (amp un-mute) | **17** | drive **HIGH** for sound; kept always-on |
+| **AMP_EN** (amp un-mute) | **17** | drive **HIGH** once at boot; never toggled again |
 | RGB LED (WS2812) | 21 | status LED |
 | IR receiver | 7 | not used by firmware |
 | SPI (OLED) | 11 / 12 / 13 + 38 / 47 / 48 | optional display |
@@ -71,10 +71,16 @@ cd esp32
 ./build.sh esp32s3-amped-plus flash      # build + flash over USB
 ```
 
-- The profile drives **GPIO17 high at boot** to un-mute the amp and leaves it
-  high (the TPA3110 pops on shutdown, so it stays on and quiet is done in
-  software — matching Sonocotta's ESPHome `ALWAYS_ON`). All pins are
-  re-provisionable over the USB console (`amp_en`, `i2s_*`, `led`, …).
+- The profile drives **GPIO17 high once at boot** to un-mute the amp and
+  leaves it there for good — it is never gated off on idle. The TPA3110
+  datasheet (§9.3.3/9.4.1) documents an inherent pop on every SD transition:
+  its input DC-blocking caps recharge over a 14 ms power-up ramp, and that pop
+  is tied to the transition itself, not to whatever's on the signal at the
+  time — no amount of muting around the toggle avoids it. So, like Sonocotta's
+  own ESPHome `ALWAYS_ON`, the only real fix is to not toggle SD after the
+  first power-up: one pop ever, at boot, instead of one per idle/resume cycle.
+  All pins are re-provisionable over the USB console (`amp_en`, `i2s_*`,
+  `led`, …).
 - **The PCM5122 needs an I2C init to make any sound.** It's strapped in software
   (I2C) control mode and runs MCLK-less, so it stays silent (line-out *and* amp)
   until its PLL is pointed at BCK. `dac=1` makes `player_init` run `pcm5122.c`'s

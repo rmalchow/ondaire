@@ -57,7 +57,8 @@
 
 #define DEF_LED         21   // onboard WS2812 RGB
 #define DEF_DAC         1    // PCM5122 — needs the I2C init below to make sound
-#define DEF_AMP_EN      17   // TPA amp un-mute: driven HIGH at boot (kept ALWAYS_ON)
+#define DEF_AMP_EN      17   // TPA amp un-mute: driven HIGH once at boot, never toggled
+                              // again (SD transitions pop — TPA3110 datasheet §9.3.3/9.4.1)
 
 // PCM5122 control I2C (software mode). The firmware writes a minimal init over
 // this bus at boot (pcm5122.c) — REQUIRED for audio: MCLK-less, so the DAC's PLL

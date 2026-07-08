@@ -831,7 +831,11 @@ ${navHeader("index.html", HOME_CTA)}
   <section class="dl">
     <header class="sec-head">
       <span class="eyebrow">${eq(6)}${esc(C.download.eyebrow)}${VERSION ? " · " + esc(VERSION) : ""}</span>
-      <h1>${esc(C.download.title)}</h1>
+      <h1>${esc(C.download.title)}</h1>${
+        C.download.important
+          ? `\n      <p class="dl-note ha-important"><strong>Important —</strong> ${esc(C.download.important)}</p>`
+          : ""
+      }
       <p class="sec-intro">${esc(C.download.intro)}</p>${
         C.download.note
           ? `\n      <p class="sec-intro"><strong>Tip:</strong> ${esc(C.download.note)}</p>`

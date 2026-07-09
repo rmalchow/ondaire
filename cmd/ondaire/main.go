@@ -858,6 +858,10 @@ func runCombined(ctx context.Context, opt options, cfg *config.Config, base *slo
 					SamplesInjected: st.SamplesInjected,
 					SamplesDropped:  st.SamplesDropped,
 					AgeMs:           time.Since(ps.LastSeen).Milliseconds(),
+					RSSI:            st.RSSI,
+					FreeHeapKB:      st.FreeHeapKB,
+					CPUIdlePct:      st.CPUIdlePct,
+					ResetReason:     st.ResetReason,
 				})
 			}
 			return out

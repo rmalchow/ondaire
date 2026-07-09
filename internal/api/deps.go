@@ -194,4 +194,9 @@ type PlaybackStat struct {
 	SamplesInjected uint64 `json:"samplesInjected"`
 	SamplesDropped  uint64 `json:"samplesDropped"`
 	AgeMs           int64  `json:"ageMs"` // ms since last STATUS (staleness)
+	// v2 player-health telemetry (WiFi playback nodes; 0 = unknown/wired).
+	RSSI        int8   `json:"rssi"`        // connected-STA signal, dBm (negative)
+	FreeHeapKB  uint16 `json:"freeHeapKb"`  // free heap headroom
+	CPUIdlePct  uint8  `json:"cpuIdlePct"`  // FreeRTOS idle %, low ⇒ pegged
+	ResetReason uint8  `json:"resetReason"` // esp_reset_reason() at boot
 }

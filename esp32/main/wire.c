@@ -80,5 +80,10 @@ int wire_status_encode(uint8_t *p, size_t cap, const wire_status_t *s) {
     put_u64(p + 79, (uint64_t)s->phase_err_ns);
     put_u64(p + 87, s->samples_injected);
     put_u64(p + 95, s->samples_dropped);
+    // v2 health telemetry at offset 103.
+    p[103] = (uint8_t)s->rssi;
+    put_u16(p + 104, s->free_heap_kb);
+    p[106] = s->cpu_idle_pct;
+    p[107] = s->reset_reason;
     return WIRE_STATUS_LEN;
 }

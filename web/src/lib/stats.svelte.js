@@ -27,6 +27,10 @@ const GAUGES = {
   phaseUs: (s) => (s.phaseErrNs ?? 0) / 1e3,
   deviceMs: (s) => (s.deviceDelayNs ?? 0) / 1e6,
   buffered: (s) => s.buffered ?? 0,
+  // v2 player-health telemetry (WiFi nodes; 0 = unknown/wired).
+  rssiDbm: (s) => s.rssi ?? 0,
+  freeHeapKb: (s) => s.freeHeapKb ?? 0,
+  cpuIdlePct: (s) => s.cpuIdlePct ?? 0,
 };
 
 // Cumulative counters → per-minute rates (delta / dt). These are the ones that

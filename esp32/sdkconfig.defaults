@@ -11,6 +11,12 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # --- FreeRTOS: 1 kHz tick so vTaskDelay/playout sleeps have ms granularity ---
 CONFIG_FREERTOS_HZ=1000
 
+# --- Runtime stats: lets status telemetry report CPU idle % (ulTaskGetIdleRunTimePercent),
+#     the direct signal for "the RX core is pegged" under a stream flood. Clocked
+#     off esp_timer (default), so no extra timer wiring. ---
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+
 # --- Wi-Fi: keep the driver's buffers modest so it fits alongside the jitter
 #     buffer + opus decoder on the 320 KB S2 (bumping these OOMs the Wi-Fi init:
 #     "malloc buffer fail / Expected to init N rx buffer, actual is 1"). ---

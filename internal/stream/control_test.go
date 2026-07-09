@@ -145,10 +145,14 @@ func TestStatusRoundTrip(t *testing.T) {
 		PhaseErrNs:      -2_500_000,  // -2.5 ms (D64 telemetry)
 		SamplesInjected: 1_234,       // grounded resample counts
 		SamplesDropped:  5_678,
+		RSSI:            -67, // v2 health telemetry
+		FreeHeapKB:      212,
+		CPUIdlePct:      3, // pegged
+		ResetReason:     6, // e.g. task watchdog
 	}
 	buf := s.AppendTo(nil)
-	if len(buf) != StatusLen {
-		t.Fatalf("AppendTo len = %d, want %d", len(buf), StatusLen)
+	if len(buf) != StatusLenV2 {
+		t.Fatalf("AppendTo len = %d, want %d", len(buf), StatusLenV2)
 	}
 	got, err := DecodeStatus(buf)
 	if err != nil {
@@ -156,6 +160,30 @@ func TestStatusRoundTrip(t *testing.T) {
 	}
 	if got != s {
 		t.Fatalf("round-trip got %+v want %+v", got, s)
+	}
+}
+
+// A v1 (103-byte) payload from an old node must still decode, with the v2 health
+// fields left zero. Guards the backward-compat contract of the min-length decode.
+func TestStatusDecodeV1BackwardCompat(t *testing.T) {
+	full := StatusPayload{
+		NodeID:   [16]byte{1, 2, 3},
+		Synced:   true,
+		Buffered: 5,
+		RSSI:     -70, // present in the v2 encode...
+		CPUIdlePct: 50,
+	}
+	buf := full.AppendTo(nil)
+	v1 := buf[:StatusLen] // truncate to the v1 wire shape an old node would send
+	got, err := DecodeStatus(v1)
+	if err != nil {
+		t.Fatalf("DecodeStatus(v1): %v", err)
+	}
+	if got.RSSI != 0 || got.FreeHeapKB != 0 || got.CPUIdlePct != 0 || got.ResetReason != 0 {
+		t.Fatalf("v1 decode leaked health fields: %+v", got)
+	}
+	if !got.Synced || got.Buffered != 5 {
+		t.Fatalf("v1 decode lost v1 fields: %+v", got)
 	}
 }
 

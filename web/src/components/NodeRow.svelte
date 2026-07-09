@@ -38,6 +38,12 @@
     const a = Math.abs(v);
     return a >= danger ? "bad" : a >= warn ? "warn" : "ok";
   };
+  // inverted: LOW values are the bad ones (signal strength, free heap, CPU idle %).
+  const healthLow = (v, warn, danger) => (v <= danger ? "bad" : v <= warn ? "warn" : "ok");
+  // esp_reset_reason() codes → labels; the crash-ish ones explain a node dropping
+  // off the cluster (panic / watchdog / brownout) vs a clean power-on or reflash.
+  const RESET = { 0: "unknown", 1: "power", 2: "ext", 3: "sw", 4: "panic", 5: "int-wdt", 6: "task-wdt", 7: "wdt", 8: "sleep", 9: "brownout", 10: "sdio" };
+  const crashReset = (r) => r === 4 || r === 5 || r === 6 || r === 7 || r === 9;
   // fresh array each tick so the Sparkline prop ref changes (the source arrays are
   // mutated in place by the accumulator); `f` optionally scales each sample.
   const series = (a, f = 1) => (a || []).map((x) => x * f);
@@ -55,7 +61,7 @@
       late = avg(h.lateRate),
       sil = avg(h.silenceRate);
     // cls "" ⇒ neutral (informational, not a health signal).
-    return [
+    const t = [
       { key: "offset", label: "offset", val: sgn(off, 2) + " ms", values: series(h.offsetMs), signed: true, cls: health(off, 1, 5), tip: "clock offset to master (rolling avg of master − local)" },
       { key: "drift", label: "drift", val: sgn(ppm, 1) + " ppm", values: series(h.ratePPM), signed: true, cls: health(ppm, 50, 150), tip: "servo rate correction, rolling avg (ppm; clamp ±300)" },
       { key: "phase", label: "phase", val: sgn(ph, 0) + " µs", values: series(h.phaseUs), signed: true, cls: health(ph, 500, 2000), tip: "playout phase error vs the smoothed model (rolling avg)" },
@@ -67,6 +73,22 @@
       { key: "late", label: "late", val: late.toFixed(0) + "/min", values: series(h.lateRate), signed: false, cls: health(late, 1, 30), tip: "frames arriving past their deadline, per minute" },
       { key: "silence", label: "silence", val: sil.toFixed(0) + "/min", values: series(h.silenceRate), signed: false, cls: health(sil, 1, 30), tip: "silent frames inserted for gaps (underrun proxy), per minute" },
     ];
+    // v2 player-health telemetry — only for WiFi nodes that report it (wired/local
+    // players send 0s). Low is bad for all three: weak signal, tight heap, pegged CPU.
+    if (stat && (stat.rssi !== 0 || stat.freeHeapKb !== 0 || stat.cpuIdlePct !== 0)) {
+      const rssi = avg(h.rssiDbm),
+        heap = avg(h.freeHeapKb),
+        idle = avg(h.cpuIdlePct);
+      t.push(
+        { key: "sig", label: "sig", val: rssi.toFixed(0) + " dBm", values: series(h.rssiDbm), signed: false, cls: healthLow(rssi, -70, -80), tip: "Wi-Fi RSSI, rolling avg (dBm; ≥−67 good, ≤−80 weak)" },
+        { key: "heap", label: "heap", val: heap.toFixed(0) + " KB", values: series(h.freeHeapKb), signed: false, cls: healthLow(heap, 40, 20), tip: "free heap, rolling avg (KB; low ⇒ memory pressure / OOM risk)" },
+        { key: "cpu", label: "cpu idle", val: idle.toFixed(0) + " %", values: series(h.cpuIdlePct), signed: false, cls: healthLow(idle, 30, 10), tip: "FreeRTOS idle %, rolling avg (low ⇒ RX core pegged / working too hard)" },
+      );
+      if (crashReset(stat.resetReason)) {
+        t.push({ key: "reset", label: "last reset", val: RESET[stat.resetReason] ?? String(stat.resetReason), values: [], signed: false, cls: "bad", tip: "last reset reason — a crash/watchdog reboot (this node dropped off the cluster)" });
+      }
+    }
+    return t;
   });
 
   let isSelf = $derived(node.id === self.id);

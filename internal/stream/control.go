@@ -47,7 +47,8 @@ const (
 	SetChanLen  = 1   // playout channel mode byte (0 stereo / 1 L / 2 R)
 	SetCapLen   = 2   // §6.2
 	SetEqLen    = 2   // D65: master-driven cross-room equalization delay
-	StatusLen   = 103 // §6.3 (87 + 8 SamplesInjected + 8 SamplesDropped)
+	StatusLen   = 103 // §6.3 v1 minimum — decode guard; older nodes send exactly this
+	StatusLenV2 = 108 // v1 + 5B health telemetry (rssi, freeHeapKB, cpuIdle, resetReason)
 )
 
 // errBadControl is returned when a control payload is too short / malformed.
@@ -230,11 +231,19 @@ type StatusPayload struct {
 	// units) — the realized correction at the DAC, not the commanded RatePPM.
 	SamplesInjected uint64
 	SamplesDropped  uint64
+	// v2 player-health telemetry (offset 103). WiFi playback nodes fill these; the
+	// local Go player leaves them 0 (not meaningful). Zero reads as "unknown" so the
+	// UI hides them for wired players.
+	RSSI        int8   // connected-STA RSSI, dBm (negative; 0 = unknown)
+	FreeHeapKB  uint16 // free heap / 1024
+	CPUIdlePct  uint8  // FreeRTOS idle-time %, 0..100
+	ResetReason uint8  // esp_reset_reason() at boot (crash vs clean power-on)
 }
 
-// AppendTo appends the 103-byte STATUS payload to dst (offsets per §6.3).
+// AppendTo appends the 108-byte v2 STATUS payload to dst (offsets per §6.3). The
+// trailing 5 health bytes are backward-compatible: a v1 master reads only 0..102.
 func (s StatusPayload) AppendTo(dst []byte) []byte {
-	var b [StatusLen]byte
+	var b [StatusLenV2]byte
 	copy(b[0:16], s.NodeID[:])
 	var flags byte
 	if s.Synced {
@@ -259,10 +268,16 @@ func (s StatusPayload) AppendTo(dst []byte) []byte {
 	binary.BigEndian.PutUint64(b[79:87], uint64(s.PhaseErrNs))
 	binary.BigEndian.PutUint64(b[87:95], s.SamplesInjected)
 	binary.BigEndian.PutUint64(b[95:103], s.SamplesDropped)
+	b[103] = byte(s.RSSI)
+	binary.BigEndian.PutUint16(b[104:106], s.FreeHeapKB)
+	b[106] = s.CPUIdlePct
+	b[107] = s.ResetReason
 	return append(dst, b[:]...)
 }
 
-// DecodeStatus parses a 103-byte STATUS payload.
+// DecodeStatus parses a STATUS payload. It requires the v1 minimum (StatusLen) and
+// reads the v2 health fields only when the payload carries them, so old and new
+// firmware/masters interoperate: a v1 (103-byte) node leaves the health fields 0.
 func DecodeStatus(p []byte) (StatusPayload, error) {
 	if len(p) < StatusLen {
 		return StatusPayload{}, errBadControl
@@ -284,6 +299,19 @@ func DecodeStatus(p []byte) (StatusPayload, error) {
 	s.PhaseErrNs = int64(binary.BigEndian.Uint64(p[79:87]))
 	s.SamplesInjected = binary.BigEndian.Uint64(p[87:95])
 	s.SamplesDropped = binary.BigEndian.Uint64(p[95:103])
+	// v2 health telemetry, each read only if the payload is long enough.
+	if len(p) >= 104 {
+		s.RSSI = int8(p[103])
+	}
+	if len(p) >= 106 {
+		s.FreeHeapKB = binary.BigEndian.Uint16(p[104:106])
+	}
+	if len(p) >= 107 {
+		s.CPUIdlePct = p[106]
+	}
+	if len(p) >= 108 {
+		s.ResetReason = p[107]
+	}
 	return s, nil
 }
 

@@ -68,3 +68,9 @@ bool netif_wait_ip(int timeout_ms) {
 bool netif_has_ip(void) {
     return s_eg && (xEventGroupGetBits(s_eg) & BIT_GOT_IP);
 }
+
+int8_t netif_rssi(void) {
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return 0;   // not associated
+    return ap.rssi;
+}

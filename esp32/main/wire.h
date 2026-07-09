@@ -45,7 +45,12 @@ enum {
 enum { WIRE_CODEC_PCM = 0, WIRE_CODEC_OPUS = 1 };
 enum { WIRE_TRANSPORT_UDP = 0, WIRE_TRANSPORT_TCP = 1 };
 
-#define WIRE_STATUS_LEN 103
+// STATUS payload length. v1 was 103 bytes; v2 appends 5 bytes of player-health
+// telemetry (rssi, free_heap_kb, cpu_idle_pct, reset_reason) at offset 103. The
+// master decodes v1 as a MINIMUM length and reads the health fields only when
+// present, so old/new firmware and old/new master interoperate freely.
+#define WIRE_STATUS_LEN    108
+#define WIRE_STATUS_LEN_V1 103
 
 // STATUS flag bits (§6.3).
 #define WIRE_ST_SYNCED     0x01
@@ -72,9 +77,9 @@ typedef struct {
     uint16_t buffer_ms;
 } wire_attach_t;
 
-// STATUS (§6.3) — 103 bytes. The two trailing u64 counters (grounded resample
-// inject/drop) were added master-side; the payload MUST be 103 bytes or the
-// master's DecodeStatus rejects it (len < StatusLen) and the node never goes live.
+// STATUS (§6.3) — 108 bytes (v2). Bytes 0..102 are the v1 payload; bytes 103..107
+// append player-health telemetry so a weak/overloaded node is diagnosable from the
+// master. All fields little-effort to compute; sent on the 1 Hz status cadence.
 typedef struct {
     uint8_t  node_id[16];
     uint8_t  flags;
@@ -90,6 +95,11 @@ typedef struct {
     int64_t  phase_err_ns;
     uint64_t samples_injected;   // grounded servo resample accounting (0 — MCU nudges whole frames)
     uint64_t samples_dropped;
+    // --- v2 health telemetry (offset 103) ---
+    int8_t   rssi;               // connected-STA RSSI, dBm (0 = unknown / not associated)
+    uint16_t free_heap_kb;       // esp_get_free_heap_size() / 1024
+    uint8_t  cpu_idle_pct;       // FreeRTOS idle-time %, 0..100 (0 = unavailable)
+    uint8_t  reset_reason;       // esp_reset_reason() captured at boot
 } wire_status_t;
 
 // Header encode/decode. enc writes WIRE_HEADER_SIZE bytes; returns size.

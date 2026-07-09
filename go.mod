@@ -3,7 +3,6 @@ module ondaire
 go 1.26
 
 require (
-	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/ebitengine/purego v0.10.1
 	github.com/go-audio/wav v1.1.0
 	github.com/gorilla/websocket v1.5.3
@@ -13,13 +12,12 @@ require (
 	github.com/hashicorp/memberlist v0.5.4
 	github.com/labstack/echo/v4 v4.15.2
 	github.com/mewkiz/flac v1.0.13
-	golang.org/x/net v0.54.0
-	modernc.org/sqlite v1.53.0
 )
 
 require (
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
+	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-audio/audio v1.0.0 // indirect
 	github.com/go-audio/riff v1.0.0 // indirect
@@ -46,6 +44,7 @@ require (
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/mod v0.36.0 // indirect
+	golang.org/x/net v0.54.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
@@ -53,4 +52,5 @@ require (
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
+	modernc.org/sqlite v1.53.0 // indirect
 )

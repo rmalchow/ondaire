@@ -5,31 +5,10 @@ package netx
 import (
 	"fmt"
 	"net"
-
-	"golang.org/x/net/ipv4"
-	"golang.org/x/net/ipv6"
 )
 
 // DefaultTries is the spec's 64-attempt cap (§2).
 const DefaultTries = 64
-
-// dscpEF is DiffServ EF (Expedited Forwarding, DSCP 46) as the raw TOS/TCLASS
-// byte (46<<2 = 0xB8). Marking the UDP sockets with it maps the audio/clock/
-// control datagrams into the WMM video/voice access category on Wi-Fi hops
-// (802.11 UP 5+, vs best-effort default), so on a contended AP our frames get
-// a shorter contention window and queue priority instead of waiting behind
-// bulk traffic — the difference between "degrades" and "stops" on a busy cell.
-const dscpEF = 0xB8
-
-// setDSCP best-effort marks a UDP socket with dscpEF for both address
-// families (a wildcard bind is a dual-stack AF_INET6 socket on Linux: IP_TOS
-// covers the v4-mapped traffic, IPV6_TCLASS the native v6). Errors are
-// ignored: an OS that refuses the option just leaves the traffic best-effort,
-// which is exactly today's behavior.
-func setDSCP(c *net.UDPConn) {
-	_ = ipv4.NewPacketConn(c).SetTOS(dscpEF)
-	_ = ipv6.NewPacketConn(c).SetTrafficClass(dscpEF)
-}
 
 // BindTCPUDP implements bind-or-increment with all-or-nothing semantics (§2).
 // It tries ports base, base+1, … base+tries-1. A port is accepted only if BOTH
@@ -56,7 +35,6 @@ func BindTCPUDP(host string, base, tries int) (
 			lastErr = uerr
 			continue
 		}
-		setDSCP(udp)
 		return tcp, udp, p, nil
 	}
 	if tries == 1 {

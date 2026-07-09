@@ -4,8 +4,6 @@ import (
 	"net"
 	"strings"
 	"testing"
-
-	"golang.org/x/net/ipv4"
 )
 
 const lo = "127.0.0.1"
@@ -141,25 +139,6 @@ func TestBindTCPHTTP(t *testing.T) {
 		t.Fatalf("BindTCP wrongly reserved UDP: %v", err)
 	}
 	udp.Close()
-}
-
-// TestBindTCPUDPMarksDSCP pins the WMM marking: the UDP socket must carry
-// DSCP EF so the audio/clock/control datagrams ride the voice/video access
-// category on Wi-Fi hops instead of best-effort.
-func TestBindTCPUDPMarksDSCP(t *testing.T) {
-	tcp, udp, _, err := BindTCPUDP(lo, freePort(t), 64)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tcp.Close()
-	defer udp.Close()
-	tos, err := ipv4.NewPacketConn(udp).TOS()
-	if err != nil {
-		t.Skipf("TOS readback unsupported here: %v", err)
-	}
-	if tos != dscpEF {
-		t.Fatalf("TOS = %#x, want %#x (DSCP EF)", tos, dscpEF)
-	}
 }
 
 func TestInterfaceCIDRsShape(t *testing.T) {

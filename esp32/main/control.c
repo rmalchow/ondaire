@@ -161,10 +161,6 @@ bool control_init(uint16_t control_port) {
     c.mu = xSemaphoreCreateRecursiveMutex();
     c.sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (c.sock < 0) { ESP_LOGE(TAG, "socket failed"); return false; }
-    // DSCP EF (0xB8) — same marking as the audio socket (net_audio.c): the 1 Hz
-    // STATUS uplink shouldn't queue behind bulk traffic on a busy cell.
-    int tos = 0xB8;
-    setsockopt(c.sock, IPPROTO_IP, IP_TOS, &tos, sizeof tos);
     struct sockaddr_in a; memset(&a, 0, sizeof a);
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = htonl(INADDR_ANY);

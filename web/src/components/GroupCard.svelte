@@ -255,7 +255,7 @@
             class="grow"
             type="range"
             min="50"
-            max="500"
+            max="2000"
             step="25"
             value={bufMs}
             oninput={onBufInput}

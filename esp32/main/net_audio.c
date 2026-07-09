@@ -233,6 +233,11 @@ bool net_audio_init(void) {
 
     n.udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (n.udp < 0) { ESP_LOGE(TAG, "udp socket failed"); return false; }
+    // DSCP EF (0xB8): clock probes + HELLOs ride the WMM voice/video access
+    // category uplink instead of best-effort — matters on a contended AP, and
+    // clock RTT samples are only as good as their queueing jitter. Best effort.
+    int tos = 0xB8;
+    setsockopt(n.udp, IPPROTO_IP, IP_TOS, &tos, sizeof tos);
     struct sockaddr_in local; memset(&local, 0, sizeof local);
     local.sin_family = AF_INET;
     local.sin_addr.s_addr = htonl(INADDR_ANY);

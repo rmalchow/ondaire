@@ -40,8 +40,8 @@ func (s *Server) prime(sub *subscriber, frames []ringSlot, gen uint32) {
 		s.mu.Unlock()
 	}
 	round := 0
-	sentFrames := 0        // total frames pushed across rounds
-	start := time.Now()    // wall clock for the realtime-keeping check
+	sentFrames := 0     // total frames pushed across rounds
+	start := time.Now() // wall clock for the realtime-keeping check
 	for {
 		round++
 		s.log.Debug("prime catch-up round", "addr", sub.addr.String(), "round", round, "frames", len(frames), "gen", gen)

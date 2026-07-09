@@ -167,10 +167,10 @@ func TestStatusRoundTrip(t *testing.T) {
 // fields left zero. Guards the backward-compat contract of the min-length decode.
 func TestStatusDecodeV1BackwardCompat(t *testing.T) {
 	full := StatusPayload{
-		NodeID:   [16]byte{1, 2, 3},
-		Synced:   true,
-		Buffered: 5,
-		RSSI:     -70, // present in the v2 encode...
+		NodeID:     [16]byte{1, 2, 3},
+		Synced:     true,
+		Buffered:   5,
+		RSSI:       -70, // present in the v2 encode...
 		CPUIdlePct: 50,
 	}
 	buf := full.AppendTo(nil)

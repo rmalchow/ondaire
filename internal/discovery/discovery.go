@@ -40,11 +40,19 @@ var (
 	retryInterval = 5 * time.Second
 	// peersBuffer is the capacity of the Peers channel (§ edge cases).
 	peersBuffer = 64
-	// browseWindow bounds one hashicorp/mdns query: long enough to collect
-	// responses, short enough that the keeper re-queries promptly (so a freshly
-	// booted node is found within ~browseWindow+retryInterval). Close cancels the
-	// query's context, so this never delays shutdown.
-	browseWindow = 8 * time.Second
+	// browseWindow bounds one hashicorp/mdns query. mdns sends its PTR query
+	// ONCE per window and then just listens, so a long window is (nearly) free:
+	// it cuts our multicast query rate — and the response burst every query
+	// solicits from all responders — by ~7× vs the old 8 s window, which
+	// matters on Wi-Fi where every multicast frame goes out unacknowledged at
+	// the lowest basic rate. Listening ~92% of the time (vs ~60%) also catches
+	// more of the ESP32 nodes' 30 s re-announces (their only discovery path —
+	// see esp32/main/mdns_adv.c), keeping idle-node re-emits well inside the
+	// 90 s playback liveness TTL. A freshly booted node announces itself, so a
+	// long open window HELPS cold discovery; worst-case for us being between
+	// windows stays retryInterval. Close cancels the query's context, so this
+	// never delays shutdown.
+	browseWindow = 55 * time.Second
 )
 
 // mdnsLogger swallows hashicorp/mdns's per-packet logging (failed reads on the
@@ -259,7 +267,13 @@ func (d *Discovery) Close() error {
 		server.Shutdown()
 	}
 	d.wg.Wait()
+	// Under d.mu because a browse worker can outlive browseKeeper by up to one
+	// window (see realBrowse) — maybeEmit's closed-check + send hold the same
+	// mutex, so a straggler either emits before this close or sees closed and
+	// drops; it can never send on the closed channel.
+	d.mu.Lock()
 	close(d.peers)
+	d.mu.Unlock()
 	return nil
 }
 
@@ -436,12 +450,18 @@ func (d *Discovery) browseKeeper() {
 // through parseEntry + maybeEmit. It returns nil on a normal window end or on
 // ctx cancellation (Close) — browseKeeper re-queries on the next loop, and
 // maybeEmit's dedup throttles the resulting re-emits.
+//
+// The query runs on a worker goroutine because hashicorp/mdns's receive loop
+// waits on its Timeout only, never the ctx: cancellation closes its sockets
+// but QueryContext still returns only at the window boundary. Waiting for it
+// inline would hold Close hostage for up to a full browseWindow. On ctx
+// cancellation we return immediately and let the worker (idle — its sockets
+// are gone) unwind at the boundary; its stragglers are safe because maybeEmit
+// closed-checks and sends under d.mu, the same mutex Close closes d.peers
+// under.
 func (d *Discovery) realBrowse(ctx context.Context) error {
 	entries := make(chan *mdns.ServiceEntry, 16)
-	var drain sync.WaitGroup
-	drain.Add(1)
 	go func() {
-		defer drain.Done()
 		for e := range entries {
 			if peer, ok := parseEntry(fromMDNS(e), d.cfg.ID); ok {
 				d.maybeEmit(peer)
@@ -451,29 +471,40 @@ func (d *Discovery) realBrowse(ctx context.Context) error {
 
 	qctx, cancel := context.WithTimeout(ctx, browseWindow)
 	defer cancel()
-	err := mdns.QueryContext(qctx, &mdns.QueryParam{
-		Service: ServiceName,
-		Domain:  strings.TrimSuffix(Domain, "."), // hashicorp wants "local", not "local."
-		Timeout: browseWindow,
-		Entries: entries,
-		Logger:  mdnsLogger,
-	})
-	close(entries) // hashicorp/mdns does not close the caller's channel
-	drain.Wait()
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return nil // window ended / shutting down — not a failure
+	done := make(chan error, 1)
+	go func() {
+		err := mdns.QueryContext(qctx, &mdns.QueryParam{
+			Service: ServiceName,
+			Domain:  strings.TrimSuffix(Domain, "."), // hashicorp wants "local", not "local."
+			Timeout: browseWindow,
+			Entries: entries,
+			Logger:  mdnsLogger,
+		})
+		close(entries) // hashicorp/mdns does not close the caller's channel
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil // window ended — not a failure
+		}
+		return err
+	case <-ctx.Done():
+		return nil // shutting down; the worker self-terminates at the window boundary
 	}
-	return err
 }
 
 // maybeEmit applies the three-rule dedup test (§2) and does a non-blocking send
-// on the peers channel. The lock is released before the send.
+// on the peers channel. The send happens UNDER d.mu (it can't block — buffered
+// channel + select-default): pairing it with the closed-check makes it safe
+// against Close closing the channel, which matters because a browse worker can
+// outlive browseKeeper by up to one window (see realBrowse).
 func (d *Discovery) maybeEmit(peer Peer) {
 	now := time.Now()
 
 	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.closed {
-		d.mu.Unlock()
 		return
 	}
 	prev, known := d.seen[peer.ID]
@@ -488,7 +519,6 @@ func (d *Discovery) maybeEmit(peer Peer) {
 		prev.emitted = now
 	}
 	d.seen[peer.ID] = prev
-	d.mu.Unlock()
 
 	if !emit {
 		return
@@ -497,11 +527,8 @@ func (d *Discovery) maybeEmit(peer Peer) {
 	select {
 	case d.peers <- peer:
 	default:
-		d.mu.Lock()
 		d.drops++
-		drops := d.drops
-		d.mu.Unlock()
-		d.log.Warn("peers channel full, dropping event (will re-offer)", "peer", peer.ID, "drops", drops)
+		d.log.Warn("peers channel full, dropping event (will re-offer)", "peer", peer.ID, "drops", d.drops)
 	}
 }
 
